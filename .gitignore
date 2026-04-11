@@ -34,3 +34,10 @@ terraform.rc
 
 *.dot
 planout
+
+# Frontend/backend local artifacts
+backend/.venv/
+backend/state/
+frontend/node_modules/
+frontend/dist/
+frontend-managed.auto.tfvars.json

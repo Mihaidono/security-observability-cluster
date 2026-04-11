@@ -41,6 +41,9 @@ In this lab, applications are "subjects." Each subject is deployed into a **Ward
 ├── iam.tf               # Optional EKS admin access entries
 ├── variables.tf         # Input definitions and ward schema
 ├── outputs.tf           # Useful cluster and ward outputs
+├── backend/             # FastAPI service that manages templates and Terraform runs
+├── frontend/            # Vite + React + Tailwind operator UI
+├── TESTING_AND_USAGE.md # Practical guide for testing the backend, frontend, and Terraform flow
 ├── backend.hcl.example  # Example backend config for remote state
 ├── terraform.tfvars     # Your lab configuration (subjects, sizing, naming)
 └── bootstrap/           # One-time state bucket and lock-table stack
@@ -56,33 +59,33 @@ In this lab, applications are "subjects." Each subject is deployed into a **Ward
 * `kubectl` and `helm` installed for cluster interaction.
 
 ### 2. Configure your "Analysis Subjects"
-Modify the `terraform.tfvars` file to define both the ward namespaces and the applications you want to run inside them.
+Modify the `terraform.tfvars` file to define both the ward namespaces and the applications you want to run inside them. The repository now ships with a single, feature-rich reference app so you can use it as the canonical template for a future frontend/backend control plane.
 
 ```hcl
 analysis_subjects = {
-  "ward-banking-api" = {
-    tier        = "production-mirror"
-    description = "Analyzing behavioral baseline of the core banking engine."
-  },
-  "ward-legacy-java" = {
-    tier        = "high-risk"
-    description = "Monitoring for unexpected process spawning (Log4j style)."
+  "ward-template-app" = {
+    tier        = "template"
+    description = "Reference ward used as a full-feature application template."
   }
 }
 
 ward_applications = [
   {
-    name      = "banking-api"
-    namespace = "ward-banking-api"
+    name      = "template-app"
+    namespace = "ward-template-app"
     replicas  = 2
     service = {
       port = 8080
     }
-    container = {
-      image = "nginxinc/nginx-unprivileged:1.27-alpine"
-      env = {
-        APP_PROFILE = "payments"
+    containers = [
+      {
+        image = "nginxinc/nginx-unprivileged:1.27-alpine"
       }
+    ]
+    ingress = {
+      enabled    = true
+      class_name = "nginx"
+      host       = "template-app.lab.internal"
     }
   }
 ]
@@ -107,6 +110,17 @@ Applications are now driven from `ward_applications`, which lets you control fro
 * Optional Ingress resources with host/path/class/tls settings.
 * Whether same-namespace ingress should be allowed for that app.
 * Explicit ingress and egress network policy allowlists using pod selectors, namespace selectors, IP blocks, and ports.
+
+The default `terraform.tfvars` intentionally contains only one application template that exercises the cluster features in one place:
+* Multi-container pod layout
+* Service and ingress exposure
+* Generated ConfigMap mount
+* Secret-backed env and volume references
+* Readiness/liveness probes
+* `emptyDir` and Secret volumes
+* App-specific ingress and egress network policies
+
+This makes it easier to build a frontend that edits a single application schema, clones it, or appends another app object to `ward_applications`.
 
 ### 3. Deployment
 ```bash
@@ -138,9 +152,63 @@ After apply, Terraform now exposes ready-to-run outputs for operator workflow:
 terraform output update_kubeconfig_command
 terraform output ward_kubectl_commands
 terraform output ward_service_endpoints
+terraform output ward_ingress_hosts
 ```
 
 If you provide IAM principal ARNs in `cluster_admin_principal_arns`, the stack will also create EKS access entries granting cluster-admin permissions.
+
+### 5. Frontend/Backend Template Flow
+If you build a UI on top of this repository, the cleanest workflow is:
+* Frontend edits an application template shaped like one `ward_applications` object.
+* Backend updates `terraform.tfvars` or generates a separate `.tfvars.json` file.
+* Backend runs `terraform plan` and `terraform apply`.
+* Backend returns both the apply result and machine-readable outputs from `terraform output -json`.
+
+Useful outputs for automation are:
+* `terraform output -json ward_kubectl_commands`
+* `terraform output -json ward_service_endpoints`
+* `terraform output -json ward_ingress_hosts`
+* `terraform output -json update_kubeconfig_command`
+
+The backend writes the frontend-managed configuration to `frontend-managed.auto.tfvars.json`, which Terraform then loads alongside the base repository files.
+
+### 6. Control Plane Development
+The repository now includes a simple control plane scaffold:
+* `backend/` runs a FastAPI API for reading and saving template config, starting Terraform plans, applying saved plans, reading run logs, and returning Terraform outputs.
+* `frontend/` runs a Vite + React UI with Tailwind styling and lightweight shadcn-style components.
+
+Backend endpoints:
+* `GET /api/config`
+* `PUT /api/config`
+* `POST /api/config/reset`
+* `POST /api/runs/plan`
+* `POST /api/runs/{id}/apply`
+* `GET /api/runs`
+* `GET /api/runs/{id}`
+* `GET /api/runs/{id}/logs`
+* `GET /api/outputs`
+
+Run the backend:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+uvicorn app.main:app --reload --port 8000
+```
+
+Run the frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend proxies `/api` requests to `http://127.0.0.1:8000` by default.
+
+For a practical walkthrough on testing the control plane and playing with the template app, see [TESTING_AND_USAGE.md](/home/mihandrei/work/security-observability-cluster/TESTING_AND_USAGE.md).
 
 ---
 
@@ -150,7 +218,7 @@ If you provide IAM principal ARNs in `cluster_admin_principal_arns`, the stack w
 Visualize how your apps are communicating through the "Default-Deny" policies:
 ```bash
 # View real-time flows in a specific ward
-kubectl hubble observe --namespace ward-banking-api
+kubectl hubble observe --namespace ward-template-app
 ```
 
 ### B. Forensic Process Tracking (Tetragon)

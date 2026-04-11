@@ -1,0 +1,28 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-image:
+      radial-gradient(circle at top left, rgba(13, 107, 95, 0.08), transparent 32%),
+      radial-gradient(circle at bottom right, rgba(180, 83, 9, 0.08), transparent 28%);
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen px-4 py-6 md:px-8;
+  }
+
+  .panel {
+    @apply rounded-3xl border border-border bg-card shadow-panel;
+  }
+}

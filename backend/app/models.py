@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class TerraformConfig(BaseModel):
+    project_name: str
+    environment: str
+    cluster_name: str
+    kubernetes_version: str
+    cluster_admin_principal_arns: list[str] = Field(default_factory=list)
+    enable_custom_runtime_policies: bool = False
+    analysis_subjects: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    ward_applications: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RunKind(str, Enum):
+    plan = "plan"
+    apply = "apply"
+
+
+class RunStatus(str, Enum):
+    pending = "pending"
+    running = "running"
+    planned = "planned"
+    applying = "applying"
+    applied = "applied"
+    failed = "failed"
+
+
+class PlanSummary(BaseModel):
+    create: int = 0
+    update: int = 0
+    delete: int = 0
+    replace: int = 0
+    addresses: list[str] = Field(default_factory=list)
+
+
+class TerraformRun(BaseModel):
+    id: str
+    kind: RunKind
+    status: RunStatus
+    created_at: datetime
+    updated_at: datetime
+    command: list[str] = Field(default_factory=list)
+    plan_path: str | None = None
+    log_path: str | None = None
+    error: str | None = None
+    plan_summary: PlanSummary | None = None
+    outputs: dict[str, Any] | None = None
+
+
+class RunListResponse(BaseModel):
+    items: list[TerraformRun]
+
+
+class RunLogsResponse(BaseModel):
+    run_id: str
+    logs: list[str]
+
+
+class OutputsResponse(BaseModel):
+    outputs: dict[str, Any]
+
+
+class HealthResponse(BaseModel):
+    status: str
+    active_run_id: str | None = None
+    managed_tfvars_present: bool
