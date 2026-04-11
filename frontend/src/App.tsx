@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -197,7 +197,7 @@ function KeyValueEditor({
 
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">{label}</p>
         <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={addRow}>
           {addLabel}
@@ -206,7 +206,7 @@ function KeyValueEditor({
       {entries.length === 0 ? <p className="text-sm text-neutral-500">No entries.</p> : null}
       <div className="grid gap-2">
         {entries.map(([entryKey, entryValue], index) => (
-          <div key={`${entryKey}-${index}`} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+          <div key={`${entryKey}-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <Input value={entryKey} onChange={(event) => updateRow(index, event.target.value, entryValue)} placeholder="Key" />
             <Input value={entryValue} onChange={(event) => updateRow(index, entryKey, event.target.value)} placeholder="Value" />
             <Button variant="danger" type="button" onClick={() => removeRow(index)}>
@@ -247,7 +247,7 @@ function StringListEditor({
 
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">{label}</p>
         <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={addItem}>
           {addLabel}
@@ -256,7 +256,7 @@ function StringListEditor({
       {items.length === 0 ? <p className="text-sm text-neutral-500">No entries.</p> : null}
       <div className="grid gap-2">
         {items.map((item, index) => (
-          <div key={`${item}-${index}`} className="grid gap-2 md:grid-cols-[1fr_auto]">
+          <div key={`${item}-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
             <Input value={item} onChange={(event) => updateItem(index, event.target.value)} />
             <Button variant="danger" type="button" onClick={() => removeItem(index)}>
               Remove
@@ -281,7 +281,7 @@ function ProbeEditor({
 
   return (
     <div className="rounded-2xl border border-border bg-muted/60 p-4">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <p className="font-medium">{label}</p>
         <label className="flex items-center gap-2 text-sm text-neutral-600">
           <input
@@ -292,7 +292,7 @@ function ProbeEditor({
           Enabled
         </label>
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-2">
         <label className="grid gap-1 text-sm">
           <span>Path</span>
           <Input value={probe.path ?? ""} onChange={(event) => onChange({ ...probe, path: event.target.value })} />
@@ -341,7 +341,7 @@ function VolumeMountEditor({
 
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Volume mounts</p>
         <Button
           variant="ghost"
@@ -355,7 +355,7 @@ function VolumeMountEditor({
       {mounts.length === 0 ? <p className="text-sm text-neutral-500">No mounts.</p> : null}
       <div className="grid gap-2">
         {mounts.map((mount, index) => (
-          <div key={`${mount.name}-${index}`} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+          <div key={`${mount.name}-${index}`} className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <Input value={mount.name} onChange={(event) => updateMount(index, { ...mount, name: event.target.value })} placeholder="Volume name" />
             <Input
               value={mount.mount_path}
@@ -387,7 +387,7 @@ function NetworkPortsEditor({
 
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Ports</p>
         <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={() => onChange([...ports, emptyPolicyPort()])}>
           Add port
@@ -396,7 +396,7 @@ function NetworkPortsEditor({
       {ports.length === 0 ? <p className="text-sm text-neutral-500">No ports.</p> : null}
       <div className="grid gap-2">
         {ports.map((port, index) => (
-          <div key={`${port.port}-${index}`} className="grid gap-2 md:grid-cols-[1fr_160px_auto]">
+          <div key={`${port.port}-${index}`} className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_160px_auto]">
             <Input
               type="number"
               value={String(port.port)}
@@ -442,7 +442,7 @@ function NetworkPeersEditor({
       <div className="grid gap-3">
         {peers.map((peer, index) => (
           <div key={index} className="rounded-2xl border border-border bg-muted/60 p-4">
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <p className="font-medium">Peer {index + 1}</p>
               <Button variant="danger" type="button" onClick={() => onChange(peers.filter((_, peerIndex) => peerIndex !== index))}>
                 Remove
@@ -499,7 +499,7 @@ function NetworkRulesEditor({
 
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-semibold">{direction === "ingress" ? "Ingress rules" : "Egress rules"}</p>
         <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={() => onChange([...rules, emptyPolicyRule(direction)])}>
           Add rule
@@ -509,7 +509,7 @@ function NetworkRulesEditor({
       <div className="grid gap-4">
         {rules.map((rule, index) => (
           <div key={index} className="rounded-2xl border border-border p-4">
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <p className="font-medium">Rule {index + 1}</p>
               <Button variant="danger" type="button" onClick={() => onChange(rules.filter((_, ruleIndex) => ruleIndex !== index))}>
                 Remove
@@ -551,7 +551,7 @@ function ContainerEditor({
 }) {
   return (
     <div className="rounded-2xl border border-border p-4">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="font-medium">Container {index + 1}</p>
           <p className="text-sm text-neutral-500">{container.name}</p>
@@ -562,18 +562,18 @@ function ContainerEditor({
       </div>
 
       <div className="grid gap-4">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 xl:grid-cols-3">
           <label className="grid gap-1 text-sm">
             <span>Name</span>
             <Input value={container.name} onChange={(event) => onChange({ ...container, name: event.target.value })} />
           </label>
-          <label className="grid gap-1 text-sm md:col-span-2">
+          <label className="grid gap-1 text-sm xl:col-span-2">
             <span>Image</span>
             <Input value={container.image} onChange={(event) => onChange({ ...container, image: event.target.value })} />
           </label>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 2xl:grid-cols-3">
           <label className="grid gap-1 text-sm">
             <span>Port</span>
             <Input
@@ -600,7 +600,7 @@ function ContainerEditor({
           addLabel="Add secret"
         />
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 2xl:grid-cols-3">
           <ProbeEditor
             label="Readiness probe"
             value={container.probes?.readiness}
@@ -633,7 +633,7 @@ function ContainerEditor({
           />
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
           <label className="grid gap-1 text-sm">
             <span>CPU request</span>
             <Input
@@ -693,6 +693,37 @@ function ContainerEditor({
   );
 }
 
+function Modal({
+  title,
+  open,
+  onClose,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/50 p-4" onClick={onClose}>
+      <div
+        className="panel flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <Button variant="ghost" type="button" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function statusTone(status?: TerraformRun["status"]): "primary" | "secondary" | "ghost" | "danger" {
   if (status === "planned" || status === "applied") return "primary";
   if (status === "failed" || status === "canceled") return "danger";
@@ -710,6 +741,8 @@ export default function App() {
   const [selectedRun, setSelectedRun] = useState<TerraformRun | null>(null);
   const [selectedRunLogs, setSelectedRunLogs] = useState<string[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown> | null>(null);
+  const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
+  const [isAppModalOpen, setIsAppModalOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -766,6 +799,18 @@ export default function App() {
       socket.close();
     };
   }, [selectedRunId, apiTokenValue]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsSubjectModalOpen(false);
+        setIsAppModalOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   async function loadInitial() {
     try {
@@ -1055,32 +1100,43 @@ export default function App() {
     <div className="app-shell">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <Card>
-          <CardContent className="flex flex-col gap-4 py-5 xl:flex-row xl:items-center xl:justify-between">
+          <CardContent className="flex flex-col gap-4 py-5 2xl:flex-row 2xl:items-center 2xl:justify-between">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-bold">KubeGuardian Control Plane</h1>
               <Badge>{config.cluster_name}</Badge>
               <Badge>{config.environment}</Badge>
               <Badge>{runs.length} runs</Badge>
             </div>
-            <div className="grid gap-3 md:grid-cols-[240px_repeat(5,auto)]">
-              <Input value={apiTokenValue} onChange={(event) => setApiTokenValue(event.target.value)} placeholder="API token" />
-              <Button variant="ghost" onClick={() => void saveManagedConfig()} disabled={isBusy}>
+            <div className="flex flex-wrap items-center gap-3">
+              <Input
+                className="w-full sm:w-60"
+                value={apiTokenValue}
+                onChange={(event) => setApiTokenValue(event.target.value)}
+                placeholder="API token"
+              />
+              <Button className="whitespace-nowrap" variant="ghost" onClick={() => void saveManagedConfig()} disabled={isBusy}>
                 Save
               </Button>
-              <Button onClick={() => void startPlan()} disabled={isBusy}>
+              <Button className="whitespace-nowrap" onClick={() => void startPlan()} disabled={isBusy}>
                 Plan
               </Button>
-              <Button variant="secondary" onClick={() => void startApply()} disabled={isBusy || selectedRun?.status !== "planned"}>
+              <Button
+                className="whitespace-nowrap"
+                variant="secondary"
+                onClick={() => void startApply()}
+                disabled={isBusy || selectedRun?.status !== "planned"}
+              >
                 Apply
               </Button>
               <Button
+                className="whitespace-nowrap"
                 variant="danger"
                 onClick={() => void cancelSelectedRun()}
                 disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
               >
                 Cancel
               </Button>
-              <Button variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
+              <Button className="whitespace-nowrap" variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
                 Reset
               </Button>
             </div>
@@ -1094,38 +1150,82 @@ export default function App() {
           <div className="rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-700">{statusMessage}</div>
         ) : null}
 
-        <div className="grid gap-6 xl:grid-cols-[300px_1fr_380px]">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Cluster</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-3">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
-                  <label className="grid gap-1 text-sm">
-                    <span>Project</span>
-                    <Input value={config.project_name} onChange={(event) => setConfig({ ...config, project_name: event.target.value })} />
-                  </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Environment</span>
-                    <Input value={config.environment} onChange={(event) => setConfig({ ...config, environment: event.target.value })} />
-                  </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Cluster name</span>
-                    <Input value={config.cluster_name} onChange={(event) => setConfig({ ...config, cluster_name: event.target.value })} />
-                  </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Kubernetes version</span>
-                    <Input value={config.kubernetes_version} onChange={(event) => setConfig({ ...config, kubernetes_version: event.target.value })} />
-                  </label>
-                </div>
-                <StringListEditor
-                  label="Cluster admin IAM principals"
-                  value={config.cluster_admin_principal_arns}
-                  onChange={(cluster_admin_principal_arns) => setConfig({ ...config, cluster_admin_principal_arns })}
-                  addLabel="Add ARN"
+        <Card>
+          <CardHeader>
+            <CardTitle>Control Plane</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-5">
+            <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-2xl font-bold">KubeGuardian Control Plane</h1>
+                <Badge>{config.cluster_name}</Badge>
+                <Badge>{config.environment}</Badge>
+                <Badge>{runs.length} runs</Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Input
+                  className="w-full sm:w-60"
+                  value={apiTokenValue}
+                  onChange={(event) => setApiTokenValue(event.target.value)}
+                  placeholder="API token"
                 />
-                <label className="flex items-center gap-2 text-sm text-neutral-700">
+                <Button className="whitespace-nowrap" variant="ghost" onClick={() => void saveManagedConfig()} disabled={isBusy}>
+                  Save
+                </Button>
+                <Button className="whitespace-nowrap" onClick={() => void startPlan()} disabled={isBusy}>
+                  Plan
+                </Button>
+                <Button
+                  className="whitespace-nowrap"
+                  variant="secondary"
+                  onClick={() => void startApply()}
+                  disabled={isBusy || selectedRun?.status !== "planned"}
+                >
+                  Apply
+                </Button>
+                <Button
+                  className="whitespace-nowrap"
+                  variant="danger"
+                  onClick={() => void cancelSelectedRun()}
+                  disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
+                >
+                  Cancel
+                </Button>
+                <Button className="whitespace-nowrap" variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
+                  Reset
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <label className="grid gap-1 text-sm">
+                <span>Project</span>
+                <Input value={config.project_name} onChange={(event) => setConfig({ ...config, project_name: event.target.value })} />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span>Environment</span>
+                <Input value={config.environment} onChange={(event) => setConfig({ ...config, environment: event.target.value })} />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span>Cluster name</span>
+                <Input value={config.cluster_name} onChange={(event) => setConfig({ ...config, cluster_name: event.target.value })} />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span>Kubernetes version</span>
+                <Input value={config.kubernetes_version} onChange={(event) => setConfig({ ...config, kubernetes_version: event.target.value })} />
+              </label>
+            </div>
+
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <StringListEditor
+                label="Cluster admin IAM principals"
+                value={config.cluster_admin_principal_arns}
+                onChange={(cluster_admin_principal_arns) => setConfig({ ...config, cluster_admin_principal_arns })}
+                addLabel="Add ARN"
+              />
+              <div className="rounded-2xl border border-border bg-muted/60 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Runtime policies</p>
+                <label className="mt-3 flex items-center gap-2 text-sm text-neutral-700">
                   <input
                     type="checkbox"
                     checked={config.enable_custom_runtime_policies}
@@ -1133,685 +1233,711 @@ export default function App() {
                   />
                   Enable custom runtime policies
                 </label>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Subjects</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-2">
-                  {subjectKeys.map((subjectKey) => (
+        <Card>
+          <CardHeader>
+            <CardTitle>Workspace</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <div className="grid gap-4">
+              <div className="rounded-2xl border border-border bg-muted/60 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Selected subject</p>
+                <p className="mt-2 font-semibold">{selectedSubjectKey || "None"}</p>
+                <p className="mt-1 text-sm text-neutral-600">{selectedSubject?.description || "Click a subject below to edit it."}</p>
+                {selectedSubject ? (
+                  <Button className="mt-4" onClick={() => setIsSubjectModalOpen(true)}>
+                    Edit subject
+                  </Button>
+                ) : null}
+              </div>
+              <div className="rounded-2xl border border-border bg-muted/60 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Selected app</p>
+                <p className="mt-2 font-semibold">{selectedApp?.name || "None"}</p>
+                <p className="mt-1 text-sm text-neutral-600">
+                  {selectedApp ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers` : "Click an app below to edit it."}
+                </p>
+                {selectedApp ? (
+                  <Button className="mt-4" onClick={() => setIsAppModalOpen(true)}>
+                    Edit app
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="grid gap-4">
+              <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+                <Card className="border-none shadow-none">
+                  <CardHeader className="px-0 pt-0">
+                    <CardTitle>Runs</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 px-0 pb-0">
+                    {runs.length === 0 ? <p className="text-sm text-neutral-500">No runs.</p> : null}
+                    {runs.map((run) => (
+                      <button
+                        key={run.id}
+                        className={classNames(
+                          "w-full rounded-2xl border px-4 py-3 text-left transition",
+                          selectedRunId === run.id ? "border-accent bg-white" : "border-border bg-white/70 hover:bg-white",
+                        )}
+                        onClick={() => {
+                          setSelectedRunId(run.id);
+                          setSelectedRun(run);
+                          setSelectedRunLogs([]);
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-medium">{run.kind}</p>
+                            <p className="text-xs text-neutral-500">{run.id}</p>
+                          </div>
+                          <Badge className={statusTone(run.status) === "danger" ? "bg-warning text-white" : ""}>
+                            {run.status}
+                            {run.queue_position ? ` #${run.queue_position}` : ""}
+                          </Badge>
+                        </div>
+                      </button>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-none shadow-none">
+                  <CardHeader className="px-0 pt-0">
+                    <CardTitle>Run Summary</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4 px-0 pb-0">
+                    {selectedRun ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-3 2xl:grid-cols-4">
+                          <div className="rounded-2xl border border-border bg-white p-3 text-center">
+                            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Create</p>
+                            <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.create ?? 0}</p>
+                          </div>
+                          <div className="rounded-2xl border border-border bg-white p-3 text-center">
+                            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Update</p>
+                            <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.update ?? 0}</p>
+                          </div>
+                          <div className="rounded-2xl border border-border bg-white p-3 text-center">
+                            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Delete</p>
+                            <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.delete ?? 0}</p>
+                          </div>
+                          <div className="rounded-2xl border border-border bg-white p-3 text-center">
+                            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Replace</p>
+                            <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.replace ?? 0}</p>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Changed resources</p>
+                          <div className="max-h-56 overflow-auto rounded-2xl border border-border bg-white p-3 text-xs text-neutral-700">
+                            {(selectedRun.plan_summary?.addresses ?? []).length === 0 ? (
+                              <p>No structured plan summary yet.</p>
+                            ) : (
+                              <ul className="space-y-1">
+                                {(selectedRun.plan_summary?.addresses ?? []).map((address) => (
+                                  <li key={address}>{address}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                        {selectedRun.error ? (
+                          <div className="rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">{selectedRun.error}</div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="text-sm text-neutral-500">Select a run.</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+                <Card className="border-none shadow-none">
+                  <CardHeader className="px-0 pt-0">
+                    <CardTitle>Run Logs</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-0 pb-0">
+                    <pre className="max-h-96 overflow-auto rounded-2xl border border-border bg-neutral-950 p-4 font-mono text-xs text-neutral-100">
+                      {selectedRunLogs.length > 0 ? selectedRunLogs.join("\n") : "No logs yet."}
+                    </pre>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-none shadow-none">
+                  <CardHeader className="px-0 pt-0">
+                    <CardTitle>Terraform Outputs</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-0 pb-0">
+                    <pre className="max-h-96 overflow-auto rounded-2xl border border-border bg-white p-4 font-mono text-xs text-neutral-800">
+                      {outputs ? prettyPrint(outputs) : "No outputs available."}
+                    </pre>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Subjects</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                {subjectKeys.map((subjectKey) => (
                     <button
                       key={subjectKey}
                       className={classNames(
                         "w-full rounded-2xl border px-4 py-3 text-left transition",
                         subjectKey === selectedSubjectKey ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
                       )}
-                      onClick={() => setSelectedSubjectKey(subjectKey)}
+                      onClick={() => {
+                        setSelectedSubjectKey(subjectKey);
+                      }}
                     >
-                      <p className="font-medium">{subjectKey}</p>
-                      <p className="mt-1 text-xs text-neutral-500">{config.analysis_subjects[subjectKey]?.tier ?? "ward"}</p>
-                    </button>
-                  ))}
-                </div>
-                <div className="grid gap-2">
-                  <Button variant="ghost" onClick={addSubject}>
-                    Add subject
-                  </Button>
-                  <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>
-                    Remove subject
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Applications</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-2">
-                  {config.ward_applications.map((application, index) => (
-                    <button
-                      key={`${application.name}-${index}`}
-                      className={classNames(
-                        "w-full rounded-2xl border px-4 py-3 text-left transition",
-                        index === selectedAppIndex ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
-                      )}
-                      onClick={() => setSelectedAppIndex(index)}
-                    >
-                      <p className="font-medium">{application.name}</p>
-                      <p className="mt-1 text-xs text-neutral-500">{application.namespace}</p>
-                    </button>
-                  ))}
-                </div>
-                <div className="grid gap-2">
-                  <Button variant="ghost" onClick={addApp}>
-                    Add app
-                  </Button>
-                  <Button variant="ghost" onClick={cloneSelectedApp} disabled={!selectedApp}>
-                    Clone app
-                  </Button>
-                  <Button variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>
-                    Remove app
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Selected Subject</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4">
-                {selectedSubject ? (
-                  <>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className="grid gap-1 text-sm">
-                        <span>Namespace</span>
-                        <Input value={selectedSubjectKey} onChange={(event) => renameSubject(selectedSubjectKey, event.target.value)} />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        <span>Tier</span>
-                        <Input
-                          value={selectedSubject.tier ?? ""}
-                          onChange={(event) => updateSelectedSubject((current) => ({ ...current, tier: event.target.value }))}
-                        />
-                      </label>
-                    </div>
-                    <label className="grid gap-1 text-sm">
-                      <span>Description</span>
-                      <Input
-                        value={selectedSubject.description ?? ""}
-                        onChange={(event) => updateSelectedSubject((current) => ({ ...current, description: event.target.value }))}
-                      />
-                    </label>
-                    <KeyValueEditor
-                      label="Labels"
-                      value={selectedSubject.labels}
-                      onChange={(labels) => updateSelectedSubject((current) => ({ ...current, labels }))}
-                      addLabel="Add label"
-                    />
-                    <div className="grid gap-3 md:grid-cols-5">
-                      <label className="grid gap-1 text-sm">
-                        <span>Pods</span>
-                        <Input
-                          value={selectedSubject.resource_quota?.pods ?? ""}
-                          onChange={(event) =>
-                            updateSelectedSubject((current) => ({
-                              ...current,
-                              resource_quota: { ...current.resource_quota, pods: event.target.value },
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        <span>CPU request</span>
-                        <Input
-                          value={selectedSubject.resource_quota?.requests_cpu ?? ""}
-                          onChange={(event) =>
-                            updateSelectedSubject((current) => ({
-                              ...current,
-                              resource_quota: { ...current.resource_quota, requests_cpu: event.target.value },
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        <span>Memory request</span>
-                        <Input
-                          value={selectedSubject.resource_quota?.requests_memory ?? ""}
-                          onChange={(event) =>
-                            updateSelectedSubject((current) => ({
-                              ...current,
-                              resource_quota: { ...current.resource_quota, requests_memory: event.target.value },
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        <span>CPU limit</span>
-                        <Input
-                          value={selectedSubject.resource_quota?.limits_cpu ?? ""}
-                          onChange={(event) =>
-                            updateSelectedSubject((current) => ({
-                              ...current,
-                              resource_quota: { ...current.resource_quota, limits_cpu: event.target.value },
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        <span>Memory limit</span>
-                        <Input
-                          value={selectedSubject.resource_quota?.limits_memory ?? ""}
-                          onChange={(event) =>
-                            updateSelectedSubject((current) => ({
-                              ...current,
-                              resource_quota: { ...current.resource_quota, limits_memory: event.target.value },
-                            }))
-                          }
-                        />
-                      </label>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-neutral-500">Select a subject.</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Selected App</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-6">
-                {selectedApp ? (
-                  <>
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <label className="grid gap-1 text-sm">
-                        <span>Name</span>
-                        <Input value={selectedApp.name} onChange={(event) => updateSelectedApp((current) => ({ ...current, name: event.target.value }))} />
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        <span>Namespace</span>
-                        <select
-                          className="rounded-2xl border border-border bg-white px-4 py-2 text-sm"
-                          value={selectedApp.namespace}
-                          onChange={(event) => updateSelectedApp((current) => ({ ...current, namespace: event.target.value }))}
-                        >
-                          {subjectKeys.map((subjectKey) => (
-                            <option key={subjectKey} value={subjectKey}>
-                              {subjectKey}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="grid gap-1 text-sm">
-                        <span>Replicas</span>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={String(selectedApp.replicas ?? 1)}
-                          onChange={(event) => updateSelectedApp((current) => ({ ...current, replicas: Number(event.target.value) }))}
-                        />
-                      </label>
-                    </div>
-
-                    <KeyValueEditor
-                      label="Pod labels"
-                      value={selectedApp.pod_labels}
-                      onChange={(pod_labels) => updateSelectedApp((current) => ({ ...current, pod_labels }))}
-                      addLabel="Add label"
-                    />
-
-                    <div className="rounded-2xl border border-border p-4">
-                      <div className="mb-4 flex items-center justify-between">
-                        <p className="font-semibold">Service</p>
-                        <label className="flex items-center gap-2 text-sm text-neutral-600">
-                          <input
-                            type="checkbox"
-                            checked={selectedApp.service?.enabled ?? true}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                service: { ...current.service, enabled: event.target.checked },
-                              }))
-                            }
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <label className="grid gap-1 text-sm">
-                          <span>Type</span>
-                          <Input
-                            value={selectedApp.service?.type ?? "ClusterIP"}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                service: { ...current.service, type: event.target.value },
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="grid gap-1 text-sm">
-                          <span>Port</span>
-                          <Input
-                            type="number"
-                            value={String(selectedApp.service?.port ?? 8080)}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                service: { ...current.service, port: Number(event.target.value) },
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="grid gap-1 text-sm">
-                          <span>Target port</span>
-                          <Input
-                            type="number"
-                            value={String(selectedApp.service?.target_port ?? selectedApp.service?.port ?? 8080)}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                service: { ...current.service, target_port: Number(event.target.value) },
-                              }))
-                            }
-                          />
-                        </label>
-                      </div>
-                      <div className="mt-4">
-                        <KeyValueEditor
-                          label="Service annotations"
-                          value={selectedApp.service?.annotations}
-                          onChange={(annotations) =>
-                            updateSelectedApp((current) => ({
-                              ...current,
-                              service: { ...current.service, annotations },
-                            }))
-                          }
-                          addLabel="Add annotation"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-border p-4">
-                      <div className="mb-4 flex items-center justify-between">
-                        <p className="font-semibold">Ingress</p>
-                        <label className="flex items-center gap-2 text-sm text-neutral-600">
-                          <input
-                            type="checkbox"
-                            checked={selectedApp.ingress?.enabled ?? false}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                ingress: { ...current.ingress, enabled: event.target.checked } as IngressConfig,
-                              }))
-                            }
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <label className="grid gap-1 text-sm">
-                          <span>Class</span>
-                          <Input
-                            value={selectedApp.ingress?.class_name ?? "nginx"}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                ingress: { ...current.ingress, class_name: event.target.value },
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="grid gap-1 text-sm">
-                          <span>Host</span>
-                          <Input
-                            value={selectedApp.ingress?.host ?? ""}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                ingress: { ...current.ingress, host: event.target.value },
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="grid gap-1 text-sm">
-                          <span>Path</span>
-                          <Input
-                            value={selectedApp.ingress?.path ?? "/"}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                ingress: { ...current.ingress, path: event.target.value },
-                              }))
-                            }
-                          />
-                        </label>
-                      </div>
-                      <div className="mt-4">
-                        <KeyValueEditor
-                          label="Ingress annotations"
-                          value={selectedApp.ingress?.annotations}
-                          onChange={(annotations) =>
-                            updateSelectedApp((current) => ({
-                              ...current,
-                              ingress: { ...current.ingress, annotations },
-                            }))
-                          }
-                          addLabel="Add annotation"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-border p-4">
-                      <div className="mb-4 flex items-center justify-between">
-                        <p className="font-semibold">ConfigMap</p>
-                        <label className="flex items-center gap-2 text-sm text-neutral-600">
-                          <input
-                            type="checkbox"
-                            checked={selectedApp.config_map?.enabled ?? false}
-                            onChange={(event) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                config_map: { ...current.config_map, enabled: event.target.checked },
-                              }))
-                            }
-                          />
-                          Enabled
-                        </label>
-                      </div>
-                      <label className="grid gap-1 text-sm">
-                        <span>Mount path</span>
-                        <Input
-                          value={selectedApp.config_map?.mount_path ?? "/usr/share/nginx/html"}
-                          onChange={(event) =>
-                            updateSelectedApp((current) => ({
-                              ...current,
-                              config_map: { ...current.config_map, mount_path: event.target.value },
-                            }))
-                          }
-                        />
-                      </label>
-                      <div className="mt-4">
-                        <KeyValueEditor
-                          label="ConfigMap data"
-                          value={selectedApp.config_map?.data}
-                          onChange={(data) =>
-                            updateSelectedApp((current) => ({
-                              ...current,
-                              config_map: { ...current.config_map, data },
-                            }))
-                          }
-                          addLabel="Add file"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-border p-4">
-                      <div className="mb-4 flex items-center justify-between">
-                        <p className="font-semibold">Containers</p>
-                        <Button
-                          variant="ghost"
-                          type="button"
-                          onClick={() =>
-                            updateSelectedApp((current) => ({
-                              ...current,
-                              containers: [...(current.containers ?? []), emptyContainer()],
-                            }))
-                          }
-                        >
-                          Add container
-                        </Button>
-                      </div>
-                      <div className="grid gap-4">
-                        {(selectedApp.containers ?? []).map((container, index) => (
-                          <ContainerEditor
-                            key={`${container.name}-${index}`}
-                            index={index}
-                            container={container}
-                            onChange={(nextContainer) =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                containers: (current.containers ?? []).map((item, itemIndex) => (itemIndex === index ? nextContainer : item)),
-                              }))
-                            }
-                            onRemove={() =>
-                              updateSelectedApp((current) => ({
-                                ...current,
-                                containers: (current.containers ?? []).filter((_, itemIndex) => itemIndex !== index),
-                              }))
-                            }
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-border p-4">
-                      <div className="mb-4 flex items-center justify-between">
-                        <p className="font-semibold">Volumes</p>
-                        <Button
-                          variant="ghost"
-                          type="button"
-                          onClick={() =>
-                            updateSelectedApp((current) => ({
-                              ...current,
-                              volumes: [...(current.volumes ?? []), emptyVolume()],
-                            }))
-                          }
-                        >
-                          Add volume
-                        </Button>
-                      </div>
-                      <div className="grid gap-3">
-                        {(selectedApp.volumes ?? []).length === 0 ? <p className="text-sm text-neutral-500">No volumes.</p> : null}
-                        {(selectedApp.volumes ?? []).map((volume, index) => {
-                          const volumeType = volume.empty_dir ? "empty_dir" : volume.secret_name ? "secret" : volume.config_map_name ? "config_map" : "empty_dir";
-                          return (
-                            <div key={`${volume.name}-${index}`} className="grid gap-3 rounded-2xl border border-border bg-muted/60 p-4 md:grid-cols-[1fr_180px_1fr_auto]">
-                              <Input
-                                value={volume.name}
-                                onChange={(event) =>
-                                  updateSelectedApp((current) => ({
-                                    ...current,
-                                    volumes: (current.volumes ?? []).map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, name: event.target.value } : item,
-                                    ),
-                                  }))
-                                }
-                                placeholder="Volume name"
-                              />
-                              <select
-                                className="rounded-2xl border border-border bg-white px-4 py-2 text-sm"
-                                value={volumeType}
-                                onChange={(event) =>
-                                  updateSelectedApp((current) => ({
-                                    ...current,
-                                    volumes: (current.volumes ?? []).map((item, itemIndex) =>
-                                      itemIndex === index
-                                        ? {
-                                            name: item.name,
-                                            empty_dir: event.target.value === "empty_dir" ? true : undefined,
-                                            secret_name: event.target.value === "secret" ? item.secret_name ?? "app-secret" : undefined,
-                                            config_map_name: event.target.value === "config_map" ? item.config_map_name ?? "app-config" : undefined,
-                                          }
-                                        : item,
-                                    ),
-                                  }))
-                                }
-                              >
-                                <option value="empty_dir">emptyDir</option>
-                                <option value="secret">Secret</option>
-                                <option value="config_map">ConfigMap</option>
-                              </select>
-                              <Input
-                                value={volume.secret_name ?? volume.config_map_name ?? ""}
-                                placeholder={volumeType === "secret" ? "Secret name" : volumeType === "config_map" ? "ConfigMap name" : "No extra value"}
-                                onChange={(event) =>
-                                  updateSelectedApp((current) => ({
-                                    ...current,
-                                    volumes: (current.volumes ?? []).map((item, itemIndex) =>
-                                      itemIndex === index
-                                        ? {
-                                            ...item,
-                                            empty_dir: volumeType === "empty_dir" ? true : undefined,
-                                            secret_name: volumeType === "secret" ? event.target.value : undefined,
-                                            config_map_name: volumeType === "config_map" ? event.target.value : undefined,
-                                          }
-                                        : item,
-                                    ),
-                                  }))
-                                }
-                                disabled={volumeType === "empty_dir"}
-                              />
-                              <Button
-                                variant="danger"
-                                type="button"
-                                onClick={() =>
-                                  updateSelectedApp((current) => ({
-                                    ...current,
-                                    volumes: (current.volumes ?? []).filter((_, itemIndex) => itemIndex !== index),
-                                  }))
-                                }
-                              >
-                                Remove
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-border p-4">
-                      <div className="mb-4 flex items-center justify-between">
-                        <p className="font-semibold">Network policy</p>
-                        <Badge>{selectedApp.namespace}</Badge>
-                      </div>
-                      <div className="grid gap-6">
-                        <NetworkRulesEditor
-                          direction="ingress"
-                          value={selectedApp.network_policy?.ingress}
-                          onChange={(ingress) =>
-                            updateSelectedApp((current) => ({
-                              ...current,
-                              network_policy: { ...current.network_policy, ingress },
-                            }))
-                          }
-                        />
-                        <NetworkRulesEditor
-                          direction="egress"
-                          value={selectedApp.network_policy?.egress}
-                          onChange={(egress) =>
-                            updateSelectedApp((current) => ({
-                              ...current,
-                              network_policy: { ...current.network_policy, egress },
-                            }))
-                          }
-                        />
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-neutral-500">Select an app.</p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Runs</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {runs.length === 0 ? <p className="text-sm text-neutral-500">No runs.</p> : null}
-                {runs.map((run) => (
-                  <button
-                    key={run.id}
-                    className={classNames(
-                      "w-full rounded-2xl border px-4 py-3 text-left transition",
-                      selectedRunId === run.id ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
-                    )}
-                    onClick={() => {
-                      setSelectedRunId(run.id);
-                      setSelectedRun(run);
-                      setSelectedRunLogs([]);
-                    }}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{run.kind}</p>
-                        <p className="text-xs text-neutral-500">{run.id}</p>
-                      </div>
-                      <Badge className={statusTone(run.status) === "danger" ? "bg-warning text-white" : ""}>
-                        {run.status}
-                        {run.queue_position ? ` #${run.queue_position}` : ""}
-                      </Badge>
-                    </div>
+                    <p className="font-medium">{subjectKey}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{config.analysis_subjects[subjectKey]?.tier ?? "ward"}</p>
                   </button>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+              <div className="grid gap-2">
+                <Button variant="ghost" onClick={addSubject}>
+                  Add subject
+                </Button>
+                <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>
+                  Remove subject
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Run Summary</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {selectedRun ? (
-                  <>
-                    <div className="grid grid-cols-4 gap-3">
-                      <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center">
-                        <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Create</p>
-                        <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.create ?? 0}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center">
-                        <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Update</p>
-                        <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.update ?? 0}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center">
-                        <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Delete</p>
-                        <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.delete ?? 0}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center">
-                        <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Replace</p>
-                        <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.replace ?? 0}</p>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Changed resources</p>
-                      <div className="max-h-48 overflow-auto rounded-2xl border border-border bg-muted/60 p-3 text-xs text-neutral-700">
-                        {(selectedRun.plan_summary?.addresses ?? []).length === 0 ? (
-                          <p>No structured plan summary yet.</p>
-                        ) : (
-                          <ul className="space-y-1">
-                            {(selectedRun.plan_summary?.addresses ?? []).map((address) => (
-                              <li key={address}>{address}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </div>
-                    {selectedRun.error ? (
-                      <div className="rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">{selectedRun.error}</div>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="text-sm text-neutral-500">Select a run.</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Run Logs</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="max-h-80 overflow-auto rounded-2xl border border-border bg-neutral-950 p-4 font-mono text-xs text-neutral-100">
-                  {selectedRunLogs.length > 0 ? selectedRunLogs.join("\n") : "No logs yet."}
-                </pre>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Terraform Outputs</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="max-h-80 overflow-auto rounded-2xl border border-border bg-muted/60 p-4 font-mono text-xs text-neutral-800">
-                  {outputs ? prettyPrint(outputs) : "No outputs available."}
-                </pre>
-              </CardContent>
-            </Card>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Applications</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                {config.ward_applications.map((application, index) => (
+                  <button
+                    key={`${application.name}-${index}`}
+                    className={classNames(
+                      "w-full rounded-2xl border px-4 py-3 text-left transition",
+                      index === selectedAppIndex ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
+                    )}
+                    onClick={() => {
+                      setSelectedAppIndex(index);
+                    }}
+                  >
+                    <p className="font-medium">{application.name}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{application.namespace}</p>
+                  </button>
+                ))}
+              </div>
+              <div className="grid gap-2">
+                <Button variant="ghost" onClick={addApp}>
+                  Add app
+                </Button>
+                <Button variant="ghost" onClick={cloneSelectedApp} disabled={!selectedApp}>
+                  Clone app
+                </Button>
+                <Button variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>
+                  Remove app
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
+
+        <Modal title="Edit Subject" open={isSubjectModalOpen && Boolean(selectedSubject)} onClose={() => setIsSubjectModalOpen(false)}>
+          {selectedSubject ? (
+            <div className="grid gap-4">
+              <div className="grid gap-3 xl:grid-cols-2">
+                <label className="grid gap-1 text-sm">
+                  <span>Namespace</span>
+                  <Input value={selectedSubjectKey} onChange={(event) => renameSubject(selectedSubjectKey, event.target.value)} />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Tier</span>
+                  <Input
+                    value={selectedSubject.tier ?? ""}
+                    onChange={(event) => updateSelectedSubject((current) => ({ ...current, tier: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <label className="grid gap-1 text-sm">
+                <span>Description</span>
+                <Input
+                  value={selectedSubject.description ?? ""}
+                  onChange={(event) => updateSelectedSubject((current) => ({ ...current, description: event.target.value }))}
+                />
+              </label>
+              <KeyValueEditor
+                label="Labels"
+                value={selectedSubject.labels}
+                onChange={(labels) => updateSelectedSubject((current) => ({ ...current, labels }))}
+                addLabel="Add label"
+              />
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+                <label className="grid gap-1 text-sm">
+                  <span>Pods</span>
+                  <Input
+                    value={selectedSubject.resource_quota?.pods ?? ""}
+                    onChange={(event) =>
+                      updateSelectedSubject((current) => ({
+                        ...current,
+                        resource_quota: { ...current.resource_quota, pods: event.target.value },
+                      }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>CPU request</span>
+                  <Input
+                    value={selectedSubject.resource_quota?.requests_cpu ?? ""}
+                    onChange={(event) =>
+                      updateSelectedSubject((current) => ({
+                        ...current,
+                        resource_quota: { ...current.resource_quota, requests_cpu: event.target.value },
+                      }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Memory request</span>
+                  <Input
+                    value={selectedSubject.resource_quota?.requests_memory ?? ""}
+                    onChange={(event) =>
+                      updateSelectedSubject((current) => ({
+                        ...current,
+                        resource_quota: { ...current.resource_quota, requests_memory: event.target.value },
+                      }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>CPU limit</span>
+                  <Input
+                    value={selectedSubject.resource_quota?.limits_cpu ?? ""}
+                    onChange={(event) =>
+                      updateSelectedSubject((current) => ({
+                        ...current,
+                        resource_quota: { ...current.resource_quota, limits_cpu: event.target.value },
+                      }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Memory limit</span>
+                  <Input
+                    value={selectedSubject.resource_quota?.limits_memory ?? ""}
+                    onChange={(event) =>
+                      updateSelectedSubject((current) => ({
+                        ...current,
+                        resource_quota: { ...current.resource_quota, limits_memory: event.target.value },
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+        </Modal>
+
+        <Modal title="Edit App" open={isAppModalOpen && Boolean(selectedApp)} onClose={() => setIsAppModalOpen(false)}>
+          {selectedApp ? (
+            <div className="grid gap-6">
+              <div className="grid gap-3 xl:grid-cols-3">
+                <label className="grid gap-1 text-sm">
+                  <span>Name</span>
+                  <Input value={selectedApp.name} onChange={(event) => updateSelectedApp((current) => ({ ...current, name: event.target.value }))} />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Namespace</span>
+                  <select
+                    className="w-full rounded-2xl border border-border bg-white px-4 py-2 text-sm"
+                    value={selectedApp.namespace}
+                    onChange={(event) => updateSelectedApp((current) => ({ ...current, namespace: event.target.value }))}
+                  >
+                    {subjectKeys.map((subjectKey) => (
+                      <option key={subjectKey} value={subjectKey}>
+                        {subjectKey}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Replicas</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={String(selectedApp.replicas ?? 1)}
+                    onChange={(event) => updateSelectedApp((current) => ({ ...current, replicas: Number(event.target.value) }))}
+                  />
+                </label>
+              </div>
+
+              <KeyValueEditor
+                label="Pod labels"
+                value={selectedApp.pod_labels}
+                onChange={(pod_labels) => updateSelectedApp((current) => ({ ...current, pod_labels }))}
+                addLabel="Add label"
+              />
+
+              <div className="rounded-2xl border border-border p-4">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-semibold">Service</p>
+                  <label className="flex items-center gap-2 text-sm text-neutral-600">
+                    <input
+                      type="checkbox"
+                      checked={selectedApp.service?.enabled ?? true}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          service: { ...current.service, enabled: event.target.checked },
+                        }))
+                      }
+                    />
+                    Enabled
+                  </label>
+                </div>
+                <div className="grid gap-3 xl:grid-cols-3">
+                  <label className="grid gap-1 text-sm">
+                    <span>Type</span>
+                    <Input
+                      value={selectedApp.service?.type ?? "ClusterIP"}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          service: { ...current.service, type: event.target.value },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span>Port</span>
+                    <Input
+                      type="number"
+                      value={String(selectedApp.service?.port ?? 8080)}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          service: { ...current.service, port: Number(event.target.value) },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span>Target port</span>
+                    <Input
+                      type="number"
+                      value={String(selectedApp.service?.target_port ?? selectedApp.service?.port ?? 8080)}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          service: { ...current.service, target_port: Number(event.target.value) },
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="mt-4">
+                  <KeyValueEditor
+                    label="Service annotations"
+                    value={selectedApp.service?.annotations}
+                    onChange={(annotations) =>
+                      updateSelectedApp((current) => ({
+                        ...current,
+                        service: { ...current.service, annotations },
+                      }))
+                    }
+                    addLabel="Add annotation"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border p-4">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-semibold">Ingress</p>
+                  <label className="flex items-center gap-2 text-sm text-neutral-600">
+                    <input
+                      type="checkbox"
+                      checked={selectedApp.ingress?.enabled ?? false}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          ingress: { ...current.ingress, enabled: event.target.checked } as IngressConfig,
+                        }))
+                      }
+                    />
+                    Enabled
+                  </label>
+                </div>
+                <div className="grid gap-3 xl:grid-cols-3">
+                  <label className="grid gap-1 text-sm">
+                    <span>Class</span>
+                    <Input
+                      value={selectedApp.ingress?.class_name ?? "nginx"}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          ingress: { ...current.ingress, class_name: event.target.value },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span>Host</span>
+                    <Input
+                      value={selectedApp.ingress?.host ?? ""}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          ingress: { ...current.ingress, host: event.target.value },
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span>Path</span>
+                    <Input
+                      value={selectedApp.ingress?.path ?? "/"}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          ingress: { ...current.ingress, path: event.target.value },
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="mt-4">
+                  <KeyValueEditor
+                    label="Ingress annotations"
+                    value={selectedApp.ingress?.annotations}
+                    onChange={(annotations) =>
+                      updateSelectedApp((current) => ({
+                        ...current,
+                        ingress: { ...current.ingress, annotations },
+                      }))
+                    }
+                    addLabel="Add annotation"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border p-4">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-semibold">ConfigMap</p>
+                  <label className="flex items-center gap-2 text-sm text-neutral-600">
+                    <input
+                      type="checkbox"
+                      checked={selectedApp.config_map?.enabled ?? false}
+                      onChange={(event) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          config_map: { ...current.config_map, enabled: event.target.checked },
+                        }))
+                      }
+                    />
+                    Enabled
+                  </label>
+                </div>
+                <label className="grid gap-1 text-sm">
+                  <span>Mount path</span>
+                  <Input
+                    value={selectedApp.config_map?.mount_path ?? "/usr/share/nginx/html"}
+                    onChange={(event) =>
+                      updateSelectedApp((current) => ({
+                        ...current,
+                        config_map: { ...current.config_map, mount_path: event.target.value },
+                      }))
+                    }
+                  />
+                </label>
+                <div className="mt-4">
+                  <KeyValueEditor
+                    label="ConfigMap data"
+                    value={selectedApp.config_map?.data}
+                    onChange={(data) =>
+                      updateSelectedApp((current) => ({
+                        ...current,
+                        config_map: { ...current.config_map, data },
+                      }))
+                    }
+                    addLabel="Add file"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border p-4">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-semibold">Containers</p>
+                  <Button
+                    variant="ghost"
+                    type="button"
+                    onClick={() =>
+                      updateSelectedApp((current) => ({
+                        ...current,
+                        containers: [...(current.containers ?? []), emptyContainer()],
+                      }))
+                    }
+                  >
+                    Add container
+                  </Button>
+                </div>
+                <div className="grid gap-4">
+                  {(selectedApp.containers ?? []).map((container, index) => (
+                    <ContainerEditor
+                      key={`${container.name}-${index}`}
+                      index={index}
+                      container={container}
+                      onChange={(nextContainer) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          containers: (current.containers ?? []).map((item, itemIndex) => (itemIndex === index ? nextContainer : item)),
+                        }))
+                      }
+                      onRemove={() =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          containers: (current.containers ?? []).filter((_, itemIndex) => itemIndex !== index),
+                        }))
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border p-4">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-semibold">Volumes</p>
+                  <Button
+                    variant="ghost"
+                    type="button"
+                    onClick={() =>
+                      updateSelectedApp((current) => ({
+                        ...current,
+                        volumes: [...(current.volumes ?? []), emptyVolume()],
+                      }))
+                    }
+                  >
+                    Add volume
+                  </Button>
+                </div>
+                <div className="grid gap-3">
+                  {(selectedApp.volumes ?? []).length === 0 ? <p className="text-sm text-neutral-500">No volumes.</p> : null}
+                  {(selectedApp.volumes ?? []).map((volume, index) => {
+                    const volumeType = volume.empty_dir ? "empty_dir" : volume.secret_name ? "secret" : volume.config_map_name ? "config_map" : "empty_dir";
+                    return (
+                      <div key={`${volume.name}-${index}`} className="grid gap-3 rounded-2xl border border-border bg-muted/60 p-4 2xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)_auto]">
+                        <Input
+                          value={volume.name}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              volumes: (current.volumes ?? []).map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, name: event.target.value } : item,
+                              ),
+                            }))
+                          }
+                          placeholder="Volume name"
+                        />
+                        <select
+                          className="w-full rounded-2xl border border-border bg-white px-4 py-2 text-sm"
+                          value={volumeType}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              volumes: (current.volumes ?? []).map((item, itemIndex) =>
+                                itemIndex === index
+                                  ? {
+                                      name: item.name,
+                                      empty_dir: event.target.value === "empty_dir" ? true : undefined,
+                                      secret_name: event.target.value === "secret" ? item.secret_name ?? "app-secret" : undefined,
+                                      config_map_name: event.target.value === "config_map" ? item.config_map_name ?? "app-config" : undefined,
+                                    }
+                                  : item,
+                              ),
+                            }))
+                          }
+                        >
+                          <option value="empty_dir">emptyDir</option>
+                          <option value="secret">Secret</option>
+                          <option value="config_map">ConfigMap</option>
+                        </select>
+                        <Input
+                          value={volume.secret_name ?? volume.config_map_name ?? ""}
+                          placeholder={volumeType === "secret" ? "Secret name" : volumeType === "config_map" ? "ConfigMap name" : "No extra value"}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              volumes: (current.volumes ?? []).map((item, itemIndex) =>
+                                itemIndex === index
+                                  ? {
+                                      ...item,
+                                      empty_dir: volumeType === "empty_dir" ? true : undefined,
+                                      secret_name: volumeType === "secret" ? event.target.value : undefined,
+                                      config_map_name: volumeType === "config_map" ? event.target.value : undefined,
+                                    }
+                                  : item,
+                              ),
+                            }))
+                          }
+                          disabled={volumeType === "empty_dir"}
+                        />
+                        <Button
+                          variant="danger"
+                          type="button"
+                          onClick={() =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              volumes: (current.volumes ?? []).filter((_, itemIndex) => itemIndex !== index),
+                            }))
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border p-4">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-semibold">Network policy</p>
+                  <Badge>{selectedApp.namespace}</Badge>
+                </div>
+                <div className="grid gap-6">
+                  <NetworkRulesEditor
+                    direction="ingress"
+                    value={selectedApp.network_policy?.ingress}
+                    onChange={(ingress) =>
+                      updateSelectedApp((current) => ({
+                        ...current,
+                        network_policy: { ...current.network_policy, ingress },
+                      }))
+                    }
+                  />
+                  <NetworkRulesEditor
+                    direction="egress"
+                    value={selectedApp.network_policy?.egress}
+                    onChange={(egress) =>
+                      updateSelectedApp((current) => ({
+                        ...current,
+                        network_policy: { ...current.network_policy, egress },
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </Modal>
       </div>
     </div>
   );
