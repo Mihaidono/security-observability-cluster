@@ -30,23 +30,25 @@ In this lab, applications are "subjects." Each subject is deployed into a **Ward
 ## 📂 Project Structure
 ```text
 .
-├── versions.tf          # Terraform + provider version constraints
-├── providers.tf         # AWS, Kubernetes, and Helm provider wiring
-├── locals.tf            # Normalized ward defaults and derived labels
-├── main.tf              # Core VPC, EKS, node group, and control-plane logging
-├── observability.tf     # Cilium, Hubble, Tetragon, and monitoring namespace
-├── apps.tf              # Dynamic ward namespaces, quotas, metadata, and policies
-├── workloads.tf         # tfvars-driven ward application deployments and services
-├── security.tf          # Kyverno and Tetragon runtime policies
-├── iam.tf               # Optional EKS admin access entries
-├── variables.tf         # Input definitions and ward schema
-├── outputs.tf           # Useful cluster and ward outputs
-├── backend/             # FastAPI service that manages templates and Terraform runs
-├── frontend/            # Vite + React + Tailwind operator UI
+├── backend/             # FastAPI service for auth, config management, and Terraform execution
+├── frontend/            # Vite + React + Tailwind operator UI with form-based editors
+├── infrastructure/      # Terraform root for the EKS lab and generated tfvars
+│   ├── versions.tf      # Terraform + provider version constraints
+│   ├── providers.tf     # AWS, Kubernetes, and Helm provider wiring
+│   ├── locals.tf        # Normalized ward defaults and derived labels
+│   ├── main.tf          # Core VPC, EKS, node group, and control-plane logging
+│   ├── observability.tf # Cilium, Hubble, Tetragon, and monitoring namespace
+│   ├── apps.tf          # Dynamic ward namespaces, quotas, metadata, and policies
+│   ├── workloads.tf     # tfvars-driven ward application deployments and services
+│   ├── security.tf      # Kyverno and Tetragon runtime policies
+│   ├── iam.tf           # Optional EKS admin access entries
+│   ├── variables.tf     # Input definitions and ward schema
+│   ├── outputs.tf       # Useful cluster and ward outputs
+│   ├── terraform.tfvars # Base lab configuration
+│   ├── backend.hcl.example
+│   └── bootstrap/       # One-time state bucket and lock-table stack
 ├── TESTING_AND_USAGE.md # Practical guide for testing the backend, frontend, and Terraform flow
-├── backend.hcl.example  # Example backend config for remote state
-├── terraform.tfvars     # Your lab configuration (subjects, sizing, naming)
-└── bootstrap/           # One-time state bucket and lock-table stack
+└── .gitignore           # Root-level ignore rules only
 ```
 
 ---
@@ -59,7 +61,7 @@ In this lab, applications are "subjects." Each subject is deployed into a **Ward
 * `kubectl` and `helm` installed for cluster interaction.
 
 ### 2. Configure your "Analysis Subjects"
-Modify the `terraform.tfvars` file to define both the ward namespaces and the applications you want to run inside them. The repository now ships with a single, feature-rich reference app so you can use it as the canonical template for a future frontend/backend control plane.
+Modify `infrastructure/terraform.tfvars` to define both the ward namespaces and the applications you want to run inside them. The repository now ships with a single, feature-rich reference app so you can use it as the canonical template for a future frontend/backend control plane.
 
 ```hcl
 analysis_subjects = {
@@ -111,7 +113,7 @@ Applications are now driven from `ward_applications`, which lets you control fro
 * Whether same-namespace ingress should be allowed for that app.
 * Explicit ingress and egress network policy allowlists using pod selectors, namespace selectors, IP blocks, and ports.
 
-The default `terraform.tfvars` intentionally contains only one application template that exercises the cluster features in one place:
+The default `infrastructure/terraform.tfvars` intentionally contains only one application template that exercises the cluster features in one place:
 * Multi-container pod layout
 * Service and ingress exposure
 * Generated ConfigMap mount
@@ -125,14 +127,15 @@ This makes it easier to build a frontend that edits a single application schema,
 ### 3. Deployment
 ```bash
 # Optional but recommended: bootstrap remote state first
-cd bootstrap
+cd infrastructure/bootstrap
 terraform init
 terraform apply -var="state_bucket_name=your-globally-unique-bucket"
 
-# Back in the root stack, copy backend.hcl.example to your own backend config
+# Back in the Terraform root, copy backend.hcl.example to your own backend config
 # and initialize against the remote state location.
 cd ..
-terraform init -backend-config=backend.hcl.example
+cp backend.hcl.example backend.hcl
+terraform init -backend-config=backend.hcl
 
 # First pass: build AWS, EKS, namespaces, workloads, and Helm-installed addons
 terraform plan
@@ -140,7 +143,7 @@ terraform plan
 terraform apply
 
 # Second pass after the cluster is reachable: enable custom Kyverno/Tetragon resources
-# by setting enable_custom_runtime_policies = true in terraform.tfvars
+# by setting enable_custom_runtime_policies = true in infrastructure/terraform.tfvars
 terraform plan
 terraform apply
 ```
@@ -158,11 +161,12 @@ terraform output ward_ingress_hosts
 If you provide IAM principal ARNs in `cluster_admin_principal_arns`, the stack will also create EKS access entries granting cluster-admin permissions.
 
 ### 5. Frontend/Backend Template Flow
-If you build a UI on top of this repository, the cleanest workflow is:
-* Frontend edits an application template shaped like one `ward_applications` object.
-* Backend updates `terraform.tfvars` or generates a separate `.tfvars.json` file.
-* Backend runs `terraform plan` and `terraform apply`.
-* Backend returns both the apply result and machine-readable outputs from `terraform output -json`.
+The repository now ships with a developer-focused control plane:
+* Frontend edits subjects and applications through forms, not raw JSON.
+* Backend writes the live config to `infrastructure/frontend-managed.auto.tfvars.json`.
+* Backend queues `terraform plan` and `terraform apply` runs one at a time.
+* Backend stores run metadata and logs in SQLite under `backend/state/`.
+* Frontend receives live run updates over WebSockets and reads machine-friendly outputs from `terraform output -json`.
 
 Useful outputs for automation are:
 * `terraform output -json ward_kubectl_commands`
@@ -170,23 +174,39 @@ Useful outputs for automation are:
 * `terraform output -json ward_ingress_hosts`
 * `terraform output -json update_kubeconfig_command`
 
-The backend writes the frontend-managed configuration to `frontend-managed.auto.tfvars.json`, which Terraform then loads alongside the base repository files.
+The backend writes the frontend-managed configuration to `infrastructure/frontend-managed.auto.tfvars.json`, which Terraform then loads inside the Terraform root alongside the base `.tf` files.
 
 ### 6. Control Plane Development
-The repository now includes a simple control plane scaffold:
-* `backend/` runs a FastAPI API for reading and saving template config, starting Terraform plans, applying saved plans, reading run logs, and returning Terraform outputs.
+The control plane is intentionally small and operator-oriented:
+* `backend/` runs a FastAPI API with bearer-token auth, SQLite-backed run history, queued Terraform execution, cancel support, and WebSocket event streaming.
 * `frontend/` runs a Vite + React UI with Tailwind styling and lightweight shadcn-style components.
+* The UI is form-driven: cluster settings, ward subjects, services, ingress, containers, probes, volumes, and network policy rules are edited with fields and add/remove controls.
+
+Backend auth defaults to:
+
+```text
+KUBEGUARDIAN_API_TOKEN=dev-token
+```
+
+Frontend can use the same token through:
+
+```text
+VITE_API_TOKEN=dev-token
+```
 
 Backend endpoints:
+* `GET /api/health`
 * `GET /api/config`
 * `PUT /api/config`
 * `POST /api/config/reset`
 * `POST /api/runs/plan`
 * `POST /api/runs/{id}/apply`
+* `POST /api/runs/{id}/cancel`
 * `GET /api/runs`
 * `GET /api/runs/{id}`
 * `GET /api/runs/{id}/logs`
 * `GET /api/outputs`
+* `WS /api/runs/{id}/events?token=...`
 
 Run the backend:
 
@@ -203,7 +223,7 @@ Run the frontend:
 ```bash
 cd frontend
 npm install
-npm run dev
+VITE_API_TOKEN=dev-token npm run dev
 ```
 
 The frontend proxies `/api` requests to `http://127.0.0.1:8000` by default.

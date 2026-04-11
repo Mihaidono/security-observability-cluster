@@ -1,11 +1,28 @@
-import type { TerraformConfig, TerraformRun } from "./types";
+import type { HealthResponse, TerraformConfig, TerraformRun } from "./types";
+
+const tokenStorageKey = "kubeguardian-api-token";
+
+export function getApiToken(): string {
+  return window.localStorage.getItem(tokenStorageKey) ?? import.meta.env.VITE_API_TOKEN ?? "dev-token";
+}
+
+export function setApiToken(token: string): void {
+  window.localStorage.setItem(tokenStorageKey, token);
+}
+
+function authHeaders(headers?: HeadersInit): HeadersInit {
+  return {
+    Authorization: `Bearer ${getApiToken()}`,
+    ...(headers ?? {}),
+  };
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
-    headers: {
+    headers: authHeaders({
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
-    },
+    }),
     ...init,
   });
 
@@ -15,6 +32,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export function buildRunEventsUrl(runId: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const host = window.location.host;
+  const token = encodeURIComponent(getApiToken());
+  return `${protocol}://${host}/api/runs/${runId}/events?token=${token}`;
 }
 
 export const api = {
@@ -30,6 +54,7 @@ export const api = {
   getRunLogs: (runId: string) => request<{ run_id: string; logs: string[] }>(`/api/runs/${runId}/logs`),
   startPlan: () => request<TerraformRun>("/api/runs/plan", { method: "POST" }),
   startApply: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/apply`, { method: "POST" }),
+  cancelRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/cancel`, { method: "POST" }),
   getOutputs: () => request<{ outputs: Record<string, unknown> }>("/api/outputs"),
-  getHealth: () => request<{ status: string; active_run_id?: string | null }>("/api/health"),
+  getHealth: () => request<HealthResponse>("/api/health"),
 };

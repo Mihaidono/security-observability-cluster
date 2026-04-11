@@ -1,100 +1,785 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "./lib/api";
-import type { TerraformConfig, TerraformRun } from "./lib/types";
+import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
-import { Textarea } from "./components/ui/textarea";
-import { Badge } from "./components/ui/badge";
+import { api, buildRunEventsUrl, getApiToken, setApiToken } from "./lib/api";
+import type {
+  AnalysisSubject,
+  ContainerConfig,
+  IngressConfig,
+  NetworkPolicyPeer,
+  NetworkPolicyPort,
+  NetworkPolicyRule,
+  ProbeConfig,
+  TerraformConfig,
+  TerraformRun,
+  VolumeConfig,
+  VolumeMountConfig,
+  WardApplication,
+} from "./lib/types";
 
-function pretty(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
+type Direction = "ingress" | "egress";
 
-function emptyAppTemplate(): Record<string, unknown> {
+function emptySubject(): AnalysisSubject {
   return {
-    name: "new-template-app",
-    namespace: "ward-template-app",
-    replicas: 1,
-    service: {
-      port: 8080,
+    tier: "template",
+    description: "",
+    labels: {},
+    resource_quota: {
+      pods: "10",
+      requests_cpu: "2",
+      requests_memory: "4Gi",
+      limits_cpu: "4",
+      limits_memory: "8Gi",
     },
-    containers: [
-      {
-        name: "app",
-        image: "nginxinc/nginx-unprivileged:1.27-alpine",
-      },
-    ],
   };
 }
 
+function emptyProbe(): ProbeConfig {
+  return {
+    enabled: false,
+    path: "/",
+    port: 8080,
+    initial_delay_seconds: 5,
+    period_seconds: 10,
+  };
+}
+
+function emptyContainer(): ContainerConfig {
+  return {
+    name: "app",
+    image: "nginxinc/nginx-unprivileged:1.27-alpine",
+    port: 8080,
+    command: [],
+    args: [],
+    env: {},
+    env_from_secret_names: [],
+    probes: {
+      readiness: emptyProbe(),
+      liveness: emptyProbe(),
+      startup: emptyProbe(),
+    },
+    resources: {
+      requests_cpu: "100m",
+      requests_memory: "128Mi",
+      limits_cpu: "500m",
+      limits_memory: "256Mi",
+    },
+    volume_mounts: [],
+  };
+}
+
+function emptyVolume(): VolumeConfig {
+  return {
+    name: "shared-data",
+    empty_dir: true,
+  };
+}
+
+function emptyPolicyPort(): NetworkPolicyPort {
+  return {
+    port: 8080,
+    protocol: "TCP",
+  };
+}
+
+function emptyPolicyPeer(): NetworkPolicyPeer {
+  return {
+    pod_selector: {},
+    namespace_selector: {},
+  };
+}
+
+function emptyPolicyRule(direction: Direction): NetworkPolicyRule {
+  return {
+    ports: [emptyPolicyPort()],
+    [direction === "ingress" ? "from" : "to"]: [emptyPolicyPeer()],
+  };
+}
+
+function emptyAppTemplate(namespace: string): WardApplication {
+  return {
+    name: "new-template-app",
+    namespace,
+    replicas: 1,
+    pod_labels: {
+      app_role: "api",
+    },
+    service: {
+      enabled: true,
+      type: "ClusterIP",
+      port: 8080,
+      target_port: 8080,
+      annotations: {},
+    },
+    ingress: {
+      enabled: false,
+      class_name: "nginx",
+      host: "",
+      path: "/",
+      annotations: {},
+    },
+    config_map: {
+      enabled: false,
+      mount_path: "/usr/share/nginx/html",
+      data: {},
+    },
+    containers: [emptyContainer()],
+    volumes: [],
+    network_policy: {
+      ingress: [],
+      egress: [],
+    },
+  };
+}
+
+function classNames(...values: Array<string | false | null | undefined>): string {
+  return values.filter(Boolean).join(" ");
+}
+
+function prettyPrint(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+function sortRuns(runs: TerraformRun[]): TerraformRun[] {
+  return [...runs].sort((left, right) => right.created_at.localeCompare(left.created_at));
+}
+
+function uniqueName(base: string, existing: string[]): string {
+  let index = 1;
+  let candidate = base;
+  while (existing.includes(candidate)) {
+    candidate = `${base}-${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
+function compactRecord(value?: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(value ?? {}).filter(([key, entryValue]) => key.trim() !== "" || String(entryValue).trim() !== ""),
+  );
+}
+
+function KeyValueEditor({
+  label,
+  value,
+  onChange,
+  addLabel = "Add row",
+}: {
+  label: string;
+  value?: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+  addLabel?: string;
+}) {
+  const entries = Object.entries(value ?? {});
+
+  function updateRow(index: number, nextKey: string, nextValue: string) {
+    const rows = entries.map(([key, currentValue], rowIndex) =>
+      rowIndex === index ? [nextKey, nextValue] : [key, currentValue],
+    );
+    onChange(Object.fromEntries(rows.filter(([key, currentValue]) => key.trim() !== "" || currentValue.trim() !== "")));
+  }
+
+  function addRow() {
+    const nextKey = uniqueName("key", entries.map(([key]) => key));
+    onChange({
+      ...(value ?? {}),
+      [nextKey]: "",
+    });
+  }
+
+  function removeRow(index: number) {
+    const rows = entries.filter((_, rowIndex) => rowIndex !== index);
+    onChange(Object.fromEntries(rows));
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">{label}</p>
+        <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={addRow}>
+          {addLabel}
+        </Button>
+      </div>
+      {entries.length === 0 ? <p className="text-sm text-neutral-500">No entries.</p> : null}
+      <div className="grid gap-2">
+        {entries.map(([entryKey, entryValue], index) => (
+          <div key={`${entryKey}-${index}`} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+            <Input value={entryKey} onChange={(event) => updateRow(index, event.target.value, entryValue)} placeholder="Key" />
+            <Input value={entryValue} onChange={(event) => updateRow(index, entryKey, event.target.value)} placeholder="Value" />
+            <Button variant="danger" type="button" onClick={() => removeRow(index)}>
+              Remove
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StringListEditor({
+  label,
+  value,
+  onChange,
+  addLabel = "Add item",
+}: {
+  label: string;
+  value?: string[];
+  onChange: (next: string[]) => void;
+  addLabel?: string;
+}) {
+  const items = value ?? [];
+
+  function updateItem(index: number, nextValue: string) {
+    const next = items.map((item, itemIndex) => (itemIndex === index ? nextValue : item));
+    onChange(next.filter((item) => item.trim() !== ""));
+  }
+
+  function addItem() {
+    onChange([...items, ""]);
+  }
+
+  function removeItem(index: number) {
+    onChange(items.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">{label}</p>
+        <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={addItem}>
+          {addLabel}
+        </Button>
+      </div>
+      {items.length === 0 ? <p className="text-sm text-neutral-500">No entries.</p> : null}
+      <div className="grid gap-2">
+        {items.map((item, index) => (
+          <div key={`${item}-${index}`} className="grid gap-2 md:grid-cols-[1fr_auto]">
+            <Input value={item} onChange={(event) => updateItem(index, event.target.value)} />
+            <Button variant="danger" type="button" onClick={() => removeItem(index)}>
+              Remove
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProbeEditor({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value?: ProbeConfig;
+  onChange: (next: ProbeConfig) => void;
+}) {
+  const probe = value ?? emptyProbe();
+
+  return (
+    <div className="rounded-2xl border border-border bg-muted/60 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="font-medium">{label}</p>
+        <label className="flex items-center gap-2 text-sm text-neutral-600">
+          <input
+            type="checkbox"
+            checked={probe.enabled ?? false}
+            onChange={(event) => onChange({ ...probe, enabled: event.target.checked })}
+          />
+          Enabled
+        </label>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="grid gap-1 text-sm">
+          <span>Path</span>
+          <Input value={probe.path ?? ""} onChange={(event) => onChange({ ...probe, path: event.target.value })} />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span>Port</span>
+          <Input
+            type="number"
+            value={String(probe.port ?? 8080)}
+            onChange={(event) => onChange({ ...probe, port: Number(event.target.value) })}
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span>Initial delay</span>
+          <Input
+            type="number"
+            value={String(probe.initial_delay_seconds ?? 5)}
+            onChange={(event) => onChange({ ...probe, initial_delay_seconds: Number(event.target.value) })}
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span>Period</span>
+          <Input
+            type="number"
+            value={String(probe.period_seconds ?? 10)}
+            onChange={(event) => onChange({ ...probe, period_seconds: Number(event.target.value) })}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function VolumeMountEditor({
+  value,
+  onChange,
+}: {
+  value?: VolumeMountConfig[];
+  onChange: (next: VolumeMountConfig[]) => void;
+}) {
+  const mounts = value ?? [];
+
+  function updateMount(index: number, next: VolumeMountConfig) {
+    onChange(mounts.map((mount, mountIndex) => (mountIndex === index ? next : mount)));
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Volume mounts</p>
+        <Button
+          variant="ghost"
+          type="button"
+          className="px-3 py-1.5 text-xs"
+          onClick={() => onChange([...mounts, { name: "shared-data", mount_path: "/data" }])}
+        >
+          Add mount
+        </Button>
+      </div>
+      {mounts.length === 0 ? <p className="text-sm text-neutral-500">No mounts.</p> : null}
+      <div className="grid gap-2">
+        {mounts.map((mount, index) => (
+          <div key={`${mount.name}-${index}`} className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+            <Input value={mount.name} onChange={(event) => updateMount(index, { ...mount, name: event.target.value })} placeholder="Volume name" />
+            <Input
+              value={mount.mount_path}
+              onChange={(event) => updateMount(index, { ...mount, mount_path: event.target.value })}
+              placeholder="/mount/path"
+            />
+            <Button variant="danger" type="button" onClick={() => onChange(mounts.filter((_, mountIndex) => mountIndex !== index))}>
+              Remove
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NetworkPortsEditor({
+  value,
+  onChange,
+}: {
+  value?: NetworkPolicyPort[];
+  onChange: (next: NetworkPolicyPort[]) => void;
+}) {
+  const ports = value ?? [];
+
+  function updatePort(index: number, next: NetworkPolicyPort) {
+    onChange(ports.map((port, portIndex) => (portIndex === index ? next : port)));
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Ports</p>
+        <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={() => onChange([...ports, emptyPolicyPort()])}>
+          Add port
+        </Button>
+      </div>
+      {ports.length === 0 ? <p className="text-sm text-neutral-500">No ports.</p> : null}
+      <div className="grid gap-2">
+        {ports.map((port, index) => (
+          <div key={`${port.port}-${index}`} className="grid gap-2 md:grid-cols-[1fr_160px_auto]">
+            <Input
+              type="number"
+              value={String(port.port)}
+              onChange={(event) => updatePort(index, { ...port, port: Number(event.target.value) })}
+            />
+            <Input value={port.protocol ?? "TCP"} onChange={(event) => updatePort(index, { ...port, protocol: event.target.value })} />
+            <Button variant="danger" type="button" onClick={() => onChange(ports.filter((_, portIndex) => portIndex !== index))}>
+              Remove
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NetworkPeersEditor({
+  direction,
+  value,
+  onChange,
+}: {
+  direction: Direction;
+  value?: NetworkPolicyPeer[];
+  onChange: (next: NetworkPolicyPeer[]) => void;
+}) {
+  const peers = value ?? [];
+
+  function updatePeer(index: number, next: NetworkPolicyPeer) {
+    onChange(peers.map((peer, peerIndex) => (peerIndex === index ? next : peer)));
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
+          {direction === "ingress" ? "Sources" : "Destinations"}
+        </p>
+        <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={() => onChange([...peers, emptyPolicyPeer()])}>
+          Add peer
+        </Button>
+      </div>
+      {peers.length === 0 ? <p className="text-sm text-neutral-500">No peers.</p> : null}
+      <div className="grid gap-3">
+        {peers.map((peer, index) => (
+          <div key={index} className="rounded-2xl border border-border bg-muted/60 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="font-medium">Peer {index + 1}</p>
+              <Button variant="danger" type="button" onClick={() => onChange(peers.filter((_, peerIndex) => peerIndex !== index))}>
+                Remove
+              </Button>
+            </div>
+            <div className="grid gap-4">
+              <KeyValueEditor
+                label="Pod selector"
+                value={peer.pod_selector ?? {}}
+                onChange={(next) => updatePeer(index, { ...peer, pod_selector: compactRecord(next) })}
+                addLabel="Add label"
+              />
+              <KeyValueEditor
+                label="Namespace selector"
+                value={peer.namespace_selector ?? {}}
+                onChange={(next) => updatePeer(index, { ...peer, namespace_selector: compactRecord(next) })}
+                addLabel="Add label"
+              />
+              <label className="grid gap-1 text-sm">
+                <span>IP block CIDR</span>
+                <Input
+                  value={peer.ip_block?.cidr ?? ""}
+                  placeholder="0.0.0.0/0"
+                  onChange={(event) =>
+                    updatePeer(index, {
+                      ...peer,
+                      ip_block: event.target.value.trim() === "" ? undefined : { cidr: event.target.value },
+                    })
+                  }
+                />
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NetworkRulesEditor({
+  direction,
+  value,
+  onChange,
+}: {
+  direction: Direction;
+  value?: NetworkPolicyRule[];
+  onChange: (next: NetworkPolicyRule[]) => void;
+}) {
+  const rules = value ?? [];
+
+  function updateRule(index: number, next: NetworkPolicyRule) {
+    onChange(rules.map((rule, ruleIndex) => (ruleIndex === index ? next : rule)));
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">{direction === "ingress" ? "Ingress rules" : "Egress rules"}</p>
+        <Button variant="ghost" type="button" className="px-3 py-1.5 text-xs" onClick={() => onChange([...rules, emptyPolicyRule(direction)])}>
+          Add rule
+        </Button>
+      </div>
+      {rules.length === 0 ? <p className="text-sm text-neutral-500">No rules.</p> : null}
+      <div className="grid gap-4">
+        {rules.map((rule, index) => (
+          <div key={index} className="rounded-2xl border border-border p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="font-medium">Rule {index + 1}</p>
+              <Button variant="danger" type="button" onClick={() => onChange(rules.filter((_, ruleIndex) => ruleIndex !== index))}>
+                Remove
+              </Button>
+            </div>
+            <div className="grid gap-4">
+              <NetworkPortsEditor
+                value={rule.ports}
+                onChange={(ports) => updateRule(index, { ...rule, ports })}
+              />
+              <NetworkPeersEditor
+                direction={direction}
+                value={direction === "ingress" ? rule.from : rule.to}
+                onChange={(peers) =>
+                  updateRule(index, {
+                    ...rule,
+                    [direction === "ingress" ? "from" : "to"]: peers,
+                  })
+                }
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ContainerEditor({
+  container,
+  onChange,
+  onRemove,
+  index,
+}: {
+  container: ContainerConfig;
+  onChange: (next: ContainerConfig) => void;
+  onRemove: () => void;
+  index: number;
+}) {
+  return (
+    <div className="rounded-2xl border border-border p-4">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <p className="font-medium">Container {index + 1}</p>
+          <p className="text-sm text-neutral-500">{container.name}</p>
+        </div>
+        <Button variant="danger" type="button" onClick={onRemove}>
+          Remove
+        </Button>
+      </div>
+
+      <div className="grid gap-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="grid gap-1 text-sm">
+            <span>Name</span>
+            <Input value={container.name} onChange={(event) => onChange({ ...container, name: event.target.value })} />
+          </label>
+          <label className="grid gap-1 text-sm md:col-span-2">
+            <span>Image</span>
+            <Input value={container.image} onChange={(event) => onChange({ ...container, image: event.target.value })} />
+          </label>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="grid gap-1 text-sm">
+            <span>Port</span>
+            <Input
+              type="number"
+              value={String(container.port ?? 8080)}
+              onChange={(event) => onChange({ ...container, port: Number(event.target.value) })}
+            />
+          </label>
+          <StringListEditor label="Command" value={container.command} onChange={(command) => onChange({ ...container, command })} addLabel="Add command" />
+          <StringListEditor label="Args" value={container.args} onChange={(args) => onChange({ ...container, args })} addLabel="Add arg" />
+        </div>
+
+        <KeyValueEditor
+          label="Environment variables"
+          value={container.env ?? {}}
+          onChange={(env) => onChange({ ...container, env: compactRecord(env) })}
+          addLabel="Add env"
+        />
+
+        <StringListEditor
+          label="Secret env sources"
+          value={container.env_from_secret_names}
+          onChange={(env_from_secret_names) => onChange({ ...container, env_from_secret_names })}
+          addLabel="Add secret"
+        />
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <ProbeEditor
+            label="Readiness probe"
+            value={container.probes?.readiness}
+            onChange={(readiness) =>
+              onChange({
+                ...container,
+                probes: { ...container.probes, readiness },
+              })
+            }
+          />
+          <ProbeEditor
+            label="Liveness probe"
+            value={container.probes?.liveness}
+            onChange={(liveness) =>
+              onChange({
+                ...container,
+                probes: { ...container.probes, liveness },
+              })
+            }
+          />
+          <ProbeEditor
+            label="Startup probe"
+            value={container.probes?.startup}
+            onChange={(startup) =>
+              onChange({
+                ...container,
+                probes: { ...container.probes, startup },
+              })
+            }
+          />
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-4">
+          <label className="grid gap-1 text-sm">
+            <span>CPU request</span>
+            <Input
+              value={container.resources?.requests_cpu ?? ""}
+              onChange={(event) =>
+                onChange({
+                  ...container,
+                  resources: { ...container.resources, requests_cpu: event.target.value },
+                })
+              }
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>Memory request</span>
+            <Input
+              value={container.resources?.requests_memory ?? ""}
+              onChange={(event) =>
+                onChange({
+                  ...container,
+                  resources: { ...container.resources, requests_memory: event.target.value },
+                })
+              }
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>CPU limit</span>
+            <Input
+              value={container.resources?.limits_cpu ?? ""}
+              onChange={(event) =>
+                onChange({
+                  ...container,
+                  resources: { ...container.resources, limits_cpu: event.target.value },
+                })
+              }
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>Memory limit</span>
+            <Input
+              value={container.resources?.limits_memory ?? ""}
+              onChange={(event) =>
+                onChange({
+                  ...container,
+                  resources: { ...container.resources, limits_memory: event.target.value },
+                })
+              }
+            />
+          </label>
+        </div>
+
+        <VolumeMountEditor
+          value={container.volume_mounts}
+          onChange={(volume_mounts) => onChange({ ...container, volume_mounts })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function statusTone(status?: TerraformRun["status"]): "primary" | "secondary" | "ghost" | "danger" {
+  if (status === "planned" || status === "applied") return "primary";
+  if (status === "failed" || status === "canceled") return "danger";
+  if (status === "running" || status === "applying" || status === "canceling") return "secondary";
+  return "ghost";
+}
+
 export default function App() {
+  const [apiTokenValue, setApiTokenValue] = useState(getApiToken());
   const [config, setConfig] = useState<TerraformConfig | null>(null);
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [appEditor, setAppEditor] = useState("");
-  const [subjectsEditor, setSubjectsEditor] = useState("");
-  const [statusMessage, setStatusMessage] = useState<string>("");
-  const [errorMessage, setErrorMessage] = useState<string>("");
   const [runs, setRuns] = useState<TerraformRun[]>([]);
+  const [selectedSubjectKey, setSelectedSubjectKey] = useState<string>("");
+  const [selectedAppIndex, setSelectedAppIndex] = useState(0);
+  const [selectedRunId, setSelectedRunId] = useState<string>("");
   const [selectedRun, setSelectedRun] = useState<TerraformRun | null>(null);
   const [selectedRunLogs, setSelectedRunLogs] = useState<string[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown> | null>(null);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
 
-  const selectedApp = useMemo(() => {
-    if (!config) return null;
-    return config.ward_applications[selectedIndex] ?? null;
-  }, [config, selectedIndex]);
+  const subjectKeys = useMemo(() => Object.keys(config?.analysis_subjects ?? {}), [config?.analysis_subjects]);
+  const selectedSubject = useMemo(() => {
+    if (!config || !selectedSubjectKey) return null;
+    return config.analysis_subjects[selectedSubjectKey] ?? null;
+  }, [config, selectedSubjectKey]);
+  const selectedApp = useMemo(() => config?.ward_applications[selectedAppIndex] ?? null, [config, selectedAppIndex]);
+
+  useEffect(() => {
+    setApiToken(apiTokenValue);
+  }, [apiTokenValue]);
 
   useEffect(() => {
     void loadInitial();
   }, []);
 
   useEffect(() => {
-    if (selectedApp) {
-      setAppEditor(pretty(selectedApp));
-    }
-  }, [selectedApp]);
+    if (!selectedRunId) return;
 
-  useEffect(() => {
-    if (config) {
-      setSubjectsEditor(pretty(config.analysis_subjects));
-    }
-  }, [config?.analysis_subjects]);
+    const socket = new WebSocket(buildRunEventsUrl(selectedRunId));
+    socket.onmessage = (event) => {
+      const payload = JSON.parse(event.data) as
+        | { type: "run.snapshot"; run: TerraformRun; logs: string[] }
+        | { type: "run.updated"; run: TerraformRun }
+        | { type: "run.logs"; lines: string[] };
 
-  useEffect(() => {
-    if (!selectedRun) return;
-    const timer = window.setInterval(() => {
-      void refreshRun(selectedRun.id);
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [selectedRun?.id]);
+      if (payload.type === "run.snapshot") {
+        setRunInState(payload.run);
+        setSelectedRun(payload.run);
+        setSelectedRunLogs(payload.logs);
+        if (payload.run.outputs) {
+          setOutputs(payload.run.outputs as Record<string, unknown>);
+        }
+      }
+
+      if (payload.type === "run.updated") {
+        setRunInState(payload.run);
+        setSelectedRun(payload.run);
+        if (payload.run.outputs) {
+          setOutputs(payload.run.outputs as Record<string, unknown>);
+        }
+      }
+
+      if (payload.type === "run.logs") {
+        setSelectedRunLogs((current) => [...current, ...payload.lines]);
+      }
+    };
+    socket.onerror = () => setErrorMessage("Run event stream disconnected.");
+
+    return () => {
+      socket.close();
+    };
+  }, [selectedRunId, apiTokenValue]);
 
   async function loadInitial() {
     try {
-      const [loadedConfig, runResponse] = await Promise.all([api.getConfig(), api.listRuns()]);
+      const [loadedConfig, runResponse, health] = await Promise.all([api.getConfig(), api.listRuns(), api.getHealth()]);
       setConfig(loadedConfig);
-      setRuns(runResponse.items);
+      setRuns(sortRuns(runResponse.items));
+      setSelectedSubjectKey(Object.keys(loadedConfig.analysis_subjects)[0] ?? "");
+      setSelectedAppIndex(0);
+      setStatusMessage(`Ready. Queue depth ${health.queue_depth}.`);
+
       if (runResponse.items[0]) {
-        setSelectedRun(runResponse.items[0]);
-        await refreshRun(runResponse.items[0].id);
+        setSelectedRunId(runResponse.items[0].id);
       } else {
         await refreshOutputs();
-      }
-    } catch (error) {
-      setErrorMessage((error as Error).message);
-    }
-  }
-
-  async function refreshRun(runId: string) {
-    try {
-      const [run, logs] = await Promise.all([api.getRun(runId), api.getRunLogs(runId)]);
-      setSelectedRun(run);
-      setSelectedRunLogs(logs.logs);
-      const refreshedRuns = await api.listRuns();
-      setRuns(refreshedRuns.items);
-      if (run.outputs) {
-        setOutputs(run.outputs);
       }
     } catch (error) {
       setErrorMessage((error as Error).message);
@@ -110,45 +795,168 @@ export default function App() {
     }
   }
 
+  function setRunInState(run: TerraformRun) {
+    setRuns((current) => {
+      const withoutCurrent = current.filter((item) => item.id !== run.id);
+      return sortRuns([run, ...withoutCurrent]);
+    });
+  }
+
   function updateConfig(mutator: (current: TerraformConfig) => TerraformConfig) {
     setConfig((current) => (current ? mutator(current) : current));
   }
 
-  function updateSelectedAppField(field: string, value: string | number | boolean) {
+  function updateSelectedSubject(mutator: (current: AnalysisSubject) => AnalysisSubject) {
+    if (!selectedSubjectKey) return;
+    updateConfig((current) => ({
+      ...current,
+      analysis_subjects: {
+        ...current.analysis_subjects,
+        [selectedSubjectKey]: mutator(current.analysis_subjects[selectedSubjectKey] ?? emptySubject()),
+      },
+    }));
+  }
+
+  function updateSelectedApp(mutator: (current: WardApplication) => WardApplication) {
     updateConfig((current) => {
       const next = structuredClone(current);
-      const app = { ...(next.ward_applications[selectedIndex] as Record<string, unknown>) };
-      app[field] = value;
-      next.ward_applications[selectedIndex] = app;
+      next.ward_applications[selectedAppIndex] = mutator(next.ward_applications[selectedAppIndex] ?? emptyAppTemplate(selectedSubjectKey || "ward-template-app"));
       return next;
     });
   }
 
-  function commitEditorsToState(): TerraformConfig | null {
-    if (!config) return null;
-    try {
-      const parsedApp = JSON.parse(appEditor) as Record<string, unknown>;
-      const parsedSubjects = JSON.parse(subjectsEditor) as Record<string, Record<string, unknown>>;
-      const next = structuredClone(config);
-      next.ward_applications[selectedIndex] = parsedApp;
-      next.analysis_subjects = parsedSubjects as TerraformConfig["analysis_subjects"];
-      setConfig(next);
-      setErrorMessage("");
-      return next;
-    } catch (error) {
-      setErrorMessage(`JSON parse error: ${(error as Error).message}`);
-      return null;
+  function renameSubject(currentKey: string, nextKey: string) {
+    const trimmed = nextKey.trim();
+    if (!config || trimmed === "" || trimmed === currentKey || config.analysis_subjects[trimmed]) {
+      return;
     }
+
+    updateConfig((current) => {
+      const next = structuredClone(current);
+      const subject = next.analysis_subjects[currentKey];
+      delete next.analysis_subjects[currentKey];
+      next.analysis_subjects[trimmed] = subject;
+      next.ward_applications = next.ward_applications.map((application) =>
+        application.namespace === currentKey ? { ...application, namespace: trimmed } : application,
+      );
+      return next;
+    });
+    setSelectedSubjectKey(trimmed);
   }
 
-  async function saveConfig(): Promise<boolean> {
-    const next = commitEditorsToState();
-    if (!next) return false;
+  function addSubject() {
+    if (!config) return;
+    const nextKey = uniqueName("ward-new-subject", subjectKeys);
+    updateConfig((current) => ({
+      ...current,
+      analysis_subjects: {
+        ...current.analysis_subjects,
+        [nextKey]: emptySubject(),
+      },
+    }));
+    setSelectedSubjectKey(nextKey);
+  }
+
+  function removeSelectedSubject() {
+    if (!config || subjectKeys.length <= 1 || !selectedSubjectKey) return;
+    updateConfig((current) => {
+      const next = structuredClone(current);
+      delete next.analysis_subjects[selectedSubjectKey];
+      next.ward_applications = next.ward_applications.filter((application) => application.namespace !== selectedSubjectKey);
+      if (next.ward_applications.length === 0) {
+        next.ward_applications.push(emptyAppTemplate(Object.keys(next.analysis_subjects)[0] ?? "ward-template-app"));
+      }
+      return next;
+    });
+    const remainingKeys = subjectKeys.filter((key) => key !== selectedSubjectKey);
+    setSelectedSubjectKey(remainingKeys[0] ?? "");
+    setSelectedAppIndex(0);
+  }
+
+  function addApp() {
+    if (!config) return;
+    const namespace = selectedSubjectKey || subjectKeys[0] || "ward-template-app";
+    updateConfig((current) => ({
+      ...current,
+      ward_applications: [...current.ward_applications, emptyAppTemplate(namespace)],
+    }));
+    setSelectedAppIndex(config.ward_applications.length);
+  }
+
+  function cloneSelectedApp() {
+    if (!selectedApp) return;
+    updateConfig((current) => {
+      const next = structuredClone(current);
+      const clone = structuredClone(selectedApp);
+      clone.name = uniqueName(`${selectedApp.name}-copy`, next.ward_applications.map((application) => application.name));
+      next.ward_applications.push(clone);
+      return next;
+    });
+    setSelectedAppIndex((config?.ward_applications.length ?? 1));
+  }
+
+  function removeSelectedApp() {
+    if (!config || config.ward_applications.length <= 1) return;
+    updateConfig((current) => {
+      const next = structuredClone(current);
+      next.ward_applications.splice(selectedAppIndex, 1);
+      return next;
+    });
+    setSelectedAppIndex((currentIndex) => Math.max(0, currentIndex - 1));
+  }
+
+  async function saveManagedConfig() {
+    if (!config) return false;
     setIsBusy(true);
     try {
-      const saved = await api.saveConfig(next);
+      const normalized: TerraformConfig = {
+        ...config,
+        analysis_subjects: Object.fromEntries(
+          Object.entries(config.analysis_subjects).map(([key, subject]) => [
+            key,
+            {
+              ...subject,
+              labels: compactRecord(subject.labels),
+            },
+          ]),
+        ),
+        ward_applications: config.ward_applications.map((application) => ({
+          ...application,
+          pod_labels: compactRecord(application.pod_labels),
+          service: application.service
+            ? {
+                ...application.service,
+                annotations: compactRecord(application.service.annotations),
+              }
+            : undefined,
+          ingress: application.ingress
+            ? {
+                ...application.ingress,
+                annotations: compactRecord(application.ingress.annotations),
+              }
+            : undefined,
+          config_map: application.config_map
+            ? {
+                ...application.config_map,
+                data: compactRecord(application.config_map.data),
+              }
+            : undefined,
+          containers: (application.containers ?? []).map((container) => ({
+            ...container,
+            env: compactRecord(container.env),
+            volume_mounts: container.volume_mounts?.filter((mount) => mount.name.trim() && mount.mount_path.trim()) ?? [],
+          })),
+          volumes: (application.volumes ?? []).filter((volume) => volume.name.trim() !== ""),
+          network_policy: {
+            ingress: application.network_policy?.ingress ?? [],
+            egress: application.network_policy?.egress ?? [],
+          },
+        })),
+      };
+
+      const saved = await api.saveConfig(normalized);
       setConfig(saved);
-      setStatusMessage("Configuration saved to frontend-managed.auto.tfvars.json");
+      setStatusMessage("Managed config saved.");
       setErrorMessage("");
       return true;
     } catch (error) {
@@ -164,8 +972,9 @@ export default function App() {
     try {
       const reset = await api.resetConfig();
       setConfig(reset);
-      setSelectedIndex(0);
-      setStatusMessage("Managed config reset to the default template.");
+      setSelectedSubjectKey(Object.keys(reset.analysis_subjects)[0] ?? "");
+      setSelectedAppIndex(0);
+      setStatusMessage("Managed config reset.");
       setErrorMessage("");
     } catch (error) {
       setErrorMessage((error as Error).message);
@@ -175,16 +984,17 @@ export default function App() {
   }
 
   async function startPlan() {
+    const didSave = await saveManagedConfig();
+    if (!didSave) return;
+
     setIsBusy(true);
     try {
-      const didSave = await saveConfig();
-      if (!didSave) {
-        return;
-      }
       const run = await api.startPlan();
-      setSelectedRun(run);
-      setStatusMessage("Terraform plan started.");
-      await refreshRun(run.id);
+      setRunInState(run);
+      setSelectedRunId(run.id);
+      setSelectedRunLogs([]);
+      setStatusMessage("Plan queued.");
+      setErrorMessage("");
     } catch (error) {
       setErrorMessage((error as Error).message);
     } finally {
@@ -194,15 +1004,18 @@ export default function App() {
 
   async function startApply() {
     if (!selectedRun || selectedRun.status !== "planned") {
-      setErrorMessage("Create a successful plan before applying.");
+      setErrorMessage("Select a completed plan before apply.");
       return;
     }
+
     setIsBusy(true);
     try {
       const run = await api.startApply(selectedRun.id);
-      setSelectedRun(run);
-      setStatusMessage("Terraform apply started.");
-      await refreshRun(run.id);
+      setRunInState(run);
+      setSelectedRunId(run.id);
+      setSelectedRunLogs([]);
+      setStatusMessage("Apply queued.");
+      setErrorMessage("");
     } catch (error) {
       setErrorMessage((error as Error).message);
     } finally {
@@ -210,169 +1023,181 @@ export default function App() {
     }
   }
 
-  function addAppFromTemplate() {
-    updateConfig((current) => {
-      const next = structuredClone(current);
-      const source = (next.ward_applications[selectedIndex] as Record<string, unknown>) ?? emptyAppTemplate();
-      const clone = structuredClone(source);
-      const baseName = String(clone.name ?? "template-app");
-      clone.name = `${baseName}-copy`;
-      next.ward_applications.push(clone);
-      return next;
-    });
-    setSelectedIndex((index) => (config ? config.ward_applications.length : index));
+  async function cancelSelectedRun() {
+    if (!selectedRun) return;
+    setIsBusy(true);
+    try {
+      const run = await api.cancelRun(selectedRun.id);
+      setRunInState(run);
+      setSelectedRun(run);
+      setStatusMessage("Cancel requested.");
+      setErrorMessage("");
+    } catch (error) {
+      setErrorMessage((error as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
   }
 
-  function addBlankApp() {
-    updateConfig((current) => {
-      const next = structuredClone(current);
-      next.ward_applications.push(emptyAppTemplate());
-      return next;
-    });
-    setSelectedIndex((index) => (config ? config.ward_applications.length : index));
-  }
-
-  function removeSelectedApp() {
-    if (!config || config.ward_applications.length <= 1) return;
-    updateConfig((current) => {
-      const next = structuredClone(current);
-      next.ward_applications.splice(selectedIndex, 1);
-      return next;
-    });
-    setSelectedIndex((index) => Math.max(0, index - 1));
+  if (!config) {
+    return (
+      <div className="app-shell">
+        <div className="mx-auto max-w-7xl">
+          <Card>
+            <CardContent className="py-10 text-sm text-neutral-600">Loading control plane state...</CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="app-shell">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <header className="panel overflow-hidden">
-          <div className="grid gap-6 p-6 md:grid-cols-[1.4fr_1fr]">
-            <div>
-              <p className="text-sm uppercase tracking-[0.3em] text-neutral-500">KubeGuardian Control Plane</p>
-              <h1 className="mt-3 text-3xl font-bold md:text-5xl">Terraform-backed app templates without the manual diff fatigue.</h1>
-              <p className="mt-4 max-w-3xl text-sm leading-6 text-neutral-600 md:text-base">
-                Edit the reference application, clone it, plan changes, apply them, and hand the frontend clean Terraform outputs. This UI is intentionally compact so it stays close to your Terraform model.
-              </p>
+        <Card>
+          <CardContent className="flex flex-col gap-4 py-5 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold">KubeGuardian Control Plane</h1>
+              <Badge>{config.cluster_name}</Badge>
+              <Badge>{config.environment}</Badge>
+              <Badge>{runs.length} runs</Badge>
             </div>
-            <div className="rounded-3xl border border-border bg-muted p-5">
-              <div className="flex flex-wrap gap-2">
-                <Badge>Single source of truth: `ward_applications`</Badge>
-                <Badge>Generated file: `frontend-managed.auto.tfvars.json`</Badge>
-                <Badge>Plan/apply from backend</Badge>
-              </div>
-              <div className="mt-5 grid gap-3 text-sm text-neutral-700">
-                <div>
-                  <p className="font-medium">Current run</p>
-                  <p>{selectedRun ? `${selectedRun.kind} / ${selectedRun.status}` : "No run selected yet"}</p>
-                </div>
-                <div>
-                  <p className="font-medium">Apps in config</p>
-                  <p>{config?.ward_applications.length ?? 0}</p>
-                </div>
-                <div>
-                  <p className="font-medium">Status</p>
-                  <p>{statusMessage || "Ready"}</p>
-                </div>
-              </div>
+            <div className="grid gap-3 md:grid-cols-[240px_repeat(5,auto)]">
+              <Input value={apiTokenValue} onChange={(event) => setApiTokenValue(event.target.value)} placeholder="API token" />
+              <Button variant="ghost" onClick={() => void saveManagedConfig()} disabled={isBusy}>
+                Save
+              </Button>
+              <Button onClick={() => void startPlan()} disabled={isBusy}>
+                Plan
+              </Button>
+              <Button variant="secondary" onClick={() => void startApply()} disabled={isBusy || selectedRun?.status !== "planned"}>
+                Apply
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => void cancelSelectedRun()}
+                disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
+              >
+                Cancel
+              </Button>
+              <Button variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
+                Reset
+              </Button>
             </div>
-          </div>
-        </header>
+          </CardContent>
+        </Card>
 
         {errorMessage ? (
           <div className="rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">{errorMessage}</div>
         ) : null}
+        {statusMessage ? (
+          <div className="rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-700">{statusMessage}</div>
+        ) : null}
 
-        <div className="grid gap-6 xl:grid-cols-[320px_1fr_380px]">
-          <Card className="overflow-hidden">
-            <CardHeader>
-              <CardTitle>Application Templates</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                {(config?.ward_applications ?? []).map((application, index) => {
-                  const typed = application as Record<string, unknown>;
-                  const isSelected = index === selectedIndex;
-                  return (
-                    <button
-                      key={`${String(typed.name)}-${index}`}
-                      className={`w-full rounded-2xl border px-4 py-3 text-left transition ${isSelected ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted"}`}
-                      onClick={() => setSelectedIndex(index)}
-                    >
-                      <p className="font-medium">{String(typed.name ?? `Application ${index + 1}`)}</p>
-                      <p className="mt-1 text-xs text-neutral-500">{String(typed.namespace ?? "No namespace")}</p>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="grid gap-2">
-                <Button variant="primary" onClick={addAppFromTemplate}>Clone Selected Template</Button>
-                <Button variant="ghost" onClick={addBlankApp}>Add Blank App</Button>
-                <Button variant="danger" onClick={removeSelectedApp} disabled={(config?.ward_applications.length ?? 0) <= 1}>
-                  Remove Selected App
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
+        <div className="grid gap-6 xl:grid-cols-[300px_1fr_380px]">
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Basic Editor</CardTitle>
+                <CardTitle>Cluster</CardTitle>
               </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <label className="grid gap-1 text-sm">
-                  <span className="text-neutral-600">Application name</span>
-                  <Input value={String((selectedApp as Record<string, unknown> | null)?.name ?? "")} onChange={(event) => updateSelectedAppField("name", event.target.value)} />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-neutral-600">Namespace</span>
-                  <Input value={String((selectedApp as Record<string, unknown> | null)?.namespace ?? "")} onChange={(event) => updateSelectedAppField("namespace", event.target.value)} />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-neutral-600">Replicas</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={String((selectedApp as Record<string, unknown> | null)?.replicas ?? 1)}
-                    onChange={(event) => updateSelectedAppField("replicas", Number(event.target.value))}
+              <CardContent className="grid gap-3">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+                  <label className="grid gap-1 text-sm">
+                    <span>Project</span>
+                    <Input value={config.project_name} onChange={(event) => setConfig({ ...config, project_name: event.target.value })} />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span>Environment</span>
+                    <Input value={config.environment} onChange={(event) => setConfig({ ...config, environment: event.target.value })} />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span>Cluster name</span>
+                    <Input value={config.cluster_name} onChange={(event) => setConfig({ ...config, cluster_name: event.target.value })} />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span>Kubernetes version</span>
+                    <Input value={config.kubernetes_version} onChange={(event) => setConfig({ ...config, kubernetes_version: event.target.value })} />
+                  </label>
+                </div>
+                <StringListEditor
+                  label="Cluster admin IAM principals"
+                  value={config.cluster_admin_principal_arns}
+                  onChange={(cluster_admin_principal_arns) => setConfig({ ...config, cluster_admin_principal_arns })}
+                  addLabel="Add ARN"
+                />
+                <label className="flex items-center gap-2 text-sm text-neutral-700">
+                  <input
+                    type="checkbox"
+                    checked={config.enable_custom_runtime_policies}
+                    onChange={(event) => setConfig({ ...config, enable_custom_runtime_policies: event.target.checked })}
                   />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span className="text-neutral-600">Ingress host</span>
-                  <Input
-                    value={String((((selectedApp as Record<string, unknown> | null)?.ingress as Record<string, unknown> | undefined)?.host ?? ""))}
-                    onChange={(event) => {
-                      updateConfig((current) => {
-                        const next = structuredClone(current);
-                        const app = { ...(next.ward_applications[selectedIndex] as Record<string, unknown>) };
-                        const ingress = { ...((app.ingress as Record<string, unknown> | undefined) ?? {}) };
-                        ingress.host = event.target.value;
-                        ingress.enabled = true;
-                        app.ingress = ingress;
-                        next.ward_applications[selectedIndex] = app;
-                        return next;
-                      });
-                    }}
-                  />
+                  Enable custom runtime policies
                 </label>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Selected App JSON</CardTitle>
+                <CardTitle>Subjects</CardTitle>
               </CardHeader>
-              <CardContent>
-                <Textarea value={appEditor} onChange={(event) => setAppEditor(event.target.value)} className="min-h-[360px]" spellCheck={false} />
+              <CardContent className="space-y-3">
+                <div className="space-y-2">
+                  {subjectKeys.map((subjectKey) => (
+                    <button
+                      key={subjectKey}
+                      className={classNames(
+                        "w-full rounded-2xl border px-4 py-3 text-left transition",
+                        subjectKey === selectedSubjectKey ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
+                      )}
+                      onClick={() => setSelectedSubjectKey(subjectKey)}
+                    >
+                      <p className="font-medium">{subjectKey}</p>
+                      <p className="mt-1 text-xs text-neutral-500">{config.analysis_subjects[subjectKey]?.tier ?? "ward"}</p>
+                    </button>
+                  ))}
+                </div>
+                <div className="grid gap-2">
+                  <Button variant="ghost" onClick={addSubject}>
+                    Add subject
+                  </Button>
+                  <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>
+                    Remove subject
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Ward Subjects JSON</CardTitle>
+                <CardTitle>Applications</CardTitle>
               </CardHeader>
-              <CardContent>
-                <Textarea value={subjectsEditor} onChange={(event) => setSubjectsEditor(event.target.value)} className="min-h-[220px]" spellCheck={false} />
+              <CardContent className="space-y-3">
+                <div className="space-y-2">
+                  {config.ward_applications.map((application, index) => (
+                    <button
+                      key={`${application.name}-${index}`}
+                      className={classNames(
+                        "w-full rounded-2xl border px-4 py-3 text-left transition",
+                        index === selectedAppIndex ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
+                      )}
+                      onClick={() => setSelectedAppIndex(index)}
+                    >
+                      <p className="font-medium">{application.name}</p>
+                      <p className="mt-1 text-xs text-neutral-500">{application.namespace}</p>
+                    </button>
+                  ))}
+                </div>
+                <div className="grid gap-2">
+                  <Button variant="ghost" onClick={addApp}>
+                    Add app
+                  </Button>
+                  <Button variant="ghost" onClick={cloneSelectedApp} disabled={!selectedApp}>
+                    Clone app
+                  </Button>
+                  <Button variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>
+                    Remove app
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -380,35 +1205,587 @@ export default function App() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Actions</CardTitle>
+                <CardTitle>Selected Subject</CardTitle>
               </CardHeader>
-              <CardContent className="grid gap-3">
-                <Button onClick={saveConfig} disabled={isBusy}>Save Managed Config</Button>
-                <Button variant="secondary" onClick={startPlan} disabled={isBusy}>Plan Terraform Changes</Button>
-                <Button variant="ghost" onClick={startApply} disabled={isBusy || selectedRun?.status !== "planned"}>Apply Saved Plan</Button>
-                <Button variant="ghost" onClick={resetConfig} disabled={isBusy}>Reset to Template</Button>
-                <Button variant="ghost" onClick={() => void refreshOutputs()}>Refresh Outputs</Button>
+              <CardContent className="grid gap-4">
+                {selectedSubject ? (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="grid gap-1 text-sm">
+                        <span>Namespace</span>
+                        <Input value={selectedSubjectKey} onChange={(event) => renameSubject(selectedSubjectKey, event.target.value)} />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Tier</span>
+                        <Input
+                          value={selectedSubject.tier ?? ""}
+                          onChange={(event) => updateSelectedSubject((current) => ({ ...current, tier: event.target.value }))}
+                        />
+                      </label>
+                    </div>
+                    <label className="grid gap-1 text-sm">
+                      <span>Description</span>
+                      <Input
+                        value={selectedSubject.description ?? ""}
+                        onChange={(event) => updateSelectedSubject((current) => ({ ...current, description: event.target.value }))}
+                      />
+                    </label>
+                    <KeyValueEditor
+                      label="Labels"
+                      value={selectedSubject.labels}
+                      onChange={(labels) => updateSelectedSubject((current) => ({ ...current, labels }))}
+                      addLabel="Add label"
+                    />
+                    <div className="grid gap-3 md:grid-cols-5">
+                      <label className="grid gap-1 text-sm">
+                        <span>Pods</span>
+                        <Input
+                          value={selectedSubject.resource_quota?.pods ?? ""}
+                          onChange={(event) =>
+                            updateSelectedSubject((current) => ({
+                              ...current,
+                              resource_quota: { ...current.resource_quota, pods: event.target.value },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>CPU request</span>
+                        <Input
+                          value={selectedSubject.resource_quota?.requests_cpu ?? ""}
+                          onChange={(event) =>
+                            updateSelectedSubject((current) => ({
+                              ...current,
+                              resource_quota: { ...current.resource_quota, requests_cpu: event.target.value },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Memory request</span>
+                        <Input
+                          value={selectedSubject.resource_quota?.requests_memory ?? ""}
+                          onChange={(event) =>
+                            updateSelectedSubject((current) => ({
+                              ...current,
+                              resource_quota: { ...current.resource_quota, requests_memory: event.target.value },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>CPU limit</span>
+                        <Input
+                          value={selectedSubject.resource_quota?.limits_cpu ?? ""}
+                          onChange={(event) =>
+                            updateSelectedSubject((current) => ({
+                              ...current,
+                              resource_quota: { ...current.resource_quota, limits_cpu: event.target.value },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Memory limit</span>
+                        <Input
+                          value={selectedSubject.resource_quota?.limits_memory ?? ""}
+                          onChange={(event) =>
+                            updateSelectedSubject((current) => ({
+                              ...current,
+                              resource_quota: { ...current.resource_quota, limits_memory: event.target.value },
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-neutral-500">Select a subject.</p>
+                )}
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Run History</CardTitle>
+                <CardTitle>Selected App</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="grid gap-6">
+                {selectedApp ? (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <label className="grid gap-1 text-sm">
+                        <span>Name</span>
+                        <Input value={selectedApp.name} onChange={(event) => updateSelectedApp((current) => ({ ...current, name: event.target.value }))} />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Namespace</span>
+                        <select
+                          className="rounded-2xl border border-border bg-white px-4 py-2 text-sm"
+                          value={selectedApp.namespace}
+                          onChange={(event) => updateSelectedApp((current) => ({ ...current, namespace: event.target.value }))}
+                        >
+                          {subjectKeys.map((subjectKey) => (
+                            <option key={subjectKey} value={subjectKey}>
+                              {subjectKey}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Replicas</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={String(selectedApp.replicas ?? 1)}
+                          onChange={(event) => updateSelectedApp((current) => ({ ...current, replicas: Number(event.target.value) }))}
+                        />
+                      </label>
+                    </div>
+
+                    <KeyValueEditor
+                      label="Pod labels"
+                      value={selectedApp.pod_labels}
+                      onChange={(pod_labels) => updateSelectedApp((current) => ({ ...current, pod_labels }))}
+                      addLabel="Add label"
+                    />
+
+                    <div className="rounded-2xl border border-border p-4">
+                      <div className="mb-4 flex items-center justify-between">
+                        <p className="font-semibold">Service</p>
+                        <label className="flex items-center gap-2 text-sm text-neutral-600">
+                          <input
+                            type="checkbox"
+                            checked={selectedApp.service?.enabled ?? true}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                service: { ...current.service, enabled: event.target.checked },
+                              }))
+                            }
+                          />
+                          Enabled
+                        </label>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <label className="grid gap-1 text-sm">
+                          <span>Type</span>
+                          <Input
+                            value={selectedApp.service?.type ?? "ClusterIP"}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                service: { ...current.service, type: event.target.value },
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="grid gap-1 text-sm">
+                          <span>Port</span>
+                          <Input
+                            type="number"
+                            value={String(selectedApp.service?.port ?? 8080)}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                service: { ...current.service, port: Number(event.target.value) },
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="grid gap-1 text-sm">
+                          <span>Target port</span>
+                          <Input
+                            type="number"
+                            value={String(selectedApp.service?.target_port ?? selectedApp.service?.port ?? 8080)}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                service: { ...current.service, target_port: Number(event.target.value) },
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                      <div className="mt-4">
+                        <KeyValueEditor
+                          label="Service annotations"
+                          value={selectedApp.service?.annotations}
+                          onChange={(annotations) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              service: { ...current.service, annotations },
+                            }))
+                          }
+                          addLabel="Add annotation"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-border p-4">
+                      <div className="mb-4 flex items-center justify-between">
+                        <p className="font-semibold">Ingress</p>
+                        <label className="flex items-center gap-2 text-sm text-neutral-600">
+                          <input
+                            type="checkbox"
+                            checked={selectedApp.ingress?.enabled ?? false}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                ingress: { ...current.ingress, enabled: event.target.checked } as IngressConfig,
+                              }))
+                            }
+                          />
+                          Enabled
+                        </label>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <label className="grid gap-1 text-sm">
+                          <span>Class</span>
+                          <Input
+                            value={selectedApp.ingress?.class_name ?? "nginx"}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                ingress: { ...current.ingress, class_name: event.target.value },
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="grid gap-1 text-sm">
+                          <span>Host</span>
+                          <Input
+                            value={selectedApp.ingress?.host ?? ""}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                ingress: { ...current.ingress, host: event.target.value },
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="grid gap-1 text-sm">
+                          <span>Path</span>
+                          <Input
+                            value={selectedApp.ingress?.path ?? "/"}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                ingress: { ...current.ingress, path: event.target.value },
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                      <div className="mt-4">
+                        <KeyValueEditor
+                          label="Ingress annotations"
+                          value={selectedApp.ingress?.annotations}
+                          onChange={(annotations) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              ingress: { ...current.ingress, annotations },
+                            }))
+                          }
+                          addLabel="Add annotation"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-border p-4">
+                      <div className="mb-4 flex items-center justify-between">
+                        <p className="font-semibold">ConfigMap</p>
+                        <label className="flex items-center gap-2 text-sm text-neutral-600">
+                          <input
+                            type="checkbox"
+                            checked={selectedApp.config_map?.enabled ?? false}
+                            onChange={(event) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                config_map: { ...current.config_map, enabled: event.target.checked },
+                              }))
+                            }
+                          />
+                          Enabled
+                        </label>
+                      </div>
+                      <label className="grid gap-1 text-sm">
+                        <span>Mount path</span>
+                        <Input
+                          value={selectedApp.config_map?.mount_path ?? "/usr/share/nginx/html"}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              config_map: { ...current.config_map, mount_path: event.target.value },
+                            }))
+                          }
+                        />
+                      </label>
+                      <div className="mt-4">
+                        <KeyValueEditor
+                          label="ConfigMap data"
+                          value={selectedApp.config_map?.data}
+                          onChange={(data) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              config_map: { ...current.config_map, data },
+                            }))
+                          }
+                          addLabel="Add file"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-border p-4">
+                      <div className="mb-4 flex items-center justify-between">
+                        <p className="font-semibold">Containers</p>
+                        <Button
+                          variant="ghost"
+                          type="button"
+                          onClick={() =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              containers: [...(current.containers ?? []), emptyContainer()],
+                            }))
+                          }
+                        >
+                          Add container
+                        </Button>
+                      </div>
+                      <div className="grid gap-4">
+                        {(selectedApp.containers ?? []).map((container, index) => (
+                          <ContainerEditor
+                            key={`${container.name}-${index}`}
+                            index={index}
+                            container={container}
+                            onChange={(nextContainer) =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                containers: (current.containers ?? []).map((item, itemIndex) => (itemIndex === index ? nextContainer : item)),
+                              }))
+                            }
+                            onRemove={() =>
+                              updateSelectedApp((current) => ({
+                                ...current,
+                                containers: (current.containers ?? []).filter((_, itemIndex) => itemIndex !== index),
+                              }))
+                            }
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-border p-4">
+                      <div className="mb-4 flex items-center justify-between">
+                        <p className="font-semibold">Volumes</p>
+                        <Button
+                          variant="ghost"
+                          type="button"
+                          onClick={() =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              volumes: [...(current.volumes ?? []), emptyVolume()],
+                            }))
+                          }
+                        >
+                          Add volume
+                        </Button>
+                      </div>
+                      <div className="grid gap-3">
+                        {(selectedApp.volumes ?? []).length === 0 ? <p className="text-sm text-neutral-500">No volumes.</p> : null}
+                        {(selectedApp.volumes ?? []).map((volume, index) => {
+                          const volumeType = volume.empty_dir ? "empty_dir" : volume.secret_name ? "secret" : volume.config_map_name ? "config_map" : "empty_dir";
+                          return (
+                            <div key={`${volume.name}-${index}`} className="grid gap-3 rounded-2xl border border-border bg-muted/60 p-4 md:grid-cols-[1fr_180px_1fr_auto]">
+                              <Input
+                                value={volume.name}
+                                onChange={(event) =>
+                                  updateSelectedApp((current) => ({
+                                    ...current,
+                                    volumes: (current.volumes ?? []).map((item, itemIndex) =>
+                                      itemIndex === index ? { ...item, name: event.target.value } : item,
+                                    ),
+                                  }))
+                                }
+                                placeholder="Volume name"
+                              />
+                              <select
+                                className="rounded-2xl border border-border bg-white px-4 py-2 text-sm"
+                                value={volumeType}
+                                onChange={(event) =>
+                                  updateSelectedApp((current) => ({
+                                    ...current,
+                                    volumes: (current.volumes ?? []).map((item, itemIndex) =>
+                                      itemIndex === index
+                                        ? {
+                                            name: item.name,
+                                            empty_dir: event.target.value === "empty_dir" ? true : undefined,
+                                            secret_name: event.target.value === "secret" ? item.secret_name ?? "app-secret" : undefined,
+                                            config_map_name: event.target.value === "config_map" ? item.config_map_name ?? "app-config" : undefined,
+                                          }
+                                        : item,
+                                    ),
+                                  }))
+                                }
+                              >
+                                <option value="empty_dir">emptyDir</option>
+                                <option value="secret">Secret</option>
+                                <option value="config_map">ConfigMap</option>
+                              </select>
+                              <Input
+                                value={volume.secret_name ?? volume.config_map_name ?? ""}
+                                placeholder={volumeType === "secret" ? "Secret name" : volumeType === "config_map" ? "ConfigMap name" : "No extra value"}
+                                onChange={(event) =>
+                                  updateSelectedApp((current) => ({
+                                    ...current,
+                                    volumes: (current.volumes ?? []).map((item, itemIndex) =>
+                                      itemIndex === index
+                                        ? {
+                                            ...item,
+                                            empty_dir: volumeType === "empty_dir" ? true : undefined,
+                                            secret_name: volumeType === "secret" ? event.target.value : undefined,
+                                            config_map_name: volumeType === "config_map" ? event.target.value : undefined,
+                                          }
+                                        : item,
+                                    ),
+                                  }))
+                                }
+                                disabled={volumeType === "empty_dir"}
+                              />
+                              <Button
+                                variant="danger"
+                                type="button"
+                                onClick={() =>
+                                  updateSelectedApp((current) => ({
+                                    ...current,
+                                    volumes: (current.volumes ?? []).filter((_, itemIndex) => itemIndex !== index),
+                                  }))
+                                }
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-border p-4">
+                      <div className="mb-4 flex items-center justify-between">
+                        <p className="font-semibold">Network policy</p>
+                        <Badge>{selectedApp.namespace}</Badge>
+                      </div>
+                      <div className="grid gap-6">
+                        <NetworkRulesEditor
+                          direction="ingress"
+                          value={selectedApp.network_policy?.ingress}
+                          onChange={(ingress) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              network_policy: { ...current.network_policy, ingress },
+                            }))
+                          }
+                        />
+                        <NetworkRulesEditor
+                          direction="egress"
+                          value={selectedApp.network_policy?.egress}
+                          onChange={(egress) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              network_policy: { ...current.network_policy, egress },
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-neutral-500">Select an app.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Runs</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {runs.length === 0 ? <p className="text-sm text-neutral-500">No runs.</p> : null}
                 {runs.map((run) => (
                   <button
                     key={run.id}
-                    className={`w-full rounded-2xl border px-3 py-3 text-left text-sm ${selectedRun?.id === run.id ? "border-accent bg-muted" : "border-border bg-white"}`}
-                    onClick={() => void refreshRun(run.id)}
+                    className={classNames(
+                      "w-full rounded-2xl border px-4 py-3 text-left transition",
+                      selectedRunId === run.id ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
+                    )}
+                    onClick={() => {
+                      setSelectedRunId(run.id);
+                      setSelectedRun(run);
+                      setSelectedRunLogs([]);
+                    }}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{run.kind}</span>
-                      <Badge>{run.status}</Badge>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{run.kind}</p>
+                        <p className="text-xs text-neutral-500">{run.id}</p>
+                      </div>
+                      <Badge className={statusTone(run.status) === "danger" ? "bg-warning text-white" : ""}>
+                        {run.status}
+                        {run.queue_position ? ` #${run.queue_position}` : ""}
+                      </Badge>
                     </div>
-                    <p className="mt-1 font-mono text-xs text-neutral-500">{run.id}</p>
                   </button>
                 ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Run Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {selectedRun ? (
+                  <>
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center">
+                        <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Create</p>
+                        <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.create ?? 0}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center">
+                        <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Update</p>
+                        <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.update ?? 0}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center">
+                        <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Delete</p>
+                        <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.delete ?? 0}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center">
+                        <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Replace</p>
+                        <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.replace ?? 0}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Changed resources</p>
+                      <div className="max-h-48 overflow-auto rounded-2xl border border-border bg-muted/60 p-3 text-xs text-neutral-700">
+                        {(selectedRun.plan_summary?.addresses ?? []).length === 0 ? (
+                          <p>No structured plan summary yet.</p>
+                        ) : (
+                          <ul className="space-y-1">
+                            {(selectedRun.plan_summary?.addresses ?? []).map((address) => (
+                              <li key={address}>{address}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                    {selectedRun.error ? (
+                      <div className="rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">{selectedRun.error}</div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-sm text-neutral-500">Select a run.</p>
+                )}
               </CardContent>
             </Card>
 
@@ -417,16 +1794,20 @@ export default function App() {
                 <CardTitle>Run Logs</CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea value={selectedRunLogs.join("\n")} readOnly className="min-h-[280px]" />
+                <pre className="max-h-80 overflow-auto rounded-2xl border border-border bg-neutral-950 p-4 font-mono text-xs text-neutral-100">
+                  {selectedRunLogs.length > 0 ? selectedRunLogs.join("\n") : "No logs yet."}
+                </pre>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Outputs</CardTitle>
+                <CardTitle>Terraform Outputs</CardTitle>
               </CardHeader>
               <CardContent>
-                <Textarea value={outputs ? pretty(outputs) : "{}"} readOnly className="min-h-[240px]" />
+                <pre className="max-h-80 overflow-auto rounded-2xl border border-border bg-muted/60 p-4 font-mono text-xs text-neutral-800">
+                  {outputs ? prettyPrint(outputs) : "No outputs available."}
+                </pre>
               </CardContent>
             </Card>
           </div>

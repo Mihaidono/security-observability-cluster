@@ -1,19 +1,46 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import asyncio
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import get_settings
+from .auth import require_api_token, require_websocket_token
+from .config import Settings, get_settings
+from .events import RunEventBroker
 from .models import HealthResponse, OutputsResponse, RunListResponse, RunLogsResponse, TerraformConfig, TerraformRun
-from .store import FileStore
+from .store import SqliteStore
 from .terraform_runner import TerraformRunner
 
 
 settings = get_settings()
-store = FileStore(settings)
-runner = TerraformRunner(settings, store)
+store = SqliteStore(settings)
+broker = RunEventBroker()
+runner = TerraformRunner(settings, store, broker)
 
-app = FastAPI(title="KubeGuardian Control Plane", version="0.1.0")
+
+def auth_dependency(
+    authorization: str | None = Header(default=None),
+) -> None:
+    require_api_token(settings=settings, authorization=authorization)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await runner.start()
+    try:
+        yield
+    finally:
+        await runner.stop()
+
+
+app = FastAPI(
+    title="KubeGuardian Control Plane",
+    version="0.2.0",
+    lifespan=lifespan,
+    dependencies=[Depends(auth_dependency)],
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -29,6 +56,8 @@ async def health() -> HealthResponse:
         status="ok",
         active_run_id=runner.active_run_id,
         managed_tfvars_present=settings.managed_tfvars_path.exists(),
+        queue_depth=runner.queue_depth,
+        auth_enabled=True,
     )
 
 
@@ -79,10 +108,41 @@ async def start_apply(run_id: str) -> TerraformRun:
     return await runner.start_apply(run_id)
 
 
+@app.post("/api/runs/{run_id}/cancel", response_model=TerraformRun)
+async def cancel_run(run_id: str) -> TerraformRun:
+    return await runner.cancel_run(run_id)
+
+
 @app.get("/api/outputs", response_model=OutputsResponse)
 async def get_outputs() -> OutputsResponse:
-    runs = store.list_runs()
-    for run in runs:
-        if run.outputs:
-            return OutputsResponse(outputs=run.outputs)
-    raise HTTPException(status_code=404, detail="No outputs are available yet.")
+    outputs = store.latest_outputs()
+    if outputs is None:
+        raise HTTPException(status_code=404, detail="No outputs are available yet.")
+    return OutputsResponse(outputs=outputs)
+
+
+@app.websocket("/api/runs/{run_id}/events")
+async def run_events(run_id: str, websocket: WebSocket) -> None:
+    token = websocket.query_params.get("token")
+    try:
+        await require_websocket_token(websocket=websocket, settings=settings, token=token)
+    except HTTPException:
+        return
+
+    run = store.load_run(run_id)
+    if run is None:
+        await websocket.close(code=4404, reason="Run not found")
+        return
+
+    queue = broker.subscribe(run_id)
+    await websocket.accept()
+    await websocket.send_json({"type": "run.snapshot", "run": run.model_dump(mode="json"), "logs": store.read_logs(run_id)})
+
+    try:
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event)
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        pass
+    finally:
+        broker.unsubscribe(run_id, queue)
