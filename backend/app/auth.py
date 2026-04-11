@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 
-from fastapi import HTTPException, WebSocket
+from fastapi import Header, HTTPException, WebSocket
 
 from .config import Settings
 

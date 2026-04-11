@@ -1,6 +1,8 @@
 pyproject.toml
 app/__init__.py
+app/auth.py
 app/config.py
+app/events.py
 app/main.py
 app/models.py
 app/store.py
