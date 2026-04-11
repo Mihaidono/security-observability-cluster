@@ -8,7 +8,9 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
-    terraform_root: Path
+    infrastructure_root: Path
+    terraform_core_root: Path
+    terraform_policies_root: Path
     state_dir: Path
     runs_dir: Path
     database_path: Path
@@ -21,11 +23,13 @@ class Settings:
 
 def get_settings() -> Settings:
     project_root = Path(__file__).resolve().parents[2]
-    terraform_root = project_root / "infrastructure"
+    infrastructure_root = project_root / "infrastructure"
+    terraform_core_root = infrastructure_root / "core"
+    terraform_policies_root = infrastructure_root / "policies"
     state_dir = project_root / "backend" / "state"
     runs_dir = state_dir / "runs"
     database_path = state_dir / "kubeguardian.db"
-    managed_tfvars_path = terraform_root / "frontend-managed.auto.tfvars.json"
+    managed_tfvars_path = infrastructure_root / "frontend-managed.auto.tfvars.json"
     default_config_path = project_root / "backend" / "app" / "default_managed_config.json"
 
     cors_origins = [
@@ -36,7 +40,9 @@ def get_settings() -> Settings:
 
     return Settings(
         project_root=project_root,
-        terraform_root=terraform_root,
+        infrastructure_root=infrastructure_root,
+        terraform_core_root=terraform_core_root,
+        terraform_policies_root=terraform_policies_root,
         state_dir=state_dir,
         runs_dir=runs_dir,
         database_path=database_path,

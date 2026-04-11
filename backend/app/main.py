@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .auth import require_api_token, require_websocket_token
 from .config import Settings, get_settings
 from .events import RunEventBroker
-from .models import HealthResponse, OutputsResponse, RunListResponse, RunLogsResponse, TerraformConfig, TerraformRun
+from .models import HealthResponse, OutputsResponse, RunListResponse, RunLogsResponse, RunStage, TerraformConfig, TerraformRun
 from .store import SqliteStore
 from .terraform_runner import TerraformRunner
 
@@ -58,6 +58,7 @@ async def health() -> HealthResponse:
         managed_tfvars_present=settings.managed_tfvars_path.exists(),
         queue_depth=runner.queue_depth,
         auth_enabled=True,
+        stages=[RunStage.core, RunStage.policies],
     )
 
 
@@ -98,9 +99,9 @@ async def get_run_logs(run_id: str) -> RunLogsResponse:
     return RunLogsResponse(run_id=run_id, logs=store.read_logs(run_id))
 
 
-@app.post("/api/runs/plan", response_model=TerraformRun)
-async def start_plan() -> TerraformRun:
-    return await runner.start_plan()
+@app.post("/api/runs/plan/{stage}", response_model=TerraformRun)
+async def start_plan(stage: RunStage) -> TerraformRun:
+    return await runner.start_plan(stage)
 
 
 @app.post("/api/runs/{run_id}/apply", response_model=TerraformRun)

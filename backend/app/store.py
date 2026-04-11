@@ -27,6 +27,7 @@ class SqliteStore:
                 """
                 CREATE TABLE IF NOT EXISTS runs (
                     id TEXT PRIMARY KEY,
+                    stage TEXT NOT NULL DEFAULT 'core',
                     kind TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -50,6 +51,12 @@ class SqliteStore:
                 );
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(runs)").fetchall()
+            }
+            if "stage" not in columns:
+                connection.execute("ALTER TABLE runs ADD COLUMN stage TEXT NOT NULL DEFAULT 'core'")
 
     def load_default_config(self) -> TerraformConfig:
         return TerraformConfig.model_validate_json(self.settings.default_config_path.read_text())
@@ -82,11 +89,12 @@ class SqliteStore:
             connection.execute(
                 """
                 INSERT INTO runs (
-                    id, kind, status, created_at, updated_at, started_at, completed_at,
+                    id, stage, kind, status, created_at, updated_at, started_at, completed_at,
                     command_json, plan_path, log_path, error, plan_summary_json, outputs_json,
                     source_run_id, queue_position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    stage = excluded.stage,
                     kind = excluded.kind,
                     status = excluded.status,
                     created_at = excluded.created_at,
@@ -104,6 +112,7 @@ class SqliteStore:
                 """,
                 (
                     run.id,
+                    run.stage.value,
                     run.kind.value,
                     run.status.value,
                     run.created_at.isoformat(),
@@ -165,10 +174,20 @@ class SqliteStore:
                 """
                 SELECT outputs_json FROM runs
                 WHERE outputs_json IS NOT NULL
+                  AND stage = 'core'
                 ORDER BY updated_at DESC
                 LIMIT 1
                 """
             ).fetchone()
+            if row is None:
+                row = connection.execute(
+                    """
+                    SELECT outputs_json FROM runs
+                    WHERE outputs_json IS NOT NULL
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
         if row is None or row["outputs_json"] is None:
             return None
         return json.loads(str(row["outputs_json"]))
@@ -182,6 +201,7 @@ class SqliteStore:
 
         return TerraformRun(
             id=str(row["id"]),
+            stage=str(row["stage"]) if row["stage"] else "core",
             kind=str(row["kind"]),
             status=str(row["status"]),
             created_at=str(row["created_at"]),

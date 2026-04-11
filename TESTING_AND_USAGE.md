@@ -7,6 +7,7 @@ This guide is for the current control plane implementation:
 * run cancellation
 * WebSocket run events
 * form-based ward and app editors
+* explicit `core` and `policies` Terraform stages
 
 ## What Gets Written
 
@@ -19,6 +20,13 @@ backend/state/kubeguardian.db
 
 `infrastructure/frontend-managed.auto.tfvars.json` is the Terraform input written by the backend.  
 `backend/state/kubeguardian.db` stores run metadata and logs.
+
+Terraform execution happens in:
+
+```text
+infrastructure/core
+infrastructure/policies
+```
 
 ## Quick Start
 
@@ -48,9 +56,9 @@ http://127.0.0.1:5173
 ```
 
 You should see:
-* cluster settings
-* subject list and subject form
-* application list and application form
+* a control-plane panel with `Plan core`, `Apply core`, `Plan policies`, and `Apply policies`
+* subject and application lists
+* modal editors for subjects and applications
 * run history, plan summary, logs, and outputs
 
 ## Backend Smoke Tests
@@ -98,12 +106,20 @@ Expected:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $KG_TOKEN" \
-  http://127.0.0.1:8000/api/runs/plan | jq
+  http://127.0.0.1:8000/api/runs/plan/core | jq
 ```
 
 Expected:
+* `stage` is `core`
 * a run object with `status: "queued"`
 * later it becomes `running`, then `planned` or `failed`
+
+For the policies stage:
+
+```bash
+curl -X POST -H "Authorization: Bearer $KG_TOKEN" \
+  http://127.0.0.1:8000/api/runs/plan/policies | jq
+```
 
 ### Read run state and logs
 
@@ -155,15 +171,16 @@ Expected:
 
 This is the normal developer workflow in the UI:
 
-1. Edit cluster settings if needed.
-2. Add or adjust subjects in the left column.
-3. Add or adjust applications in the left column.
-4. Use the middle forms to configure service, ingress, containers, probes, volumes, and network policy.
-5. Click `Save`.
-6. Click `Plan`.
-7. Review the structured plan summary and live logs.
-8. Click `Apply` only after the plan is satisfactory.
-9. Read outputs in the right column.
+1. Add or adjust subjects in the `Subjects` section.
+2. Add or adjust applications in the `Applications` section.
+3. Use `Edit subject` and `Edit app` from the workspace to configure service, ingress, containers, probes, volumes, and network policy.
+4. Click `Save`.
+5. Click `Plan core`.
+6. Review the structured plan summary and live logs.
+7. Click `Apply core`.
+8. Once core is live, click `Plan policies`.
+9. Review that plan and click `Apply policies`.
+10. Read outputs in the workspace.
 
 ## What To Try In The UI
 
@@ -235,7 +252,8 @@ Expected Terraform effect:
 * `/api/health` returns `ok` with auth
 * `/api/config` returns the managed config
 * `/api/config/reset` restores the seed template
-* `/api/runs/plan` queues a run
+* `/api/runs/plan/core` queues a core run
+* `/api/runs/plan/policies` is only used after a successful core apply
 * `/api/runs/{id}/cancel` cancels queued and active runs correctly
 * `/api/outputs` returns values after a successful apply
 
@@ -243,19 +261,21 @@ Expected Terraform effect:
 
 * page loads without console errors
 * no raw JSON editor is required for common changes
-* selecting a different subject updates the subject form
-* selecting a different app updates the app form
+* selecting a different subject updates the workspace summary and the correct subject opens in the modal editor
+* selecting a different app updates the workspace summary and the correct app opens in the modal editor
 * save persists the managed config
 * plan summary counts render after a successful plan
 * run logs update live without polling
 * cancel works for queued or active runs
-* apply only enables after a `planned` run
+* `Apply core` only enables after a core `planned` run
+* `Apply policies` only enables after a policies `planned` run
 
 ### Terraform and cluster
 
-* first pass works with `enable_custom_runtime_policies = false`
-* cluster outputs are available after apply
-* second pass works after enabling custom runtime policies
+* `terraform init` succeeds in `infrastructure/core`
+* `terraform init` succeeds in `infrastructure/policies`
+* cluster outputs are available after a successful core apply
+* policy manifests plan and apply after core is live
 
 ## WebSocket Check
 
@@ -276,10 +296,12 @@ Expected event types:
 The intended sequence is:
 
 1. save config
-2. queue a plan
+2. plan core
 3. inspect summary and logs
-4. apply the saved plan
-5. inspect outputs
+4. apply core
+5. plan policies
+6. apply policies
+7. inspect outputs
 
 Avoid wiring UI changes directly to `terraform apply`.
 
@@ -299,7 +321,6 @@ Avoid wiring UI changes directly to `terraform apply`.
 Check:
 * `KUBEGUARDIAN_API_TOKEN` in the backend shell
 * `VITE_API_TOKEN` in the frontend shell
-* the token input in the top bar if you changed it after page load
 
 ### Run logs do not update
 
@@ -313,9 +334,9 @@ Check:
 Check:
 * Terraform is installed
 * AWS credentials are configured
-* `terraform init` has been run inside `infrastructure/`
-* remote backend is initialized if you use one
-* the cluster bootstrap phase is complete before enabling custom runtime policies
+* `terraform init` has been run inside both `infrastructure/core` and `infrastructure/policies`
+* remote backend is initialized for each stage if you use one
+* `core` has already been successfully applied before planning or applying `policies`
 
 ### Outputs are empty
 
@@ -357,7 +378,8 @@ Then:
 1. open `http://127.0.0.1:5173`
 2. edit a subject or app through the forms
 3. save
-4. plan
-5. review summary and logs
-6. apply
-7. inspect outputs
+4. plan core
+5. apply core
+6. plan policies
+7. apply policies
+8. inspect outputs

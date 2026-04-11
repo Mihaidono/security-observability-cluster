@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from .config import Settings
 from .events import RunEventBroker
-from .models import PlanSummary, RunKind, RunStatus, TerraformRun
+from .models import PlanSummary, RunKind, RunStage, RunStatus, TerraformRun
 from .store import SqliteStore
 
 
@@ -59,7 +59,13 @@ class TerraformRunner:
         if self._active_process is not None and self._active_process.returncode is None:
             self._active_process.terminate()
 
-    async def start_plan(self) -> TerraformRun:
+    async def start_plan(self, stage: RunStage) -> TerraformRun:
+        if stage == RunStage.policies and not self._has_successful_core_apply():
+            raise HTTPException(
+                status_code=409,
+                detail="Apply the core stage first. The policies stage expects a reachable cluster and installed CRDs.",
+            )
+
         run_id = uuid.uuid4().hex[:12]
         run_dir = self.store.run_dir(run_id)
         command = [
@@ -74,6 +80,7 @@ class TerraformRunner:
         ]
         run = TerraformRun(
             id=run_id,
+            stage=stage,
             kind=RunKind.plan,
             status=RunStatus.queued,
             created_at=utc_now(),
@@ -97,6 +104,7 @@ class TerraformRunner:
         apply_run_id = uuid.uuid4().hex[:12]
         apply_run = TerraformRun(
             id=apply_run_id,
+            stage=source_run.stage,
             kind=RunKind.apply,
             status=RunStatus.queued,
             created_at=utc_now(),
@@ -209,11 +217,11 @@ class TerraformRunner:
         await self._persist_run(run)
 
         try:
-            await self._stream_command(run.id, command, cwd=self.settings.terraform_root)
+            await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
 
             show_payload = await self._capture_json(
                 [self.settings.terraform_bin, "show", "-json", str(plan_file)],
-                cwd=self.settings.terraform_root,
+                cwd=self._terraform_root_for_stage(run.stage),
             )
             self.store.save_json_artifact(run.id, "plan.json", show_payload)
             run.plan_summary = summarize_plan(show_payload)
@@ -253,11 +261,11 @@ class TerraformRunner:
         await self._persist_run(run)
 
         try:
-            await self._stream_command(run.id, command, cwd=self.settings.terraform_root)
+            await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
 
             outputs_payload = await self._capture_json(
                 [self.settings.terraform_bin, "output", "-json"],
-                cwd=self.settings.terraform_root,
+                cwd=self._terraform_root_for_stage(run.stage),
             )
             run.outputs = outputs_payload
             run.status = RunStatus.applied
@@ -329,6 +337,17 @@ class TerraformRunner:
         if proc.returncode != 0:
             raise RuntimeError(stderr.decode("utf-8", errors="replace").strip() or "Terraform command failed.")
         return json.loads(stdout.decode("utf-8"))
+
+    def _terraform_root_for_stage(self, stage: RunStage) -> Path:
+        if stage == RunStage.core:
+            return self.settings.terraform_core_root
+        return self.settings.terraform_policies_root
+
+    def _has_successful_core_apply(self) -> bool:
+        return any(
+            run.stage == RunStage.core and run.kind == RunKind.apply and run.status == RunStatus.applied
+            for run in self.store.list_runs()
+        )
 
 
 def summarize_plan(payload: dict[str, Any]) -> PlanSummary:

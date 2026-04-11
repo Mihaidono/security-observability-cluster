@@ -7,10 +7,10 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants: Record<ButtonVariant, string> = {
-  primary: "bg-accent text-accentForeground hover:opacity-95",
-  secondary: "bg-foreground text-card hover:opacity-95",
-  ghost: "bg-transparent text-foreground hover:bg-muted",
-  danger: "bg-warning text-white hover:opacity-95",
+  primary: "border border-accent/80 bg-accent text-accentForeground hover:brightness-105",
+  secondary: "border border-border bg-muted text-foreground hover:bg-border",
+  ghost: "border border-border bg-card text-foreground hover:bg-muted",
+  danger: "border border-warning/70 bg-warning text-accentForeground hover:brightness-105",
 };
 
 export function Button({

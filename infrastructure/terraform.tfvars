@@ -1,10 +1,8 @@
-project_name                   = "kubeguardian"
-environment                    = "lab"
-cluster_name                   = "forensic-lab"
-kubernetes_version             = "1.35"
-cluster_admin_principal_arns   = []
-enable_custom_runtime_policies = false
-
+project_name                 = "kubeguardian"
+environment                  = "lab"
+cluster_name                 = "forensic-lab"
+kubernetes_version           = "1.35"
+cluster_admin_principal_arns = []
 analysis_subjects = {
   "ward-template-app" = {
     tier        = "template"

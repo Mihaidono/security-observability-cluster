@@ -124,10 +124,11 @@ export interface TerraformConfig {
   cluster_name: string;
   kubernetes_version: string;
   cluster_admin_principal_arns: string[];
-  enable_custom_runtime_policies: boolean;
   analysis_subjects: Record<string, AnalysisSubject>;
   ward_applications: WardApplication[];
 }
+
+export type RunStage = "core" | "policies";
 
 export interface PlanSummary {
   create: number;
@@ -149,6 +150,7 @@ export type RunStatus =
 
 export interface TerraformRun {
   id: string;
+  stage: RunStage;
   kind: "plan" | "apply";
   status: RunStatus;
   created_at: string;
@@ -171,6 +173,7 @@ export interface HealthResponse {
   managed_tfvars_present: boolean;
   queue_depth: number;
   auth_enabled: boolean;
+  stages: RunStage[];
 }
 
 export interface RunEventSnapshot {

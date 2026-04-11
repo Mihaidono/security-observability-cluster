@@ -72,12 +72,6 @@ variable "cluster_admin_principal_arns" {
   default     = []
 }
 
-variable "enable_custom_runtime_policies" {
-  description = "Enable custom-resource policies that require a live Kubernetes API during planning, such as Kyverno ClusterPolicies and Tetragon TracingPolicyNamespaced resources."
-  type        = bool
-  default     = false
-}
-
 variable "analysis_subjects" {
   description = "Namespaces to create as isolated wards for runtime analysis."
   type = map(object({

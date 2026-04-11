@@ -1,4 +1,4 @@
-import type { HealthResponse, TerraformConfig, TerraformRun } from "./types";
+import type { HealthResponse, RunStage, TerraformConfig, TerraformRun } from "./types";
 
 const tokenStorageKey = "kubeguardian-api-token";
 
@@ -52,7 +52,7 @@ export const api = {
   listRuns: () => request<{ items: TerraformRun[] }>("/api/runs"),
   getRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}`),
   getRunLogs: (runId: string) => request<{ run_id: string; logs: string[] }>(`/api/runs/${runId}/logs`),
-  startPlan: () => request<TerraformRun>("/api/runs/plan", { method: "POST" }),
+  startPlan: (stage: RunStage) => request<TerraformRun>(`/api/runs/plan/${stage}`, { method: "POST" }),
   startApply: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/apply`, { method: "POST" }),
   cancelRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/cancel`, { method: "POST" }),
   getOutputs: () => request<{ outputs: Record<string, unknown> }>("/api/outputs"),

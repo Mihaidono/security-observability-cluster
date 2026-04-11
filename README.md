@@ -32,21 +32,12 @@ In this lab, applications are "subjects." Each subject is deployed into a **Ward
 .
 ├── backend/             # FastAPI service for auth, config management, and Terraform execution
 ├── frontend/            # Vite + React + Tailwind operator UI with form-based editors
-├── infrastructure/      # Terraform root for the EKS lab and generated tfvars
-│   ├── versions.tf      # Terraform + provider version constraints
-│   ├── providers.tf     # AWS, Kubernetes, and Helm provider wiring
-│   ├── locals.tf        # Normalized ward defaults and derived labels
-│   ├── main.tf          # Core VPC, EKS, node group, and control-plane logging
-│   ├── observability.tf # Cilium, Hubble, Tetragon, and monitoring namespace
-│   ├── apps.tf          # Dynamic ward namespaces, quotas, metadata, and policies
-│   ├── workloads.tf     # tfvars-driven ward application deployments and services
-│   ├── security.tf      # Kyverno and Tetragon runtime policies
-│   ├── iam.tf           # Optional EKS admin access entries
-│   ├── variables.tf     # Input definitions and ward schema
-│   ├── outputs.tf       # Useful cluster and ward outputs
-│   ├── terraform.tfvars # Base lab configuration
-│   ├── backend.hcl.example
-│   └── bootstrap/       # One-time state bucket and lock-table stack
+├── infrastructure/
+│   ├── terraform.tfvars                 # Shared lab configuration template
+│   ├── frontend-managed.auto.tfvars.json
+│   ├── core/                            # VPC, EKS, add-ons, wards, workloads, and outputs
+│   ├── policies/                        # Kyverno ClusterPolicies and Tetragon tracing manifests
+│   └── bootstrap/                       # One-time state bucket and lock-table stack
 ├── TESTING_AND_USAGE.md # Practical guide for testing the backend, frontend, and Terraform flow
 └── .gitignore           # Root-level ignore rules only
 ```
@@ -131,22 +122,23 @@ cd infrastructure/bootstrap
 terraform init
 terraform apply -var="state_bucket_name=your-globally-unique-bucket"
 
-# Back in the Terraform root, copy backend.hcl.example to your own backend config
-# and initialize against the remote state location.
-cd ..
-cp backend.hcl.example backend.hcl
+# Initialize and apply the core stage.
+cd ../core
 terraform init -backend-config=backend.hcl
+terraform plan -var-file=../terraform.tfvars
+terraform apply -var-file=../terraform.tfvars
 
-# First pass: build AWS, EKS, namespaces, workloads, and Helm-installed addons
-terraform plan
-
-terraform apply
-
-# Second pass after the cluster is reachable: enable custom Kyverno/Tetragon resources
-# by setting enable_custom_runtime_policies = true in infrastructure/terraform.tfvars
-terraform plan
-terraform apply
+# Initialize and apply the policies stage after core is live.
+cd ../policies
+terraform init -backend-config=backend.hcl
+terraform plan -var-file=../terraform.tfvars
+terraform apply -var-file=../terraform.tfvars
 ```
+
+The split is intentional:
+* `core/` owns AWS, EKS, Helm add-ons, wards, workloads, and operator outputs.
+* `policies/` owns the CRD-backed Kyverno and Tetragon manifest layer that should only run after the cluster is reachable.
+* Each stage already has its own committed [backend.hcl](/home/mihandrei/work/security-observability-cluster/infrastructure/core/backend.hcl) or [backend.hcl](/home/mihandrei/work/security-observability-cluster/infrastructure/policies/backend.hcl), so you can initialize them directly.
 
 ### 4. Cluster Access
 After apply, Terraform now exposes ready-to-run outputs for operator workflow:
@@ -165,6 +157,7 @@ The repository now ships with a developer-focused control plane:
 * Frontend edits subjects and applications through forms, not raw JSON.
 * Backend writes the live config to `infrastructure/frontend-managed.auto.tfvars.json`.
 * Backend queues `terraform plan` and `terraform apply` runs one at a time.
+* Backend targets either `infrastructure/core` or `infrastructure/policies` per run.
 * Backend stores run metadata and logs in SQLite under `backend/state/`.
 * Frontend receives live run updates over WebSockets and reads machine-friendly outputs from `terraform output -json`.
 
@@ -174,13 +167,14 @@ Useful outputs for automation are:
 * `terraform output -json ward_ingress_hosts`
 * `terraform output -json update_kubeconfig_command`
 
-The backend writes the frontend-managed configuration to `infrastructure/frontend-managed.auto.tfvars.json`, which Terraform then loads inside the Terraform root alongside the base `.tf` files.
+The backend writes the frontend-managed configuration to `infrastructure/frontend-managed.auto.tfvars.json`, which both Terraform stages load with `-var-file`.
 
 ### 6. Control Plane Development
 The control plane is intentionally small and operator-oriented:
 * `backend/` runs a FastAPI API with bearer-token auth, SQLite-backed run history, queued Terraform execution, cancel support, and WebSocket event streaming.
 * `frontend/` runs a Vite + React UI with Tailwind styling and lightweight shadcn-style components.
-* The UI is form-driven: cluster settings, ward subjects, services, ingress, containers, probes, volumes, and network policy rules are edited with fields and add/remove controls.
+* The UI is form-driven: ward subjects, services, ingress, containers, probes, volumes, and network policy rules are edited with fields and add/remove controls.
+* The control plane exposes staged Terraform actions for `core` and `policies`.
 
 Backend auth defaults to:
 
@@ -199,7 +193,7 @@ Backend endpoints:
 * `GET /api/config`
 * `PUT /api/config`
 * `POST /api/config/reset`
-* `POST /api/runs/plan`
+* `POST /api/runs/plan/{stage}`
 * `POST /api/runs/{id}/apply`
 * `POST /api/runs/{id}/cancel`
 * `GET /api/runs`
@@ -215,6 +209,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
+export KUBEGUARDIAN_API_TOKEN=dev-token
 uvicorn app.main:app --reload --port 8000
 ```
 

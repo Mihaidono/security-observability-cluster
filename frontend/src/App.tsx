@@ -3,7 +3,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
-import { api, buildRunEventsUrl, getApiToken, setApiToken } from "./lib/api";
+import { api, buildRunEventsUrl, getApiToken } from "./lib/api";
 import type {
   AnalysisSubject,
   ContainerConfig,
@@ -12,6 +12,7 @@ import type {
   NetworkPolicyPort,
   NetworkPolicyRule,
   ProbeConfig,
+  RunStage,
   TerraformConfig,
   TerraformRun,
   VolumeConfig,
@@ -731,8 +732,11 @@ function statusTone(status?: TerraformRun["status"]): "primary" | "secondary" | 
   return "ghost";
 }
 
+function stageLabel(stage: RunStage): string {
+  return stage === "core" ? "Core" : "Policies";
+}
+
 export default function App() {
-  const [apiTokenValue, setApiTokenValue] = useState(getApiToken());
   const [config, setConfig] = useState<TerraformConfig | null>(null);
   const [runs, setRuns] = useState<TerraformRun[]>([]);
   const [selectedSubjectKey, setSelectedSubjectKey] = useState<string>("");
@@ -753,10 +757,13 @@ export default function App() {
     return config.analysis_subjects[selectedSubjectKey] ?? null;
   }, [config, selectedSubjectKey]);
   const selectedApp = useMemo(() => config?.ward_applications[selectedAppIndex] ?? null, [config, selectedAppIndex]);
-
-  useEffect(() => {
-    setApiToken(apiTokenValue);
-  }, [apiTokenValue]);
+  const latestCoreRun = useMemo(() => runs.find((run) => run.stage === "core") ?? null, [runs]);
+  const latestPoliciesRun = useMemo(() => runs.find((run) => run.stage === "policies") ?? null, [runs]);
+  const hasAppliedCoreRun = useMemo(
+    () => runs.some((run) => run.stage === "core" && run.kind === "apply" && run.status === "applied"),
+    [runs],
+  );
+  const apiTokenValue = getApiToken();
 
   useEffect(() => {
     void loadInitial();
@@ -798,7 +805,7 @@ export default function App() {
     return () => {
       socket.close();
     };
-  }, [selectedRunId, apiTokenValue]);
+  }, [selectedRunId]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -928,18 +935,6 @@ export default function App() {
     setSelectedAppIndex(config.ward_applications.length);
   }
 
-  function cloneSelectedApp() {
-    if (!selectedApp) return;
-    updateConfig((current) => {
-      const next = structuredClone(current);
-      const clone = structuredClone(selectedApp);
-      clone.name = uniqueName(`${selectedApp.name}-copy`, next.ward_applications.map((application) => application.name));
-      next.ward_applications.push(clone);
-      return next;
-    });
-    setSelectedAppIndex((config?.ward_applications.length ?? 1));
-  }
-
   function removeSelectedApp() {
     if (!config || config.ward_applications.length <= 1) return;
     updateConfig((current) => {
@@ -948,6 +943,29 @@ export default function App() {
       return next;
     });
     setSelectedAppIndex((currentIndex) => Math.max(0, currentIndex - 1));
+  }
+
+  function addClusterAdminArn() {
+    updateConfig((current) => ({
+      ...current,
+      cluster_admin_principal_arns: [...current.cluster_admin_principal_arns, ""],
+    }));
+  }
+
+  function updateClusterAdminArn(index: number, value: string) {
+    updateConfig((current) => ({
+      ...current,
+      cluster_admin_principal_arns: current.cluster_admin_principal_arns.map((item, itemIndex) =>
+        itemIndex === index ? value : item,
+      ),
+    }));
+  }
+
+  function removeClusterAdminArn(index: number) {
+    updateConfig((current) => ({
+      ...current,
+      cluster_admin_principal_arns: current.cluster_admin_principal_arns.filter((_, itemIndex) => itemIndex !== index),
+    }));
   }
 
   async function saveManagedConfig() {
@@ -1028,17 +1046,21 @@ export default function App() {
     }
   }
 
-  async function startPlan() {
+  function latestPlannedRun(stage: RunStage): TerraformRun | null {
+    return runs.find((run) => run.stage === stage && run.kind === "plan" && run.status === "planned") ?? null;
+  }
+
+  async function startPlan(stage: RunStage) {
     const didSave = await saveManagedConfig();
     if (!didSave) return;
 
     setIsBusy(true);
     try {
-      const run = await api.startPlan();
+      const run = await api.startPlan(stage);
       setRunInState(run);
       setSelectedRunId(run.id);
       setSelectedRunLogs([]);
-      setStatusMessage("Plan queued.");
+      setStatusMessage(`${stageLabel(stage)} plan queued.`);
       setErrorMessage("");
     } catch (error) {
       setErrorMessage((error as Error).message);
@@ -1047,19 +1069,20 @@ export default function App() {
     }
   }
 
-  async function startApply() {
-    if (!selectedRun || selectedRun.status !== "planned") {
-      setErrorMessage("Select a completed plan before apply.");
+  async function startApply(stage: RunStage) {
+    const plannedRun = latestPlannedRun(stage);
+    if (!plannedRun) {
+      setErrorMessage(`Queue or select a completed ${stageLabel(stage).toLowerCase()} plan before apply.`);
       return;
     }
 
     setIsBusy(true);
     try {
-      const run = await api.startApply(selectedRun.id);
+      const run = await api.startApply(plannedRun.id);
       setRunInState(run);
       setSelectedRunId(run.id);
       setSelectedRunLogs([]);
-      setStatusMessage("Apply queued.");
+      setStatusMessage(`${stageLabel(stage)} apply queued.`);
       setErrorMessage("");
     } catch (error) {
       setErrorMessage((error as Error).message);
@@ -1100,143 +1123,274 @@ export default function App() {
     <div className="app-shell">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <Card>
-          <CardContent className="flex flex-col gap-4 py-5 2xl:flex-row 2xl:items-center 2xl:justify-between">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-bold">KubeGuardian Control Plane</h1>
-              <Badge>{config.cluster_name}</Badge>
-              <Badge>{config.environment}</Badge>
-              <Badge>{runs.length} runs</Badge>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Input
-                className="w-full sm:w-60"
-                value={apiTokenValue}
-                onChange={(event) => setApiTokenValue(event.target.value)}
-                placeholder="API token"
-              />
-              <Button className="whitespace-nowrap" variant="ghost" onClick={() => void saveManagedConfig()} disabled={isBusy}>
-                Save
-              </Button>
-              <Button className="whitespace-nowrap" onClick={() => void startPlan()} disabled={isBusy}>
-                Plan
-              </Button>
-              <Button
-                className="whitespace-nowrap"
-                variant="secondary"
-                onClick={() => void startApply()}
-                disabled={isBusy || selectedRun?.status !== "planned"}
-              >
-                Apply
-              </Button>
-              <Button
-                className="whitespace-nowrap"
-                variant="danger"
-                onClick={() => void cancelSelectedRun()}
-                disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
-              >
-                Cancel
-              </Button>
-              <Button className="whitespace-nowrap" variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
-                Reset
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {errorMessage ? (
-          <div className="rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">{errorMessage}</div>
-        ) : null}
-        {statusMessage ? (
-          <div className="rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-700">{statusMessage}</div>
-        ) : null}
-
-        <Card>
           <CardHeader>
             <CardTitle>Control Plane</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-5">
-            <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
-              <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-2xl font-bold">KubeGuardian Control Plane</h1>
-                <Badge>{config.cluster_name}</Badge>
-                <Badge>{config.environment}</Badge>
-                <Badge>{runs.length} runs</Badge>
+          <CardContent className="grid gap-6">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_380px]">
+              <div className="rounded-[28px] border border-border bg-muted/60 p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">Operations deck</p>
+                      <h1 className="text-3xl font-bold tracking-tight">KubeGuardian Control Plane</h1>
+                    </div>
+                    <p className="max-w-2xl text-sm leading-6 text-neutral-400">
+                      Manage the shared lab config, run the core infrastructure stage, and layer runtime policies on top when the cluster is ready.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Status</p>
+                    <p className="mt-2 font-semibold">{statusMessage || "Ready"}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Queue</p>
+                    <p className="mt-2 font-semibold">{selectedRun?.queue_position ? `#${selectedRun.queue_position}` : "Ready"}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Current run</p>
+                    <p className="mt-2 font-semibold">{selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind} / ${selectedRun.status}` : "Idle"}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Current stage</p>
+                    <p className="mt-2 font-semibold">{selectedRun ? stageLabel(selectedRun.stage) : "Core first"}</p>
+                  </div>
+                </div>
+
+                {errorMessage ? (
+                  <div className="mt-5 rounded-2xl border border-warning/30 bg-warning/15 px-4 py-3 text-sm text-warning">
+                    {errorMessage}
+                  </div>
+                ) : null}
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <Input
-                  className="w-full sm:w-60"
-                  value={apiTokenValue}
-                  onChange={(event) => setApiTokenValue(event.target.value)}
-                  placeholder="API token"
-                />
-                <Button className="whitespace-nowrap" variant="ghost" onClick={() => void saveManagedConfig()} disabled={isBusy}>
-                  Save
-                </Button>
-                <Button className="whitespace-nowrap" onClick={() => void startPlan()} disabled={isBusy}>
-                  Plan
-                </Button>
-                <Button
-                  className="whitespace-nowrap"
-                  variant="secondary"
-                  onClick={() => void startApply()}
-                  disabled={isBusy || selectedRun?.status !== "planned"}
-                >
-                  Apply
-                </Button>
-                <Button
-                  className="whitespace-nowrap"
-                  variant="danger"
-                  onClick={() => void cancelSelectedRun()}
-                  disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
-                >
-                  Cancel
-                </Button>
-                <Button className="whitespace-nowrap" variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
-                  Reset
-                </Button>
+
+              <div className="grid gap-4 rounded-[28px] border border-border bg-card p-6">
+                <div className="grid gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Session</p>
+                  </div>
+                  <div className="grid gap-1 text-sm">
+                    <span>API token</span>
+                    <Input value={apiTokenValue} readOnly placeholder="API token" />
+                    <p className="text-xs text-neutral-500">Read-only. Set via `VITE_API_TOKEN` or saved browser state.</p>
+                  </div>
+                </div>
+                <div className="border-t border-border/70 pt-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Config actions</p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <Button className="w-full" variant="ghost" onClick={() => void saveManagedConfig()} disabled={isBusy}>
+                      Save config
+                    </Button>
+                    <Button
+                      className="w-full"
+                      variant="danger"
+                      onClick={() => void cancelSelectedRun()}
+                      disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
+                    >
+                      Cancel run
+                    </Button>
+                  </div>
+                  <Button className="mt-3 w-full" variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
+                    Reset managed config
+                  </Button>
+                </div>
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <label className="grid gap-1 text-sm">
-                <span>Project</span>
-                <Input value={config.project_name} onChange={(event) => setConfig({ ...config, project_name: event.target.value })} />
-              </label>
-              <label className="grid gap-1 text-sm">
-                <span>Environment</span>
-                <Input value={config.environment} onChange={(event) => setConfig({ ...config, environment: event.target.value })} />
-              </label>
-              <label className="grid gap-1 text-sm">
-                <span>Cluster name</span>
-                <Input value={config.cluster_name} onChange={(event) => setConfig({ ...config, cluster_name: event.target.value })} />
-              </label>
-              <label className="grid gap-1 text-sm">
-                <span>Kubernetes version</span>
-                <Input value={config.kubernetes_version} onChange={(event) => setConfig({ ...config, kubernetes_version: event.target.value })} />
-              </label>
+            <div className="rounded-[28px] border border-border bg-muted/60 p-6">
+              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Deployment stages</p>
+
+              <div className="mt-5 grid gap-3 xl:grid-cols-2">
+                <div className="rounded-2xl border border-border bg-card p-4">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <p className="text-sm font-semibold">Core</p>
+                        <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
+                      </div>
+                      <p className="mt-2 text-sm text-neutral-500">AWS, EKS, add-ons, wards, workloads, and cluster outputs.</p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Button onClick={() => void startPlan("core")} disabled={isBusy}>
+                        Plan core
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => void startApply("core")}
+                        disabled={isBusy || !latestPlannedRun("core")}
+                      >
+                        Apply core
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card p-4">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <p className="text-sm font-semibold">Policies</p>
+                        <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
+                      </div>
+                      <p className="mt-2 text-sm text-neutral-500">Kyverno ClusterPolicies and per-ward Tetragon tracing manifests.</p>
+                      <p className="mt-2 text-xs text-neutral-500">
+                        {hasAppliedCoreRun ? "Core is applied. You can plan or apply the policies stage." : "Apply the core stage first to unlock policies."}
+                      </p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAppliedCoreRun}>
+                        Plan policies
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => void startApply("policies")}
+                        disabled={isBusy || !hasAppliedCoreRun || !latestPlannedRun("policies")}
+                      >
+                        Apply policies
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-              <StringListEditor
-                label="Cluster admin IAM principals"
-                value={config.cluster_admin_principal_arns}
-                onChange={(cluster_admin_principal_arns) => setConfig({ ...config, cluster_admin_principal_arns })}
-                addLabel="Add ARN"
-              />
-              <div className="rounded-2xl border border-border bg-muted/60 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Runtime policies</p>
-                <label className="mt-3 flex items-center gap-2 text-sm text-neutral-700">
-                  <input
-                    type="checkbox"
-                    checked={config.enable_custom_runtime_policies}
-                    onChange={(event) => setConfig({ ...config, enable_custom_runtime_policies: event.target.checked })}
-                  />
-                  Enable custom runtime policies
-                </label>
+            <div className="rounded-[28px] border border-border bg-muted/60 p-6">
+                <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Cluster profile</p>
+                <p className="mt-3 text-sm leading-6 text-neutral-400">
+                  Read-only cluster identity and environment metadata managed by the shared Terraform configuration.
+                </p>
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Project</p>
+                    <p className="mt-2 font-semibold">{config.project_name}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Environment</p>
+                    <p className="mt-2 font-semibold">{config.environment}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Cluster name</p>
+                    <p className="mt-2 font-semibold">{config.cluster_name}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Kubernetes version</p>
+                    <p className="mt-2 font-semibold">{config.kubernetes_version}</p>
+                  </div>
+                </div>
+            </div>
+
+            <div className="rounded-[28px] border border-border bg-muted/60 p-6">
+              <div className="flex items-center gap-3">
+                <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Admin access</p>
               </div>
+              <div className="mt-4 rounded-2xl border border-border bg-card p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">ARNs ({config.cluster_admin_principal_arns.length})</p>
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      className="h-8 w-8 px-0 text-xl leading-none"
+                      onClick={addClusterAdminArn}
+                    >
+                      +
+                    </Button>
+                  </div>
+                  <div className="themed-scrollbar h-[5.5rem] overflow-y-auto pr-1">
+                    {config.cluster_admin_principal_arns.length === 0 ? (
+                      null
+                    ) : (
+                      <div className="grid gap-2">
+                        {config.cluster_admin_principal_arns.map((arn, index) => (
+                          <div key={`${arn}-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
+                            <Input
+                              value={arn}
+                              onChange={(event) => updateClusterAdminArn(index, event.target.value)}
+                              placeholder="arn:aws:iam::123456789012:role/example"
+                            />
+                            <Button variant="danger" type="button" onClick={() => removeClusterAdminArn(index)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              
             </div>
           </CardContent>
         </Card>
+
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Subjects</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                {subjectKeys.map((subjectKey) => (
+                    <button
+                      key={subjectKey}
+                      className={classNames(
+                        "w-full rounded-2xl border px-4 py-3 text-left transition",
+                      subjectKey === selectedSubjectKey ? "border-accent bg-muted" : "border-border bg-card hover:bg-muted",
+                      )}
+                      onClick={() => {
+                        setSelectedSubjectKey(subjectKey);
+                      }}
+                    >
+                    <p className="font-medium">{subjectKey}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{config.analysis_subjects[subjectKey]?.tier ?? "ward"}</p>
+                  </button>
+                ))}
+              </div>
+              <div className="grid gap-2">
+                <Button variant="ghost" onClick={addSubject}>
+                  Add subject
+                </Button>
+                <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>
+                  Remove subject
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Applications</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                {config.ward_applications.map((application, index) => (
+                  <button
+                    key={`${application.name}-${index}`}
+                    className={classNames(
+                      "w-full rounded-2xl border px-4 py-3 text-left transition",
+                      index === selectedAppIndex ? "border-accent bg-muted" : "border-border bg-card hover:bg-muted",
+                    )}
+                    onClick={() => {
+                      setSelectedAppIndex(index);
+                    }}
+                  >
+                    <p className="font-medium">{application.name}</p>
+                    <p className="mt-1 text-xs text-neutral-500">{application.namespace}</p>
+                  </button>
+                ))}
+              </div>
+              <div className="grid gap-2">
+                <Button variant="ghost" onClick={addApp}>
+                  Add app
+                </Button>
+                <Button variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>
+                  Remove app
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         <Card>
           <CardHeader>
@@ -1247,7 +1401,7 @@ export default function App() {
               <div className="rounded-2xl border border-border bg-muted/60 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Selected subject</p>
                 <p className="mt-2 font-semibold">{selectedSubjectKey || "None"}</p>
-                <p className="mt-1 text-sm text-neutral-600">{selectedSubject?.description || "Click a subject below to edit it."}</p>
+                <p className="mt-1 text-sm text-neutral-600">{selectedSubject?.description || "Click a subject above to edit it."}</p>
                 {selectedSubject ? (
                   <Button className="mt-4" onClick={() => setIsSubjectModalOpen(true)}>
                     Edit subject
@@ -1258,7 +1412,7 @@ export default function App() {
                 <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Selected app</p>
                 <p className="mt-2 font-semibold">{selectedApp?.name || "None"}</p>
                 <p className="mt-1 text-sm text-neutral-600">
-                  {selectedApp ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers` : "Click an app below to edit it."}
+                  {selectedApp ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers` : "Click an app above to edit it."}
                 </p>
                 {selectedApp ? (
                   <Button className="mt-4" onClick={() => setIsAppModalOpen(true)}>
@@ -1281,7 +1435,7 @@ export default function App() {
                         key={run.id}
                         className={classNames(
                           "w-full rounded-2xl border px-4 py-3 text-left transition",
-                          selectedRunId === run.id ? "border-accent bg-white" : "border-border bg-white/70 hover:bg-white",
+                          selectedRunId === run.id ? "border-accent bg-card" : "border-border bg-card/70 hover:bg-card",
                         )}
                         onClick={() => {
                           setSelectedRunId(run.id);
@@ -1291,7 +1445,7 @@ export default function App() {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <p className="font-medium">{run.kind}</p>
+                            <p className="font-medium">{stageLabel(run.stage)} {run.kind}</p>
                             <p className="text-xs text-neutral-500">{run.id}</p>
                           </div>
                           <Badge className={statusTone(run.status) === "danger" ? "bg-warning text-white" : ""}>
@@ -1311,27 +1465,31 @@ export default function App() {
                   <CardContent className="space-y-4 px-0 pb-0">
                     {selectedRun ? (
                       <>
+                        <div className="rounded-2xl border border-border bg-card p-4">
+                          <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Stage</p>
+                          <p className="mt-2 font-semibold">{stageLabel(selectedRun.stage)}</p>
+                        </div>
                         <div className="grid grid-cols-2 gap-3 2xl:grid-cols-4">
-                          <div className="rounded-2xl border border-border bg-white p-3 text-center">
+                          <div className="rounded-2xl border border-border bg-card p-3 text-center">
                             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Create</p>
                             <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.create ?? 0}</p>
                           </div>
-                          <div className="rounded-2xl border border-border bg-white p-3 text-center">
+                          <div className="rounded-2xl border border-border bg-card p-3 text-center">
                             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Update</p>
                             <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.update ?? 0}</p>
                           </div>
-                          <div className="rounded-2xl border border-border bg-white p-3 text-center">
+                          <div className="rounded-2xl border border-border bg-card p-3 text-center">
                             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Delete</p>
                             <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.delete ?? 0}</p>
                           </div>
-                          <div className="rounded-2xl border border-border bg-white p-3 text-center">
+                          <div className="rounded-2xl border border-border bg-card p-3 text-center">
                             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Replace</p>
                             <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.replace ?? 0}</p>
                           </div>
                         </div>
                         <div className="space-y-2">
                           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Changed resources</p>
-                          <div className="max-h-56 overflow-auto rounded-2xl border border-border bg-white p-3 text-xs text-neutral-700">
+                          <div className="max-h-56 overflow-auto rounded-2xl border border-border bg-card p-3 text-xs text-neutral-300">
                             {(selectedRun.plan_summary?.addresses ?? []).length === 0 ? (
                               <p>No structured plan summary yet.</p>
                             ) : (
@@ -1371,7 +1529,7 @@ export default function App() {
                     <CardTitle>Terraform Outputs</CardTitle>
                   </CardHeader>
                   <CardContent className="px-0 pb-0">
-                    <pre className="max-h-96 overflow-auto rounded-2xl border border-border bg-white p-4 font-mono text-xs text-neutral-800">
+                    <pre className="max-h-96 overflow-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs text-neutral-300">
                       {outputs ? prettyPrint(outputs) : "No outputs available."}
                     </pre>
                   </CardContent>
@@ -1380,77 +1538,6 @@ export default function App() {
             </div>
           </CardContent>
         </Card>
-
-        <div className="grid gap-6 xl:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Subjects</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                {subjectKeys.map((subjectKey) => (
-                    <button
-                      key={subjectKey}
-                      className={classNames(
-                        "w-full rounded-2xl border px-4 py-3 text-left transition",
-                        subjectKey === selectedSubjectKey ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
-                      )}
-                      onClick={() => {
-                        setSelectedSubjectKey(subjectKey);
-                      }}
-                    >
-                    <p className="font-medium">{subjectKey}</p>
-                    <p className="mt-1 text-xs text-neutral-500">{config.analysis_subjects[subjectKey]?.tier ?? "ward"}</p>
-                  </button>
-                ))}
-              </div>
-              <div className="grid gap-2">
-                <Button variant="ghost" onClick={addSubject}>
-                  Add subject
-                </Button>
-                <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>
-                  Remove subject
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Applications</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                {config.ward_applications.map((application, index) => (
-                  <button
-                    key={`${application.name}-${index}`}
-                    className={classNames(
-                      "w-full rounded-2xl border px-4 py-3 text-left transition",
-                      index === selectedAppIndex ? "border-accent bg-muted" : "border-border bg-white hover:bg-muted",
-                    )}
-                    onClick={() => {
-                      setSelectedAppIndex(index);
-                    }}
-                  >
-                    <p className="font-medium">{application.name}</p>
-                    <p className="mt-1 text-xs text-neutral-500">{application.namespace}</p>
-                  </button>
-                ))}
-              </div>
-              <div className="grid gap-2">
-                <Button variant="ghost" onClick={addApp}>
-                  Add app
-                </Button>
-                <Button variant="ghost" onClick={cloneSelectedApp} disabled={!selectedApp}>
-                  Clone app
-                </Button>
-                <Button variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>
-                  Remove app
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
 
         <Modal title="Edit Subject" open={isSubjectModalOpen && Boolean(selectedSubject)} onClose={() => setIsSubjectModalOpen(false)}>
           {selectedSubject ? (
@@ -1558,7 +1645,7 @@ export default function App() {
                 <label className="grid gap-1 text-sm">
                   <span>Namespace</span>
                   <select
-                    className="w-full rounded-2xl border border-border bg-white px-4 py-2 text-sm"
+                    className="w-full rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground"
                     value={selectedApp.namespace}
                     onChange={(event) => updateSelectedApp((current) => ({ ...current, namespace: event.target.value }))}
                   >
@@ -1847,7 +1934,7 @@ export default function App() {
                           placeholder="Volume name"
                         />
                         <select
-                          className="w-full rounded-2xl border border-border bg-white px-4 py-2 text-sm"
+                          className="w-full rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground"
                           value={volumeType}
                           onChange={(event) =>
                             updateSelectedApp((current) => ({
@@ -1933,6 +2020,63 @@ export default function App() {
                       }))
                     }
                   />
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-border bg-muted/60 p-6">
+                <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Deployment stages</p>
+
+                <div className="mt-5 grid gap-3 xl:grid-cols-2">
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <p className="text-sm font-semibold">Core</p>
+                          <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
+                        </div>
+                        <p className="mt-2 text-sm text-neutral-500">AWS, EKS, add-ons, wards, workloads, and cluster outputs.</p>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Button onClick={() => void startPlan("core")} disabled={isBusy}>
+                          Plan core
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => void startApply("core")}
+                          disabled={isBusy || !latestPlannedRun("core")}
+                        >
+                          Apply core
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-border bg-card p-4">
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <p className="text-sm font-semibold">Policies</p>
+                          <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
+                        </div>
+                        <p className="mt-2 text-sm text-neutral-500">Kyverno ClusterPolicies and per-ward Tetragon tracing manifests.</p>
+                        <p className="mt-2 text-xs text-neutral-500">
+                          {hasAppliedCoreRun ? "Core is applied. You can plan or apply the policies stage." : "Apply the core stage first to unlock policies."}
+                        </p>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAppliedCoreRun}>
+                          Plan policies
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => void startApply("policies")}
+                          disabled={isBusy || !hasAppliedCoreRun || !latestPlannedRun("policies")}
+                        >
+                          Apply policies
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
