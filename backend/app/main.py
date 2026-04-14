@@ -39,7 +39,6 @@ app = FastAPI(
     title="KubeGuardian Control Plane",
     version="0.2.0",
     lifespan=lifespan,
-    dependencies=[Depends(auth_dependency)],
 )
 app.add_middleware(
     CORSMiddleware,
@@ -50,7 +49,7 @@ app.add_middleware(
 )
 
 
-@app.get("/api/health", response_model=HealthResponse)
+@app.get("/api/health", response_model=HealthResponse, dependencies=[Depends(auth_dependency)])
 async def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
@@ -62,28 +61,28 @@ async def health() -> HealthResponse:
     )
 
 
-@app.get("/api/config", response_model=TerraformConfig)
+@app.get("/api/config", response_model=TerraformConfig, dependencies=[Depends(auth_dependency)])
 async def get_config() -> TerraformConfig:
     return store.load_config()
 
 
-@app.put("/api/config", response_model=TerraformConfig)
+@app.put("/api/config", response_model=TerraformConfig, dependencies=[Depends(auth_dependency)])
 async def save_config(config: TerraformConfig) -> TerraformConfig:
     store.save_config(config)
     return config
 
 
-@app.post("/api/config/reset", response_model=TerraformConfig)
+@app.post("/api/config/reset", response_model=TerraformConfig, dependencies=[Depends(auth_dependency)])
 async def reset_config() -> TerraformConfig:
     return store.reset_config()
 
 
-@app.get("/api/runs", response_model=RunListResponse)
+@app.get("/api/runs", response_model=RunListResponse, dependencies=[Depends(auth_dependency)])
 async def list_runs() -> RunListResponse:
     return RunListResponse(items=store.list_runs())
 
 
-@app.get("/api/runs/{run_id}", response_model=TerraformRun)
+@app.get("/api/runs/{run_id}", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
 async def get_run(run_id: str) -> TerraformRun:
     run = store.load_run(run_id)
     if run is None:
@@ -91,7 +90,7 @@ async def get_run(run_id: str) -> TerraformRun:
     return run
 
 
-@app.get("/api/runs/{run_id}/logs", response_model=RunLogsResponse)
+@app.get("/api/runs/{run_id}/logs", response_model=RunLogsResponse, dependencies=[Depends(auth_dependency)])
 async def get_run_logs(run_id: str) -> RunLogsResponse:
     run = store.load_run(run_id)
     if run is None:
@@ -99,22 +98,22 @@ async def get_run_logs(run_id: str) -> RunLogsResponse:
     return RunLogsResponse(run_id=run_id, logs=store.read_logs(run_id))
 
 
-@app.post("/api/runs/plan/{stage}", response_model=TerraformRun)
+@app.post("/api/runs/plan/{stage}", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
 async def start_plan(stage: RunStage) -> TerraformRun:
     return await runner.start_plan(stage)
 
 
-@app.post("/api/runs/{run_id}/apply", response_model=TerraformRun)
+@app.post("/api/runs/{run_id}/apply", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
 async def start_apply(run_id: str) -> TerraformRun:
     return await runner.start_apply(run_id)
 
 
-@app.post("/api/runs/{run_id}/cancel", response_model=TerraformRun)
+@app.post("/api/runs/{run_id}/cancel", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
 async def cancel_run(run_id: str) -> TerraformRun:
     return await runner.cancel_run(run_id)
 
 
-@app.get("/api/outputs", response_model=OutputsResponse)
+@app.get("/api/outputs", response_model=OutputsResponse, dependencies=[Depends(auth_dependency)])
 async def get_outputs() -> OutputsResponse:
     outputs = store.latest_outputs()
     if outputs is None:

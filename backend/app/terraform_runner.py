@@ -23,6 +23,14 @@ class RunCanceledError(RuntimeError):
     pass
 
 
+class CommandFailedError(RuntimeError):
+    def __init__(self, command: list[str], exit_code: int, recent_lines: list[str]) -> None:
+        self.command = command
+        self.exit_code = exit_code
+        self.recent_lines = recent_lines
+        super().__init__(build_command_error_message(command, exit_code, recent_lines))
+
+
 class TerraformRunner:
     def __init__(self, settings: Settings, store: SqliteStore, broker: RunEventBroker) -> None:
         self.settings = settings
@@ -310,6 +318,7 @@ class TerraformRunner:
             stderr=asyncio.subprocess.STDOUT,
         )
         self._active_process = proc
+        recent_lines: list[str] = []
 
         assert proc.stdout is not None
         while True:
@@ -317,6 +326,9 @@ class TerraformRunner:
             if not raw:
                 break
             line = raw.decode("utf-8", errors="replace").rstrip()
+            if line:
+                recent_lines.append(line)
+                recent_lines = recent_lines[-20:]
             self.store.append_logs(run_id, [line])
             await self._publish_logs(run_id, [line])
 
@@ -324,7 +336,7 @@ class TerraformRunner:
         if run_id in self._cancel_requested:
             raise RunCanceledError("Run canceled by user.")
         if exit_code != 0:
-            raise RuntimeError(f"{' '.join(command)} failed with exit code {exit_code}")
+            raise CommandFailedError(command, exit_code, recent_lines)
 
     async def _capture_json(self, command: list[str], cwd: Path) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
@@ -376,3 +388,24 @@ def summarize_plan(payload: dict[str, Any]) -> PlanSummary:
         replace=replace,
         addresses=addresses[:50],
     )
+
+
+def build_command_error_message(command: list[str], exit_code: int, recent_lines: list[str]) -> str:
+    recent_output = "\n".join(line for line in recent_lines if line.strip())
+
+    if "No valid credential sources found" in recent_output or "InvalidGrantException" in recent_output:
+        return (
+            "Terraform could not authenticate to AWS. "
+            "Refresh the AWS credentials used by the backend process, then retry. "
+            "If you use AWS SSO, run `aws sso login --profile <your-profile>` and start the backend with "
+            "`AWS_PROFILE=<your-profile>`.\n\n"
+            f"Recent Terraform output:\n{recent_output}"
+        )
+
+    if recent_output:
+        return (
+            f"{' '.join(command)} failed with exit code {exit_code}.\n\n"
+            f"Recent Terraform output:\n{recent_output}"
+        )
+
+    return f"{' '.join(command)} failed with exit code {exit_code}"

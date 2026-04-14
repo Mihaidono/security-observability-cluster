@@ -20,6 +20,7 @@ backend/state/kubeguardian.db
 
 `infrastructure/frontend-managed.auto.tfvars.json` is the Terraform input written by the backend.  
 `backend/state/kubeguardian.db` stores run metadata and logs.
+`backend/.env` stores local backend runtime settings and AWS/Terraform environment variables.
 
 Terraform execution happens in:
 
@@ -37,9 +38,14 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-export KUBEGUARDIAN_API_TOKEN=dev-token
+cp .env.example .env
+# edit .env with your AWS profile and token values
+aws sso login --profile <your-profile>
 uvicorn app.main:app --reload --port 8000
 ```
+
+That install now pulls in `uvicorn[standard]`, which is required for websocket run events.
+The backend loads [backend/.env](/home/mihandrei/work/security-observability-cluster/backend/.env.example) on startup, and Terraform inherits AWS credentials from that backend environment.
 
 ### 2. Start the frontend
 
@@ -54,6 +60,8 @@ VITE_API_TOKEN=dev-token npm run dev
 ```text
 http://127.0.0.1:5173
 ```
+
+The frontend uses `http://127.0.0.1:8000` directly for API and websocket traffic during local dev. If you want a different backend origin, set `VITE_API_BASE_URL`.
 
 You should see:
 * a control-plane panel with `Plan core`, `Apply core`, `Plan policies`, and `Apply policies`
@@ -364,7 +372,9 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-export KUBEGUARDIAN_API_TOKEN=dev-token
+cp .env.example .env
+# edit .env with your AWS profile and token values
+aws sso login --profile <your-profile>
 uvicorn app.main:app --reload --port 8000
 ```
 

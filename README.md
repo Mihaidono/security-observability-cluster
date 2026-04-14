@@ -209,9 +209,14 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-export KUBEGUARDIAN_API_TOKEN=dev-token
+cp .env.example .env
+# edit .env with your AWS profile and token values
+aws sso login --profile <your-profile>
 uvicorn app.main:app --reload --port 8000
 ```
+
+`uvicorn[standard]` is installed through the backend package, so websocket support for `/api/runs/{id}/events` is included after `pip install -e .`.
+The backend loads [backend/.env](/home/mihandrei/work/security-observability-cluster/backend/.env.example) on startup, and Terraform inherits AWS credentials from that backend environment.
 
 Run the frontend:
 
@@ -221,7 +226,7 @@ npm install
 VITE_API_TOKEN=dev-token npm run dev
 ```
 
-The frontend proxies `/api` requests to `http://127.0.0.1:8000` by default.
+In local dev, the frontend talks directly to `http://127.0.0.1:8000` for both HTTP and websocket traffic. You can override that with `VITE_API_BASE_URL` if needed.
 
 For a practical walkthrough on testing the control plane and playing with the template app, see [TESTING_AND_USAGE.md](/home/mihandrei/work/security-observability-cluster/TESTING_AND_USAGE.md).
 

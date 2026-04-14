@@ -5,8 +5,9 @@ description = "FastAPI control plane for Terraform-driven KubeGuardian operation
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",
-  "uvicorn>=0.30.0",
+  "uvicorn[standard]>=0.30.0",
   "pydantic>=2.8.0",
+  "python-dotenv>=1.0.0",
 ]
 
 [build-system]

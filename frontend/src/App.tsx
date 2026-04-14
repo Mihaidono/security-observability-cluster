@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -736,6 +736,10 @@ function stageLabel(stage: RunStage): string {
   return stage === "core" ? "Core" : "Policies";
 }
 
+function isTerminalRunStatus(status?: TerraformRun["status"]): boolean {
+  return status === "planned" || status === "applied" || status === "failed" || status === "canceled";
+}
+
 export default function App() {
   const [config, setConfig] = useState<TerraformConfig | null>(null);
   const [runs, setRuns] = useState<TerraformRun[]>([]);
@@ -750,6 +754,7 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const selectedRunStatusRef = useRef<TerraformRun["status"] | undefined>(undefined);
 
   const subjectKeys = useMemo(() => Object.keys(config?.analysis_subjects ?? {}), [config?.analysis_subjects]);
   const selectedSubject = useMemo(() => {
@@ -766,44 +771,102 @@ export default function App() {
   const apiTokenValue = getApiToken();
 
   useEffect(() => {
+    selectedRunStatusRef.current = selectedRun?.status;
+  }, [selectedRun?.status]);
+
+  useEffect(() => {
     void loadInitial();
   }, []);
 
   useEffect(() => {
     if (!selectedRunId) return;
 
-    const socket = new WebSocket(buildRunEventsUrl(selectedRunId));
-    socket.onmessage = (event) => {
-      const payload = JSON.parse(event.data) as
-        | { type: "run.snapshot"; run: TerraformRun; logs: string[] }
-        | { type: "run.updated"; run: TerraformRun }
-        | { type: "run.logs"; lines: string[] };
+    let isClosed = false;
+    let reconnectTimer: number | null = null;
+    let socket: WebSocket | null = null;
 
-      if (payload.type === "run.snapshot") {
-        setRunInState(payload.run);
-        setSelectedRun(payload.run);
-        setSelectedRunLogs(payload.logs);
-        if (payload.run.outputs) {
-          setOutputs(payload.run.outputs as Record<string, unknown>);
+    async function hydrateSelectedRun() {
+      try {
+        const [runResponse, logsResponse] = await Promise.all([api.getRun(selectedRunId), api.getRunLogs(selectedRunId)]);
+        if (isClosed) return;
+        setRunInState(runResponse);
+        setSelectedRun(runResponse);
+        setSelectedRunLogs(logsResponse.logs);
+        if (runResponse.outputs) {
+          setOutputs(runResponse.outputs as Record<string, unknown>);
+        }
+      } catch {
+        if (!isClosed) {
+          setErrorMessage("Unable to refresh run details.");
         }
       }
+    }
 
-      if (payload.type === "run.updated") {
-        setRunInState(payload.run);
-        setSelectedRun(payload.run);
-        if (payload.run.outputs) {
-          setOutputs(payload.run.outputs as Record<string, unknown>);
+    function connectToRunStream() {
+      if (isClosed) return;
+
+      socket = new WebSocket(buildRunEventsUrl(selectedRunId));
+      socket.onopen = () => {
+        if (!isClosed) {
+          setStatusMessage("Live run stream connected.");
+          setErrorMessage("");
         }
-      }
+      };
 
-      if (payload.type === "run.logs") {
-        setSelectedRunLogs((current) => [...current, ...payload.lines]);
-      }
-    };
-    socket.onerror = () => setErrorMessage("Run event stream disconnected.");
+      socket.onmessage = (event) => {
+        const payload = JSON.parse(event.data) as
+          | { type: "run.snapshot"; run: TerraformRun; logs: string[] }
+          | { type: "run.updated"; run: TerraformRun }
+          | { type: "run.logs"; lines: string[] };
+
+        if (payload.type === "run.snapshot") {
+          setRunInState(payload.run);
+          setSelectedRun(payload.run);
+          setSelectedRunLogs(payload.logs);
+          if (payload.run.outputs) {
+            setOutputs(payload.run.outputs as Record<string, unknown>);
+          }
+        }
+
+        if (payload.type === "run.updated") {
+          setRunInState(payload.run);
+          setSelectedRun(payload.run);
+          if (payload.run.outputs) {
+            setOutputs(payload.run.outputs as Record<string, unknown>);
+          }
+        }
+
+        if (payload.type === "run.logs") {
+          setSelectedRunLogs((current) => [...current, ...payload.lines]);
+        }
+      };
+
+      socket.onerror = () => {
+        if (!isClosed) {
+          setStatusMessage("Live run stream interrupted.");
+        }
+      };
+
+      socket.onclose = () => {
+        if (isClosed) return;
+        if (isTerminalRunStatus(selectedRunStatusRef.current)) return;
+        setStatusMessage("Reconnecting to live run stream...");
+        reconnectTimer = window.setTimeout(() => {
+          void hydrateSelectedRun();
+          connectToRunStream();
+        }, 1500);
+      };
+    }
+
+    void hydrateSelectedRun();
+    connectToRunStream();
 
     return () => {
-      socket.close();
+      isClosed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      socket?.close();
     };
   }, [selectedRunId]);
 
@@ -830,6 +893,7 @@ export default function App() {
 
       if (runResponse.items[0]) {
         setSelectedRunId(runResponse.items[0].id);
+        setSelectedRun(runResponse.items[0]);
       } else {
         await refreshOutputs();
       }
@@ -1058,6 +1122,7 @@ export default function App() {
     try {
       const run = await api.startPlan(stage);
       setRunInState(run);
+      setSelectedRun(run);
       setSelectedRunId(run.id);
       setSelectedRunLogs([]);
       setStatusMessage(`${stageLabel(stage)} plan queued.`);
@@ -1080,6 +1145,7 @@ export default function App() {
     try {
       const run = await api.startApply(plannedRun.id);
       setRunInState(run);
+      setSelectedRun(run);
       setSelectedRunId(run.id);
       setSelectedRunLogs([]);
       setStatusMessage(`${stageLabel(stage)} apply queued.`);

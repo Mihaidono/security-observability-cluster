@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -23,14 +25,16 @@ class Settings:
 
 def get_settings() -> Settings:
     project_root = Path(__file__).resolve().parents[2]
+    backend_root = project_root / "backend"
+    load_dotenv(backend_root / ".env")
     infrastructure_root = project_root / "infrastructure"
     terraform_core_root = infrastructure_root / "core"
     terraform_policies_root = infrastructure_root / "policies"
-    state_dir = project_root / "backend" / "state"
+    state_dir = backend_root / "state"
     runs_dir = state_dir / "runs"
     database_path = state_dir / "kubeguardian.db"
     managed_tfvars_path = infrastructure_root / "frontend-managed.auto.tfvars.json"
-    default_config_path = project_root / "backend" / "app" / "default_managed_config.json"
+    default_config_path = backend_root / "app" / "default_managed_config.json"
 
     cors_origins = [
         origin.strip()

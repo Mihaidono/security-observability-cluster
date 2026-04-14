@@ -1,6 +1,7 @@
 import type { HealthResponse, RunStage, TerraformConfig, TerraformRun } from "./types";
 
 const tokenStorageKey = "kubeguardian-api-token";
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/$/, "");
 
 export function getApiToken(): string {
   return window.localStorage.getItem(tokenStorageKey) ?? import.meta.env.VITE_API_TOKEN ?? "dev-token";
@@ -17,8 +18,20 @@ function authHeaders(headers?: HeadersInit): HeadersInit {
   };
 }
 
+function getApiBaseUrl(): string {
+  if (configuredApiBaseUrl) {
+    return configuredApiBaseUrl;
+  }
+
+  if (window.location.port === "5173") {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+
+  return window.location.origin;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     headers: authHeaders({
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
@@ -35,10 +48,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function buildRunEventsUrl(runId: string): string {
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const host = window.location.host;
+  const apiBaseUrl = new URL(getApiBaseUrl());
+  const protocol = apiBaseUrl.protocol === "https:" ? "wss:" : "ws:";
   const token = encodeURIComponent(getApiToken());
-  return `${protocol}://${host}/api/runs/${runId}/events?token=${token}`;
+  return `${protocol}//${apiBaseUrl.host}/api/runs/${runId}/events?token=${token}`;
 }
 
 export const api = {
