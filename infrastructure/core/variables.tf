@@ -1,7 +1,7 @@
 variable "project_name" {
   description = "Logical project name used for tagging and cluster naming."
   type        = string
-  default     = "kubeguardian"
+  default     = "isolens"
 }
 
 variable "environment" {

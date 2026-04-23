@@ -13,7 +13,7 @@ module "vpc" {
   single_nat_gateway = true
 
   tags = {
-    Blueprint = "kubeguardian"
+    Blueprint = "isolens"
   }
 }
 
@@ -47,6 +47,6 @@ module "eks" {
   }
 
   tags = {
-    Blueprint = "kubeguardian"
+    Blueprint = "isolens"
   }
 }

@@ -46,7 +46,7 @@ output "ward_kubectl_commands" {
   value = {
     for name, app in local.ward_applications :
     name => {
-      pods       = "kubectl get pods -n ${app.namespace} -l kubeguardian.io/application=${app.name}"
+      pods       = "kubectl get pods -n ${app.namespace} -l isolens.io/application=${app.name}"
       deployment = "kubectl describe deployment -n ${app.namespace} ${app.name}"
       service    = app.service.enabled ? "kubectl get svc -n ${app.namespace} ${app.service.name}" : "service disabled"
     }

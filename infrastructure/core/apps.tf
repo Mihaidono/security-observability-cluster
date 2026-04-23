@@ -9,7 +9,7 @@ resource "kubernetes_namespace" "wards" {
       "analysis-tier"                              = each.value.tier
     }, each.value.labels)
     annotations = merge({
-      "kubeguardian.io/description" = each.value.description
+      "isolens.io/description" = each.value.description
     }, each.value.annotations)
   }
 }

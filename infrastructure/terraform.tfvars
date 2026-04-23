@@ -1,4 +1,4 @@
-project_name                 = "kubeguardian"
+project_name                 = "isolens"
 environment                  = "lab"
 cluster_name                 = "forensic-lab"
 kubernetes_version           = "1.35"

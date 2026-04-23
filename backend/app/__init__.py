@@ -1,1 +1,1 @@
-"""KubeGuardian backend package."""
+"""Isolens backend package."""

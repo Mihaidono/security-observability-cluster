@@ -36,7 +36,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="KubeGuardian Control Plane",
+    title="Isolens Control Plane",
     version="0.2.0",
     lifespan=lifespan,
 )

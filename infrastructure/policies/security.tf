@@ -29,11 +29,11 @@ resource "kubernetes_manifest" "kyverno_require_subject_label" {
           }
           validate = {
             failureAction = "Enforce"
-            message       = "Pods deployed into ward namespaces must declare the kubeguardian.io/subject label."
+            message       = "Pods deployed into ward namespaces must declare the isolens.io/subject label."
             pattern = {
               metadata = {
                 labels = {
-                  "kubeguardian.io/subject" = "?*"
+                  "isolens.io/subject" = "?*"
                 }
               }
             }

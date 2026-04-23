@@ -15,11 +15,11 @@ The backend manages two generated artifacts:
 
 ```text
 infrastructure/frontend-managed.auto.tfvars.json
-backend/state/kubeguardian.db
+backend/state/isolens.db
 ```
 
 `infrastructure/frontend-managed.auto.tfvars.json` is the Terraform input written by the backend.  
-`backend/state/kubeguardian.db` stores run metadata and logs.
+`backend/state/isolens.db` stores run metadata and logs.
 `backend/.env` stores local backend runtime settings and AWS/Terraform environment variables.
 
 Terraform execution happens in:
@@ -317,7 +317,7 @@ Avoid wiring UI changes directly to `terraform apply`.
 
 * [frontend-managed.auto.tfvars.json](/home/mihandrei/work/security-observability-cluster/infrastructure/frontend-managed.auto.tfvars.json)
 * [default_managed_config.json](/home/mihandrei/work/security-observability-cluster/backend/app/default_managed_config.json)
-* [kubeguardian.db](/home/mihandrei/work/security-observability-cluster/backend/state/kubeguardian.db)
+* [isolens.db](/home/mihandrei/work/security-observability-cluster/backend/state/isolens.db)
 * [terraform_runner.py](/home/mihandrei/work/security-observability-cluster/backend/app/terraform_runner.py)
 * [main.py](/home/mihandrei/work/security-observability-cluster/backend/app/main.py)
 * [App.tsx](/home/mihandrei/work/security-observability-cluster/frontend/src/App.tsx)
@@ -327,7 +327,7 @@ Avoid wiring UI changes directly to `terraform apply`.
 ### `401 Unauthorized`
 
 Check:
-* `KUBEGUARDIAN_API_TOKEN` in the backend shell
+* `ISOLENS_API_TOKEN` in the backend shell
 * `VITE_API_TOKEN` in the frontend shell
 
 ### Run logs do not update

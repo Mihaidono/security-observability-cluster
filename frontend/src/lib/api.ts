@@ -1,6 +1,6 @@
 import type { HealthResponse, RunStage, TerraformConfig, TerraformRun } from "./types";
 
-const tokenStorageKey = "kubeguardian-api-token";
+const tokenStorageKey = "isolens-api-token";
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/$/, "");
 
 export function getApiToken(): string {

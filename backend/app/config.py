@@ -32,13 +32,14 @@ def get_settings() -> Settings:
     terraform_policies_root = infrastructure_root / "policies"
     state_dir = backend_root / "state"
     runs_dir = state_dir / "runs"
-    database_path = state_dir / "kubeguardian.db"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    database_path = state_dir / "isolens.db"
     managed_tfvars_path = infrastructure_root / "frontend-managed.auto.tfvars.json"
     default_config_path = backend_root / "app" / "default_managed_config.json"
 
     cors_origins = [
         origin.strip()
-        for origin in os.getenv("KUBEGUARDIAN_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+        for origin in os.getenv("ISOLENS_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
         if origin.strip()
     ]
 
@@ -54,5 +55,5 @@ def get_settings() -> Settings:
         default_config_path=default_config_path,
         terraform_bin=os.getenv("TERRAFORM_BIN", "terraform"),
         cors_origins=cors_origins,
-        api_token=os.getenv("KUBEGUARDIAN_API_TOKEN", "dev-token"),
+        api_token=os.getenv("ISOLENS_API_TOKEN", "dev-token"),
     )

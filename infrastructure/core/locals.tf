@@ -22,8 +22,8 @@ locals {
         "app.kubernetes.io/name"       = app.name
         "app.kubernetes.io/component"  = "analysis-subject"
         "app.kubernetes.io/managed-by" = "terraform"
-        "kubeguardian.io/application"  = app.name
-        "kubeguardian.io/subject"      = app.namespace
+        "isolens.io/application"       = app.name
+        "isolens.io/subject"           = app.namespace
       }, try(app.pod_labels, {}))
       pod_annotations                 = try(app.pod_annotations, {})
       automount_service_account_token = try(app.automount_service_account_token, false)

@@ -1,11 +1,11 @@
-# 🛡️ KubeGuardian: eBPF-Powered Forensic & Observability Lab
+# 🛡️ Isolens: eBPF-Powered Forensic & Observability Lab
 
 **An Infrastructure-as-Code (IaC) Framework for Behavioral Analysis, Workload Isolation, and Runtime Forensics.**
 
 ---
 
 ## 📖 Project Overview
-**KubeGuardian** is a high-fidelity Security Observability Lab provisioned on AWS EKS. Unlike standard clusters, this environment is designed specifically for **DevSecOps Research** and **Behavioral Baselining**. 
+**Isolens** is a high-fidelity Security Observability Lab provisioned on AWS EKS. Unlike standard clusters, this environment is designed specifically for **DevSecOps Research** and **Behavioral Baselining**.
 
 By leveraging **Terraform** as the sole orchestrator (no GitOps controller overhead), the lab maintains a strictly deterministic state. It uses kernel-level **eBPF** probes to analyze applications within hardened "Wards" (Namespaces), providing deep visibility into process execution, file access, and network flows without sidecars or code modifications.
 
@@ -179,7 +179,7 @@ The control plane is intentionally small and operator-oriented:
 Backend auth defaults to:
 
 ```text
-KUBEGUARDIAN_API_TOKEN=dev-token
+ISOLENS_API_TOKEN=dev-token
 ```
 
 Frontend can use the same token through:

@@ -1199,7 +1199,7 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="space-y-2">
                       <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">Operations deck</p>
-                      <h1 className="text-3xl font-bold tracking-tight">KubeGuardian Control Plane</h1>
+                      <h1 className="text-3xl font-bold tracking-tight">Isolens Control Plane</h1>
                     </div>
                     <p className="max-w-2xl text-sm leading-6 text-neutral-400">
                       Manage the shared lab config, run the core infrastructure stage, and layer runtime policies on top when the cluster is ready.

@@ -1,7 +1,7 @@
 variable "project_name" {
   description = "Project name used for bucket naming and tags."
   type        = string
-  default     = "kubeguardian"
+  default     = "isolens"
 }
 
 variable "environment" {
@@ -19,7 +19,7 @@ variable "region" {
 variable "state_bucket_name" {
   description = "Globally unique S3 bucket name for Terraform state."
   type        = string
-  default     = "kubeguardian-lab"
+  default     = "isolens-lab"
 }
 
 variable "force_destroy" {
