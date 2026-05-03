@@ -257,6 +257,8 @@ class TerraformRunner:
         run.queue_position = None
         await self._persist_run(run)
 
+        await self._ensure_stage_initialized(run.stage)
+
         plan_file = Path(run.plan_path or self.store.run_dir(run.id) / "planned.tfplan")
         command = [
             self.settings.terraform_bin,
@@ -304,6 +306,8 @@ class TerraformRunner:
         run.updated_at = utc_now()
         run.queue_position = None
         await self._persist_run(run)
+
+        await self._ensure_stage_initialized(run.stage)
 
         command = [
             self.settings.terraform_bin,
@@ -403,6 +407,8 @@ class TerraformRunner:
         run.queue_position = None
         await self._persist_run(run)
 
+        await self._ensure_stage_initialized(run.stage)
+
         command = [
             self.settings.terraform_bin,
             "destroy",
@@ -455,6 +461,38 @@ class TerraformRunner:
     async def _append_internal_log(self, run_id: str, line: str) -> None:
         self.store.append_logs(run_id, [line])
         await self._publish_logs(run_id, [line])
+
+    async def _ensure_stage_initialized(self, stage: RunStage) -> None:
+        cwd = self._terraform_root_for_stage(stage)
+        backend_config = cwd / "backend.hcl"
+
+        command = [self.settings.terraform_bin, "init", "-reconfigure"]
+        if backend_config.exists():
+            command.extend(["-backend-config", str(backend_config)])
+
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+        self._active_process = proc
+        try:
+            stdout, stderr = await proc.communicate()
+            if self._stopping:
+                raise RunCanceledError("Run canceled by user.")
+            if proc.returncode != 0:
+                stderr_text = stderr.decode("utf-8", errors="replace").strip()
+                stdout_text = stdout.decode("utf-8", errors="replace").strip()
+                message = stderr_text or stdout_text or "Terraform init failed."
+                raise RuntimeError(message)
+        except asyncio.CancelledError:
+            await self._terminate_active_process()
+            raise
+        finally:
+            if self._active_process is proc:
+                self._active_process = None
 
     async def _stream_command(self, run_id: str, command: list[str], cwd: Path) -> None:
         proc = await asyncio.create_subprocess_exec(
