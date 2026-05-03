@@ -145,6 +145,73 @@ function prettyPrint(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+type ParsedLogLine = {
+  kind: "plain" | "structured";
+  message: string;
+  detail?: string;
+  level?: string;
+  timestamp?: string;
+  source?: string;
+};
+
+function parseLogLine(line: string): ParsedLogLine {
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    if (!parsed || Array.isArray(parsed)) {
+      return { kind: "plain", message: line };
+    }
+
+    const diagnostic = typeof parsed.diagnostic === "object" && parsed.diagnostic ? (parsed.diagnostic as Record<string, unknown>) : null;
+    const message =
+      (typeof parsed["@message"] === "string" && parsed["@message"]) ||
+      (typeof parsed.message === "string" && parsed.message) ||
+      (typeof parsed.summary === "string" && parsed.summary) ||
+      (typeof diagnostic?.summary === "string" && diagnostic.summary) ||
+      (typeof parsed.type === "string" && parsed.type) ||
+      line;
+
+    const detail =
+      (typeof diagnostic?.detail === "string" && diagnostic.detail) ||
+      (typeof parsed.detail === "string" && parsed.detail) ||
+      undefined;
+
+    const level =
+      (typeof parsed["@level"] === "string" && parsed["@level"]) ||
+      (typeof parsed.level === "string" && parsed.level) ||
+      undefined;
+
+    const timestamp =
+      (typeof parsed["@timestamp"] === "string" && parsed["@timestamp"]) ||
+      (typeof parsed.timestamp === "string" && parsed.timestamp) ||
+      (typeof parsed.time === "string" && parsed.time) ||
+      undefined;
+
+    const source =
+      (typeof parsed.type === "string" && parsed.type) ||
+      (typeof parsed.hook === "string" && parsed.hook) ||
+      undefined;
+
+    return {
+      kind: "structured",
+      message,
+      detail,
+      level,
+      timestamp,
+      source,
+    };
+  } catch {
+    return { kind: "plain", message: line };
+  }
+}
+
+function logLevelTone(level?: string): string {
+  const normalized = level?.toLowerCase();
+  if (normalized === "error" || normalized === "fatal") return "border-warning/40 bg-warning/16 text-foreground";
+  if (normalized === "warn" || normalized === "warning") return "border-[#ab9f9d]/60 bg-[#ab9f9d]/20 text-foreground";
+  if (normalized === "debug" || normalized === "trace") return "border-border/70 bg-card/70 text-foreground/80";
+  return "border-accent/30 bg-accent/12 text-accent";
+}
+
 function sortRuns(runs: TerraformRun[]): TerraformRun[] {
   return [...runs].sort((left, right) => right.created_at.localeCompare(left.created_at));
 }
@@ -778,6 +845,7 @@ function ReadOnlyField({
 export default function App() {
   const [config, setConfig] = useState<TerraformConfig | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("overview");
+  const [autoScrollLogs, setAutoScrollLogs] = useState(true);
   const [runs, setRuns] = useState<TerraformRun[]>([]);
   const [selectedSubjectKey, setSelectedSubjectKey] = useState<string>("");
   const [selectedAppIndex, setSelectedAppIndex] = useState(0);
@@ -793,6 +861,7 @@ export default function App() {
   const [isBusy, setIsBusy] = useState(false);
   const selectedRunStatusRef = useRef<TerraformRun["status"] | undefined>(undefined);
   const workspaceScrollRef = useRef<HTMLDivElement | null>(null);
+  const logsViewportRef = useRef<HTMLDivElement | null>(null);
 
   const subjectKeys = useMemo(() => Object.keys(config?.analysis_subjects ?? {}), [config?.analysis_subjects]);
   const selectedSubject = useMemo(() => {
@@ -954,6 +1023,13 @@ export default function App() {
   useEffect(() => {
     workspaceScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!autoScrollLogs) return;
+    const viewport = logsViewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [selectedRunLogs, autoScrollLogs]);
 
   async function loadInitial() {
     try {
@@ -1784,13 +1860,54 @@ export default function App() {
 
                   <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
                     <Card>
-                      <CardHeader>
+                      <CardHeader className="flex flex-wrap items-center justify-between gap-3">
                         <CardTitle>Run Logs</CardTitle>
+                        <Button variant={autoScrollLogs ? "secondary" : "ghost"} className="px-3 py-1.5 text-xs" onClick={() => setAutoScrollLogs((current) => !current)}>
+                          Auto-scroll {autoScrollLogs ? "On" : "Off"}
+                        </Button>
                       </CardHeader>
                       <CardContent>
-                        <pre className="themed-scrollbar max-h-[32rem] overflow-auto rounded-[1.2rem] border border-border/80 bg-[#383f51] p-4 font-mono text-xs text-[#f6f4fb]">
-                          {selectedRunLogs.length > 0 ? selectedRunLogs.join("\n") : "No logs yet."}
-                        </pre>
+                        <div className="overflow-hidden rounded-[1.2rem] border border-border/80 bg-[#383f51]">
+                          <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 text-[11px] uppercase tracking-[0.24em] text-[#dddbf1]/80">
+                            <span>{selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "No run selected"}</span>
+                            <span>{selectedRunLogs.length} lines</span>
+                          </div>
+                          <div ref={logsViewportRef} className="themed-scrollbar max-h-[32rem] overflow-auto p-4 font-mono text-xs text-[#f6f4fb]">
+                            {selectedRunLogs.length > 0 ? (
+                              <div className="space-y-2.5">
+                                {selectedRunLogs.map((line, index) => (
+                                  (() => {
+                                    const entry = parseLogLine(line);
+                                    return (
+                                      <div key={`${index}-${line}`} className="rounded-[1rem] border border-white/10 bg-white/5 px-3 py-2.5">
+                                          <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.2em]">
+                                            <span className="rounded-full border border-[#d1beb0]/35 bg-[#d1beb0]/12 px-2 py-1 text-[#d1beb0]">
+                                              {index + 1}
+                                            </span>
+                                            {entry.level ? (
+                                              <span className={`rounded-full border px-2 py-1 ${logLevelTone(entry.level)}`}>{entry.level}</span>
+                                            ) : null}
+                                            {entry.source ? <span className="text-[#d1beb0]/80">{entry.source}</span> : null}
+                                            {entry.timestamp ? <span className="text-[#dddbf1]/65">{entry.timestamp}</span> : null}
+                                          </div>
+                                          <p className="mt-2 break-words whitespace-pre-wrap font-sans text-sm leading-6 text-[#f6f4fb]">
+                                            {entry.message}
+                                          </p>
+                                          {entry.detail ? (
+                                            <p className="mt-2 break-words whitespace-pre-wrap font-sans text-xs leading-5 text-[#dddbf1]/78">
+                                              {entry.detail}
+                                            </p>
+                                          ) : null}
+                                      </div>
+                                    );
+                                  })()
+                                ))}
+                              </div>
+                            ) : (
+                              <p>No logs yet.</p>
+                            )}
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
 
@@ -1815,7 +1932,7 @@ export default function App() {
                   <CardHeader>
                     <CardTitle>Cluster Profile</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-5">
+                  <CardContent className="space-y-4">
                     <p className="text-sm leading-6 text-neutral-400">
                       Read-only cluster identity and environment metadata from the shared Terraform configuration.
                     </p>
@@ -1828,11 +1945,11 @@ export default function App() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                <Card className="flex h-[22rem] flex-col overflow-hidden">
                   <CardHeader>
                     <CardTitle>Admin Access</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4">
+                  <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">ARNs ({config.cluster_admin_principal_arns.length})</p>
                       <Button
@@ -1844,7 +1961,7 @@ export default function App() {
                         +
                       </Button>
                     </div>
-                    <div className="themed-scrollbar max-h-[18rem] overflow-y-auto pr-1">
+                    <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
                       <div className="grid gap-2">
                         {config.cluster_admin_principal_arns.map((arn, index) => (
                           <div key={`${arn}-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
