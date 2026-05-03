@@ -41,6 +41,8 @@ resource "helm_release" "cilium" {
     name  = "operator.replicas"
     value = "1"
   }
+
+  depends_on = [aws_eks_access_policy_association.cluster_admins]
 }
 
 resource "helm_release" "tetragon" {
@@ -64,6 +66,8 @@ resource "kubernetes_namespace" "monitoring" {
       "observability-role"                         = "platform"
     }
   }
+
+  depends_on = [aws_eks_access_policy_association.cluster_admins]
 }
 
 resource "helm_release" "lgtm_stack" {

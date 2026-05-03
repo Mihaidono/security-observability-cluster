@@ -7,6 +7,8 @@ resource "kubernetes_namespace" "kyverno" {
       "observability-role"                         = "policy-engine"
     }
   }
+
+  depends_on = [aws_eks_access_policy_association.cluster_admins]
 }
 
 resource "helm_release" "kyverno" {

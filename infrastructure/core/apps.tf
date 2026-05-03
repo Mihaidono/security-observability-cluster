@@ -12,6 +12,8 @@ resource "kubernetes_namespace" "wards" {
       "isolens.io/description" = each.value.description
     }, each.value.annotations)
   }
+
+  depends_on = [aws_eks_access_policy_association.cluster_admins]
 }
 
 resource "kubernetes_config_map" "ward_metadata" {
