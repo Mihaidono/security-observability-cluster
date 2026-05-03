@@ -27,6 +27,11 @@ resource "helm_release" "cilium" {
   }
 
   set {
+    name  = "hubble.relay.enabled"
+    value = "true"
+  }
+
+  set {
     name  = "hubble.ui.enabled"
     value = "true"
   }

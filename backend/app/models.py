@@ -25,6 +25,7 @@ class RunStage(str, Enum):
 class RunKind(str, Enum):
     plan = "plan"
     apply = "apply"
+    destroy = "destroy"
 
 
 class RunStatus(str, Enum):
@@ -33,6 +34,8 @@ class RunStatus(str, Enum):
     planned = "planned"
     applying = "applying"
     applied = "applied"
+    destroying = "destroying"
+    destroyed = "destroyed"
     canceling = "canceling"
     canceled = "canceled"
     failed = "failed"

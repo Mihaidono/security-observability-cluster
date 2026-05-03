@@ -37,7 +37,7 @@ In this lab, applications are "subjects." Each subject is deployed into a **Ward
 │   ├── frontend-managed.auto.tfvars.json
 │   ├── core/                            # VPC, EKS, add-ons, wards, workloads, and outputs
 │   ├── policies/                        # Kyverno ClusterPolicies and Tetragon tracing manifests
-│   └── bootstrap/                       # One-time state bucket and lock-table stack
+│   └── bootstrap/                       # One-time remote-state bucket stack aligned with core/policies backends
 ├── TESTING_AND_USAGE.md # Practical guide for testing the backend, frontend, and Terraform flow
 └── .gitignore           # Root-level ignore rules only
 ```
@@ -120,7 +120,7 @@ This makes it easier to build a frontend that edits a single application schema,
 # Optional but recommended: bootstrap remote state first
 cd infrastructure/bootstrap
 terraform init
-terraform apply -var="state_bucket_name=your-globally-unique-bucket"
+terraform apply
 
 # Initialize and apply the core stage.
 cd ../core
@@ -139,6 +139,7 @@ The split is intentional:
 * `core/` owns AWS, EKS, Helm add-ons, wards, workloads, and operator outputs.
 * `policies/` owns the CRD-backed Kyverno and Tetragon manifest layer that should only run after the cluster is reachable.
 * Each stage already has its own committed [backend.hcl](/home/mihandrei/work/security-observability-cluster/infrastructure/core/backend.hcl) or [backend.hcl](/home/mihandrei/work/security-observability-cluster/infrastructure/policies/backend.hcl), so you can initialize them directly.
+* `bootstrap/` defaults to the `isolens-lab` state bucket and emits staged backend snippets for `dev/core/terraform.tfstate` and `dev/policies/terraform.tfstate`.
 
 ### 4. Cluster Access
 After apply, Terraform now exposes ready-to-run outputs for operator workflow:
@@ -176,7 +177,8 @@ The control plane is intentionally small and operator-oriented:
 * The UI is organized as a tabbed operator shell with `Overview`, `Assets`, `Activity`, and `Settings`.
 * `Assets` is subject-first: pick a ward, see the applications assigned to it, then open the selected subject or app in a modal editor.
 * Ward subjects, services, ingress, containers, probes, volumes, and network policy rules are edited through form-based modals.
-* The control plane exposes staged Terraform actions for `core` and `policies`.
+* The control plane exposes staged Terraform actions for `core` and `policies`, including stage-specific destroy actions.
+* At least one IAM principal ARN must be present in `Settings -> Admin Access` before the backend will allow `plan`, `apply`, or `destroy` runs.
 
 Backend auth defaults to:
 

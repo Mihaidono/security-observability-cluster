@@ -144,6 +144,8 @@ export type RunStatus =
   | "planned"
   | "applying"
   | "applied"
+  | "destroying"
+  | "destroyed"
   | "canceling"
   | "canceled"
   | "failed";
@@ -151,7 +153,7 @@ export type RunStatus =
 export interface TerraformRun {
   id: string;
   stage: RunStage;
-  kind: "plan" | "apply";
+  kind: "plan" | "apply" | "destroy";
   status: RunStatus;
   created_at: string;
   updated_at: string;

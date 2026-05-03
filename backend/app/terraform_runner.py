@@ -74,6 +74,8 @@ class TerraformRunner:
         self._active_process = None
 
     async def start_plan(self, stage: RunStage) -> TerraformRun:
+        self._require_cluster_admin_access()
+
         if stage == RunStage.policies and not self._has_successful_core_apply():
             raise HTTPException(
                 status_code=409,
@@ -107,6 +109,8 @@ class TerraformRunner:
         return run
 
     async def start_apply(self, run_id: str) -> TerraformRun:
+        self._require_cluster_admin_access()
+
         source_run = self.store.load_run(run_id)
         if source_run is None:
             raise HTTPException(status_code=404, detail="Run not found.")
@@ -137,11 +141,43 @@ class TerraformRunner:
         await self._enqueue_run(apply_run)
         return apply_run
 
+    async def start_destroy(self, stage: RunStage) -> TerraformRun:
+        self._require_cluster_admin_access()
+
+        if stage == RunStage.core and self._has_active_policies_stage():
+            raise HTTPException(
+                status_code=409,
+                detail="Destroy the policies stage first. The core stage owns the cluster the policies stage depends on.",
+            )
+
+        destroy_run_id = uuid.uuid4().hex[:12]
+        command = [
+            self.settings.terraform_bin,
+            "destroy",
+            "-auto-approve",
+            "-input=false",
+            "-no-color",
+            "-var-file",
+            str(self.settings.managed_tfvars_path),
+        ]
+        run = TerraformRun(
+            id=destroy_run_id,
+            stage=stage,
+            kind=RunKind.destroy,
+            status=RunStatus.queued,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            command=command,
+            log_path=str(self.store.run_dir(destroy_run_id) / "run.log"),
+        )
+        await self._enqueue_run(run)
+        return run
+
     async def cancel_run(self, run_id: str) -> TerraformRun:
         run = self.store.load_run(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found.")
-        if run.status in {RunStatus.applied, RunStatus.failed, RunStatus.canceled, RunStatus.planned}:
+        if run.status in {RunStatus.applied, RunStatus.destroyed, RunStatus.failed, RunStatus.canceled, RunStatus.planned}:
             raise HTTPException(status_code=409, detail="This run is already finished.")
 
         if run_id in self._queue_order:
@@ -201,8 +237,10 @@ class TerraformRunner:
                 self._active_run_id = run_id
                 if run.kind == RunKind.plan:
                     await self._execute_plan(run)
-                else:
+                elif run.kind == RunKind.apply:
                     await self._execute_apply(run)
+                else:
+                    await self._execute_destroy(run)
             except asyncio.CancelledError:
                 break
             finally:
@@ -291,6 +329,47 @@ class TerraformRunner:
             run.error = None
             await self._persist_run(run)
             self.store.save_json_artifact(run.id, "outputs.json", outputs_payload)
+        except RunCanceledError as exc:
+            run.status = RunStatus.canceled
+            run.completed_at = utc_now()
+            run.updated_at = utc_now()
+            run.error = str(exc)
+            await self._persist_run(run)
+        except Exception as exc:  # noqa: BLE001
+            run.status = RunStatus.failed
+            run.completed_at = utc_now()
+            run.updated_at = utc_now()
+            run.error = str(exc)
+            await self._persist_run(run)
+
+    async def _execute_destroy(self, run: TerraformRun) -> None:
+        run.status = RunStatus.destroying
+        run.started_at = utc_now()
+        run.updated_at = utc_now()
+        run.queue_position = None
+        await self._persist_run(run)
+
+        command = [
+            self.settings.terraform_bin,
+            "destroy",
+            "-auto-approve",
+            "-input=false",
+            "-no-color",
+            "-var-file",
+            str(self.settings.managed_tfvars_path),
+        ]
+        run.command = command
+        await self._persist_run(run)
+
+        try:
+            await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
+
+            run.outputs = {} if run.stage == RunStage.core else None
+            run.status = RunStatus.destroyed
+            run.completed_at = utc_now()
+            run.updated_at = utc_now()
+            run.error = None
+            await self._persist_run(run)
         except RunCanceledError as exc:
             run.status = RunStatus.canceled
             run.completed_at = utc_now()
@@ -416,6 +495,33 @@ class TerraformRunner:
         return any(
             run.stage == RunStage.core and run.kind == RunKind.apply and run.status == RunStatus.applied
             for run in self.store.list_runs()
+        )
+
+    def _has_active_policies_stage(self) -> bool:
+        stage_runs = [
+            run
+            for run in self.store.list_runs()
+            if run.stage == RunStage.policies and run.kind in {RunKind.apply, RunKind.destroy}
+        ]
+        if not stage_runs:
+            return False
+
+        latest = max(stage_runs, key=lambda run: run.created_at)
+        return latest.kind == RunKind.apply and latest.status == RunStatus.applied
+
+    def _require_cluster_admin_access(self) -> None:
+        config = self.store.load_config()
+        admin_arns = [arn.strip() for arn in config.cluster_admin_principal_arns if arn.strip()]
+        if admin_arns:
+            return
+
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Add at least one cluster admin IAM principal ARN in Settings -> Admin Access before planning or "
+                "applying. Without an admin ARN, Terraform can create AWS infrastructure but may not be able to "
+                "manage or destroy the in-cluster Kubernetes and Helm resources safely."
+            ),
         )
 
 

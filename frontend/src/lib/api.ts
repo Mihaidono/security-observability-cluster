@@ -35,6 +35,24 @@ export function buildObservabilityLaunchUrl(path: "hubble-ui"): string {
   return `${getApiBaseUrl()}/api/observability/${path}?token=${token}`;
 }
 
+function parseErrorPayload(payload: string): string {
+  const trimmed = payload.trim();
+  if (!trimmed) {
+    return "Request failed.";
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as { detail?: unknown };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail;
+    }
+  } catch {
+    // Fall through to text cleanup below.
+  }
+
+  return trimmed;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     headers: authHeaders({
@@ -46,7 +64,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const payload = await response.text();
-    throw new Error(payload || `Request failed with status ${response.status}`);
+    throw new Error(parseErrorPayload(payload) || `Request failed with status ${response.status}`);
   }
 
   return response.json() as Promise<T>;
@@ -72,6 +90,7 @@ export const api = {
   getRunLogs: (runId: string) => request<{ run_id: string; logs: string[] }>(`/api/runs/${runId}/logs`),
   startPlan: (stage: RunStage) => request<TerraformRun>(`/api/runs/plan/${stage}`, { method: "POST" }),
   startApply: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/apply`, { method: "POST" }),
+  startDestroy: (stage: RunStage) => request<TerraformRun>(`/api/runs/destroy/${stage}`, { method: "POST" }),
   cancelRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/cancel`, { method: "POST" }),
   getOutputs: () => request<{ outputs: Record<string, unknown> }>("/api/outputs"),
   getHealth: () => request<HealthResponse>("/api/health"),

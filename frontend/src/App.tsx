@@ -152,6 +152,7 @@ type ParsedLogLine = {
   level?: string;
   timestamp?: string;
   source?: string;
+  address?: string;
 };
 
 function parseLogLine(line: string): ParsedLogLine {
@@ -162,11 +163,12 @@ function parseLogLine(line: string): ParsedLogLine {
     }
 
     const diagnostic = typeof parsed.diagnostic === "object" && parsed.diagnostic ? (parsed.diagnostic as Record<string, unknown>) : null;
+    const snippet = typeof diagnostic?.snippet === "object" && diagnostic.snippet ? (diagnostic.snippet as Record<string, unknown>) : null;
     const message =
+      (typeof diagnostic?.summary === "string" && diagnostic.summary) ||
       (typeof parsed["@message"] === "string" && parsed["@message"]) ||
       (typeof parsed.message === "string" && parsed.message) ||
       (typeof parsed.summary === "string" && parsed.summary) ||
-      (typeof diagnostic?.summary === "string" && diagnostic.summary) ||
       (typeof parsed.type === "string" && parsed.type) ||
       line;
 
@@ -187,8 +189,13 @@ function parseLogLine(line: string): ParsedLogLine {
       undefined;
 
     const source =
+      (typeof snippet?.context === "string" && snippet.context) ||
       (typeof parsed.type === "string" && parsed.type) ||
       (typeof parsed.hook === "string" && parsed.hook) ||
+      undefined;
+
+    const address =
+      (typeof diagnostic?.address === "string" && diagnostic.address) ||
       undefined;
 
     return {
@@ -198,6 +205,7 @@ function parseLogLine(line: string): ParsedLogLine {
       level,
       timestamp,
       source,
+      address,
     };
   } catch {
     return { kind: "plain", message: line };
@@ -795,9 +803,9 @@ function Modal({
 }
 
 function statusTone(status?: TerraformRun["status"]): "primary" | "secondary" | "ghost" | "danger" {
-  if (status === "planned" || status === "applied") return "primary";
+  if (status === "planned" || status === "applied" || status === "destroyed") return "primary";
   if (status === "failed" || status === "canceled") return "danger";
-  if (status === "running" || status === "applying" || status === "canceling") return "secondary";
+  if (status === "running" || status === "applying" || status === "destroying" || status === "canceling") return "secondary";
   return "ghost";
 }
 
@@ -806,7 +814,7 @@ function stageLabel(stage: RunStage): string {
 }
 
 function isTerminalRunStatus(status?: TerraformRun["status"]): boolean {
-  return status === "planned" || status === "applied" || status === "failed" || status === "canceled";
+  return status === "planned" || status === "applied" || status === "destroyed" || status === "failed" || status === "canceled";
 }
 
 function MetricTile({
@@ -842,6 +850,45 @@ function ReadOnlyField({
   );
 }
 
+function StageAction({
+  disabledReason,
+  children,
+}: {
+  disabledReason?: string;
+  children: ReactNode;
+}) {
+  if (!disabledReason) {
+    return <>{children}</>;
+  }
+
+  return (
+    <div className="group relative inline-flex">
+      {children}
+      <div className="pointer-events-none absolute bottom-[calc(100%+0.45rem)] left-0 z-20 hidden w-56 rounded-[0.95rem] border border-[#ab9f9d]/40 bg-[#383f51] px-3 py-2 text-left text-xs leading-5 text-[#f6f4fb] shadow-[0_16px_40px_rgba(56,63,81,0.22)] group-hover:block">
+        {disabledReason}
+      </div>
+    </div>
+  );
+}
+
+function formatRunTimestamp(value: string | null | undefined) {
+  if (!value) return "-";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(parsed);
+}
+
 export default function App() {
   const [config, setConfig] = useState<TerraformConfig | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("overview");
@@ -856,6 +903,7 @@ export default function App() {
   const [observabilityLinks, setObservabilityLinks] = useState<ObservabilityLinksResponse | null>(null);
   const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
   const [isAppModalOpen, setIsAppModalOpen] = useState(false);
+  const [armedDestroyStage, setArmedDestroyStage] = useState<RunStage | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -882,6 +930,25 @@ export default function App() {
     () => runs.some((run) => run.stage === "core" && run.kind === "apply" && run.status === "applied"),
     [runs],
   );
+  const hasAdminAccess = useMemo(
+    () => (config?.cluster_admin_principal_arns ?? []).some((arn) => arn.trim() !== ""),
+    [config?.cluster_admin_principal_arns],
+  );
+  const sourcePlanRun = useMemo(() => {
+    if (!selectedRun?.source_run_id) return null;
+    return runs.find((run) => run.id === selectedRun.source_run_id) ?? null;
+  }, [runs, selectedRun?.source_run_id]);
+  const displayedPlanSummary = useMemo(() => {
+    if (!selectedRun) return null;
+    if (selectedRun.kind === "destroy") {
+      return null;
+    }
+    if (selectedRun.kind === "plan") {
+      return selectedRun.plan_summary ?? null;
+    }
+    return sourcePlanRun?.plan_summary ?? null;
+  }, [selectedRun, sourcePlanRun]);
+  const planSummaryLabel = selectedRun?.kind === "apply" ? "Plan behind this apply" : "Planned changes";
   const apiTokenValue = getApiToken();
   const totalAppsWithIngress = useMemo(
     () => config?.ward_applications.filter((application) => application.ingress?.enabled).length ?? 0,
@@ -895,10 +962,39 @@ export default function App() {
     () => config?.ward_applications.reduce((count, application) => count + (application.containers?.length ?? 0), 0) ?? 0,
     [config?.ward_applications],
   );
+  const adminAccessDisabledReason = !hasAdminAccess
+    ? "Add at least one IAM principal ARN in Settings -> Admin Access before running this action."
+    : undefined;
 
   useEffect(() => {
     selectedRunStatusRef.current = selectedRun?.status;
   }, [selectedRun?.status]);
+
+  useEffect(() => {
+    if (!armedDestroyStage) return;
+
+    function handleDocumentClick(event: MouseEvent) {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-destroy-arm]")) {
+        return;
+      }
+      setArmedDestroyStage(null);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setArmedDestroyStage(null);
+      }
+    }
+
+    document.addEventListener("click", handleDocumentClick);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [armedDestroyStage]);
 
   useEffect(() => {
     void loadInitial();
@@ -1324,6 +1420,41 @@ export default function App() {
     }
   }
 
+  async function startDestroy(stage: RunStage) {
+    if (armedDestroyStage !== stage) {
+      setArmedDestroyStage(stage);
+      setErrorMessage("");
+      return;
+    }
+
+    const didSave = await saveManagedConfig();
+    if (!didSave) {
+      setArmedDestroyStage(null);
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const run = await api.startDestroy(stage);
+      setRunInState(run);
+      setSelectedRun(run);
+      setSelectedRunId(run.id);
+      setSelectedRunLogs([]);
+      setStatusMessage(`${stageLabel(stage)} destroy queued.`);
+      setErrorMessage("");
+      setArmedDestroyStage(null);
+      if (stage === "core") {
+        setOutputs(null);
+      }
+    } catch (error) {
+      setStatusMessage(`${stageLabel(stage)} destroy was not queued.`);
+      setErrorMessage((error as Error).message);
+      setArmedDestroyStage(null);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function cancelSelectedRun() {
     if (!selectedRun) return;
     setIsBusy(true);
@@ -1512,7 +1643,7 @@ export default function App() {
                 </Card>
 
                 <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                  <Card>
+                  <Card className="overflow-visible">
                     <CardHeader>
                       <CardTitle>Deployment Stages</CardTitle>
                     </CardHeader>
@@ -1533,10 +1664,26 @@ export default function App() {
                           <MetricTile label="Services" value={totalAppsWithService} />
                         </div>
                         <div className="mt-5 flex flex-wrap gap-2">
-                          <Button onClick={() => void startPlan("core")} disabled={isBusy}>Plan core</Button>
-                          <Button variant="secondary" onClick={() => void startApply("core")} disabled={isBusy || !latestPlannedRun("core")}>
-                            Apply core
-                          </Button>
+                          <StageAction disabledReason={adminAccessDisabledReason}>
+                            <Button onClick={() => void startPlan("core")} disabled={isBusy || !hasAdminAccess}>Plan core</Button>
+                          </StageAction>
+                          <StageAction disabledReason={adminAccessDisabledReason}>
+                            <Button variant="secondary" onClick={() => void startApply("core")} disabled={isBusy || !hasAdminAccess || !latestPlannedRun("core")}>
+                              Apply core
+                            </Button>
+                          </StageAction>
+                          <div data-destroy-arm>
+                            <StageAction disabledReason={adminAccessDisabledReason}>
+                              <Button
+                                variant={armedDestroyStage === "core" ? "danger" : "ghost"}
+                                className={armedDestroyStage === "core" ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]" : ""}
+                                onClick={() => void startDestroy("core")}
+                                disabled={isBusy || !hasAdminAccess}
+                              >
+                                Destroy core
+                              </Button>
+                            </StageAction>
+                          </div>
                         </div>
                       </div>
 
@@ -1558,14 +1705,30 @@ export default function App() {
                           <MetricTile label="Queue Depth" value={selectedRun?.queue_position ?? 0} />
                         </div>
                         <div className="mt-5 flex flex-wrap gap-2">
-                          <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAppliedCoreRun}>Plan policies</Button>
-                          <Button
-                            variant="secondary"
-                            onClick={() => void startApply("policies")}
-                            disabled={isBusy || !hasAppliedCoreRun || !latestPlannedRun("policies")}
-                          >
-                            Apply policies
-                          </Button>
+                          <StageAction disabledReason={adminAccessDisabledReason}>
+                            <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun}>Plan policies</Button>
+                          </StageAction>
+                          <StageAction disabledReason={adminAccessDisabledReason}>
+                            <Button
+                              variant="secondary"
+                              onClick={() => void startApply("policies")}
+                              disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun || !latestPlannedRun("policies")}
+                            >
+                              Apply policies
+                            </Button>
+                          </StageAction>
+                          <div data-destroy-arm>
+                            <StageAction disabledReason={adminAccessDisabledReason}>
+                              <Button
+                                variant={armedDestroyStage === "policies" ? "danger" : "ghost"}
+                                className={armedDestroyStage === "policies" ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]" : ""}
+                                onClick={() => void startDestroy("policies")}
+                                disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun}
+                              >
+                                Destroy policies
+                              </Button>
+                            </StageAction>
+                          </div>
                         </div>
                       </div>
                     </CardContent>
@@ -1807,50 +1970,114 @@ export default function App() {
                   </CardContent>
                 </Card>
 
-                <div className="grid gap-6">
+                <div className="grid min-w-0 gap-6">
                   <Card>
                     <CardHeader>
                       <CardTitle>Run Summary</CardTitle>
                     </CardHeader>
-                    <CardContent className="grid gap-4">
+                    <CardContent className="grid min-w-0 gap-4">
                       {selectedRun ? (
                         <>
                           <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-                            <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                            <div className="min-w-0 rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
                               <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Selected run</p>
-                              <p className="mt-3 text-2xl font-semibold">{stageLabel(selectedRun.stage)} {selectedRun.kind}</p>
-                              <p className="mt-2 text-sm text-neutral-400">
-                                Status: {selectedRun.status}
-                                {selectedRun.queue_position ? ` • Queue #${selectedRun.queue_position}` : ""}
-                              </p>
+                              <p className="mt-3 break-words text-2xl font-semibold">{stageLabel(selectedRun.stage)} {selectedRun.kind}</p>
+                              <div className="mt-4 grid gap-3">
+                                <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
+                                  <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">Status</span>
+                                  <span className="break-words text-sm font-medium text-foreground">
+                                    {selectedRun.status}
+                                    {selectedRun.queue_position ? ` • Queue #${selectedRun.queue_position}` : ""}
+                                  </span>
+                                </div>
+                                <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
+                                  <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">Run ID</span>
+                                  <span className="break-all text-sm text-foreground/80">{selectedRun.id}</span>
+                                </div>
+                                {selectedRun.started_at || selectedRun.completed_at ? (
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    {selectedRun.started_at ? (
+                                      <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
+                                        <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">Started</span>
+                                        <span className="break-words text-sm text-foreground/80">{formatRunTimestamp(selectedRun.started_at)}</span>
+                                      </div>
+                                    ) : null}
+                                    {selectedRun.completed_at ? (
+                                      <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
+                                        <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">Completed</span>
+                                        <span className="break-words text-sm text-foreground/80">{formatRunTimestamp(selectedRun.completed_at)}</span>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
                               {selectedRun.error ? (
                                 <div className="mt-4 rounded-[1.2rem] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
-                                  {selectedRun.error}
+                                  <div className="mb-2 text-[11px] uppercase tracking-[0.22em] text-warning/75">Details</div>
+                                  <div className="themed-scrollbar max-h-40 overflow-auto break-words whitespace-pre-wrap pr-2">
+                                    {selectedRun.error}
+                                  </div>
                                 </div>
                               ) : null}
                             </div>
-                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                              <MetricTile label="Create" value={selectedRun.plan_summary?.create ?? 0} />
-                              <MetricTile label="Update" value={selectedRun.plan_summary?.update ?? 0} />
-                              <MetricTile label="Delete" value={selectedRun.plan_summary?.delete ?? 0} />
-                              <MetricTile label="Replace" value={selectedRun.plan_summary?.replace ?? 0} />
-                            </div>
-                          </div>
-
-                          <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                            <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Changed resources</p>
-                            <div className="themed-scrollbar mt-4 max-h-56 overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-foreground/80">
-                              {(selectedRun.plan_summary?.addresses ?? []).length === 0 ? (
-                                <p>No structured plan summary yet.</p>
+                            <div className="grid min-w-0 gap-3">
+                              {selectedRun.kind === "destroy" ? (
+                                <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                                  <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Destroy run</p>
+                                  <p className="mt-3 text-sm leading-6 text-foreground/75">
+                                    This run removes the resources managed by the {stageLabel(selectedRun.stage).toLowerCase()} stage directly from Terraform state and the target platform.
+                                  </p>
+                                  <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
+                                    <MetricTile label="Stage" value={stageLabel(selectedRun.stage)} />
+                                    <MetricTile label="Mode" value="Destroy" />
+                                  </div>
+                                </div>
                               ) : (
-                                <ul className="space-y-1.5">
-                                  {(selectedRun.plan_summary?.addresses ?? []).map((address) => (
-                                    <li key={address}>{address}</li>
-                                  ))}
-                                </ul>
+                                <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                      <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">{planSummaryLabel}</p>
+                                      {selectedRun.kind === "apply" ? (
+                                        <p className="mt-2 max-w-xl text-sm text-foreground/70">
+                                          These counts come from the saved plan that this apply executed. They are not a record of what finished successfully.
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                    {selectedRun.kind === "apply" && sourcePlanRun ? (
+                                      <Badge className="whitespace-nowrap border-border/80 bg-card/80 text-foreground/75">
+                                        Source plan {sourcePlanRun.id}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                    <MetricTile label="Create" value={displayedPlanSummary?.create ?? 0} />
+                                    <MetricTile label="Update" value={displayedPlanSummary?.update ?? 0} />
+                                    <MetricTile label="Delete" value={displayedPlanSummary?.delete ?? 0} />
+                                    <MetricTile label="Replace" value={displayedPlanSummary?.replace ?? 0} />
+                                  </div>
+                                </div>
                               )}
                             </div>
                           </div>
+
+                          {selectedRun.kind !== "destroy" ? (
+                            <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
+                                {selectedRun.kind === "apply" ? "Resources in saved plan" : "Changed resources"}
+                              </p>
+                              <div className="themed-scrollbar mt-4 max-h-56 overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-foreground/80">
+                                {(displayedPlanSummary?.addresses ?? []).length === 0 ? (
+                                  <p>No structured plan summary yet.</p>
+                                ) : (
+                                  <ul className="space-y-1.5">
+                                    {(displayedPlanSummary?.addresses ?? []).map((address) => (
+                                      <li key={address} className="break-all">{address}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
                         </>
                       ) : (
                         <p className="text-sm text-neutral-500">Select a run.</p>
@@ -1867,34 +2094,35 @@ export default function App() {
                         </Button>
                       </CardHeader>
                       <CardContent>
-                        <div className="overflow-hidden rounded-[1.2rem] border border-border/80 bg-[#383f51]">
-                          <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 text-[11px] uppercase tracking-[0.24em] text-[#dddbf1]/80">
+                        <div className="overflow-hidden rounded-[1.2rem] border border-[#ab9f9d]/45 bg-[#f5f1fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+                          <div className="flex items-center justify-between gap-3 border-b border-[#ab9f9d]/35 bg-[#dddbf1]/72 px-4 py-3 text-[11px] uppercase tracking-[0.24em] text-[#383f51]/78">
                             <span>{selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "No run selected"}</span>
                             <span>{selectedRunLogs.length} lines</span>
                           </div>
-                          <div ref={logsViewportRef} className="themed-scrollbar max-h-[32rem] overflow-auto p-4 font-mono text-xs text-[#f6f4fb]">
+                          <div ref={logsViewportRef} className="themed-scrollbar max-h-[32rem] overflow-auto p-4 font-mono text-xs text-[#383f51]">
                             {selectedRunLogs.length > 0 ? (
                               <div className="space-y-2.5">
                                 {selectedRunLogs.map((line, index) => (
                                   (() => {
                                     const entry = parseLogLine(line);
                                     return (
-                                      <div key={`${index}-${line}`} className="rounded-[1rem] border border-white/10 bg-white/5 px-3 py-2.5">
+                                      <div key={`${index}-${line}`} className="rounded-[1rem] border border-[#ab9f9d]/32 bg-white/78 px-3 py-2.5 shadow-[0_10px_24px_rgba(56,63,81,0.06)]">
                                           <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.2em]">
-                                            <span className="rounded-full border border-[#d1beb0]/35 bg-[#d1beb0]/12 px-2 py-1 text-[#d1beb0]">
+                                            <span className="rounded-full border border-[#3c4f76]/18 bg-[#3c4f76]/10 px-2 py-1 text-[#3c4f76]">
                                               {index + 1}
                                             </span>
                                             {entry.level ? (
                                               <span className={`rounded-full border px-2 py-1 ${logLevelTone(entry.level)}`}>{entry.level}</span>
                                             ) : null}
-                                            {entry.source ? <span className="text-[#d1beb0]/80">{entry.source}</span> : null}
-                                            {entry.timestamp ? <span className="text-[#dddbf1]/65">{entry.timestamp}</span> : null}
+                                            {entry.source ? <span className="text-[#3c4f76]/82">{entry.source}</span> : null}
+                                            {entry.address ? <span className="break-all text-[#383f51]/62">{entry.address}</span> : null}
+                                            {entry.timestamp ? <span className="text-[#383f51]/58">{entry.timestamp}</span> : null}
                                           </div>
-                                          <p className="mt-2 break-words whitespace-pre-wrap font-sans text-sm leading-6 text-[#f6f4fb]">
+                                          <p className="mt-2 break-words whitespace-pre-wrap font-sans text-sm leading-6 text-[#383f51]">
                                             {entry.message}
                                           </p>
                                           {entry.detail ? (
-                                            <p className="mt-2 break-words whitespace-pre-wrap font-sans text-xs leading-5 text-[#dddbf1]/78">
+                                            <p className="mt-2 break-words whitespace-pre-wrap font-sans text-xs leading-5 text-[#3c4f76]/82">
                                               {entry.detail}
                                             </p>
                                           ) : null}
@@ -1904,7 +2132,7 @@ export default function App() {
                                 ))}
                               </div>
                             ) : (
-                              <p>No logs yet.</p>
+                              <p className="text-[#383f51]/62">No logs yet.</p>
                             )}
                           </div>
                         </div>

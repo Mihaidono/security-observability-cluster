@@ -109,6 +109,11 @@ async def start_apply(run_id: str) -> TerraformRun:
     return await runner.start_apply(run_id)
 
 
+@app.post("/api/runs/destroy/{stage}", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
+async def start_destroy(stage: RunStage) -> TerraformRun:
+    return await runner.start_destroy(stage)
+
+
 @app.post("/api/runs/{run_id}/cancel", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
 async def cancel_run(run_id: str) -> TerraformRun:
     return await runner.cancel_run(run_id)

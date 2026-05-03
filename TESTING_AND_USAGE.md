@@ -241,12 +241,19 @@ This is the normal developer workflow in the UI:
 3. Add or adjust applications from that subject-scoped application list.
 4. Open `Edit subject` or `Edit app` to configure service, ingress, containers, probes, volumes, and network policy.
 5. Click `Save`.
-6. Move to `Overview` and click `Plan core`.
-7. Review the structured plan summary and live logs.
-8. Click `Apply core`.
-9. Once core is live, click `Plan policies`.
-10. Review that plan and click `Apply policies`.
-11. Move to `Activity` to inspect outputs and logs.
+6. Open `Settings` and add at least one IAM principal ARN under `Admin Access`.
+7. Move to `Overview` and click `Plan core`.
+8. Review the structured plan summary and live logs.
+9. Click `Apply core`.
+10. Once core is live, click `Plan policies`.
+11. Review that plan and click `Apply policies`.
+12. Move to `Activity` to inspect outputs and logs.
+
+To tear the environment down from the UI:
+
+1. Click `Destroy policies` first.
+2. Wait for that run to finish.
+3. Click `Destroy core`.
 
 ## What To Try In The UI
 
@@ -330,6 +337,7 @@ Expected Terraform effect:
 * selecting a different subject updates the workspace summary and the correct subject opens in the modal editor
 * selecting a different app updates the workspace summary and the correct app opens in the modal editor
 * save persists the managed config
+* plan/apply/destroy are blocked with a clear error if `Admin Access` is empty
 * plan summary counts render after a successful plan
 * run logs update live without polling
 * cancel works for queued or active runs
