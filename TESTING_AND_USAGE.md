@@ -47,6 +47,7 @@ uvicorn app.main:app --port 8000
 That install now pulls in `uvicorn[standard]`, which is required for websocket run events.
 The backend loads [backend/.env](/home/mihandrei/work/security-observability-cluster/backend/.env.example) on startup, and Terraform inherits AWS credentials from that backend environment.
 Use `--reload` only when you explicitly want backend hot reload. Running without it is the cleaner default.
+If you want the frontend to launch the real Hubble UI, set `ISOLENS_HUBBLE_UI_URL` in `backend/.env`.
 
 ### 2. Start the frontend
 
@@ -84,10 +85,27 @@ Notes:
 * the backend container intentionally runs without Uvicorn `--reload` to avoid sticky shutdowns and unnecessary reloader process churn
 
 You should see:
-* a control-plane panel with `Plan core`, `Apply core`, `Plan policies`, and `Apply policies`
-* subject and application lists
-* modal editors for subjects and applications
-* run history, plan summary, logs, and outputs
+* a top control header with status, navigation, and config actions
+* an `Overview` tab with deployment stages and Hubble handoff
+* an `Assets` tab with subject-first navigation, scoped application lists, and modal-based editors
+* an `Activity` tab with run history, plan summary, logs, and outputs
+* a `Settings` tab with cluster profile and admin access
+
+### Optional: local Hubble UI handoff
+
+If Hubble UI is installed in the cluster, a common local setup is:
+
+```bash
+kubectl -n kube-system port-forward svc/hubble-ui 12000:80
+```
+
+Then set this in `backend/.env`:
+
+```text
+ISOLENS_HUBBLE_UI_URL=http://127.0.0.1:12000
+```
+
+After restarting the backend, the frontend `Open Hubble UI` button will launch the real Hubble interface in a new tab.
 
 ## Backend Smoke Tests
 
@@ -199,16 +217,17 @@ Expected:
 
 This is the normal developer workflow in the UI:
 
-1. Add or adjust subjects in the `Subjects` section.
-2. Add or adjust applications in the `Applications` section.
-3. Use `Edit subject` and `Edit app` from the workspace to configure service, ingress, containers, probes, volumes, and network policy.
-4. Click `Save`.
-5. Click `Plan core`.
-6. Review the structured plan summary and live logs.
-7. Click `Apply core`.
-8. Once core is live, click `Plan policies`.
-9. Review that plan and click `Apply policies`.
-10. Read outputs in the workspace.
+1. Add or adjust subjects from the `Assets` tab.
+2. Select a subject to see the applications assigned to that ward.
+3. Add or adjust applications from that subject-scoped application list.
+4. Open `Edit subject` or `Edit app` to configure service, ingress, containers, probes, volumes, and network policy.
+5. Click `Save`.
+6. Move to `Overview` and click `Plan core`.
+7. Review the structured plan summary and live logs.
+8. Click `Apply core`.
+9. Once core is live, click `Plan policies`.
+10. Review that plan and click `Apply policies`.
+11. Move to `Activity` to inspect outputs and logs.
 
 ## What To Try In The UI
 

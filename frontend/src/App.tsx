@@ -3,11 +3,12 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
-import { api, buildRunEventsUrl, getApiToken } from "./lib/api";
+import { api, buildObservabilityLaunchUrl, buildRunEventsUrl, getApiToken } from "./lib/api";
 import type {
   AnalysisSubject,
   ContainerConfig,
   IngressConfig,
+  ObservabilityLinksResponse,
   NetworkPolicyPeer,
   NetworkPolicyPort,
   NetworkPolicyRule,
@@ -21,6 +22,7 @@ import type {
 } from "./lib/types";
 
 type Direction = "ingress" | "egress";
+type AppTab = "overview" | "assets" | "activity" | "settings";
 
 function emptySubject(): AnalysisSubject {
   return {
@@ -708,7 +710,7 @@ function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-neutral-950/70 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#383f51]/48 backdrop-blur-sm p-4" onClick={onClose}>
       <div
         className="panel flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden"
         onClick={(event) => event.stopPropagation()}
@@ -740,8 +742,42 @@ function isTerminalRunStatus(status?: TerraformRun["status"]): boolean {
   return status === "planned" || status === "applied" || status === "failed" || status === "canceled";
 }
 
+function MetricTile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+      <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">{label}</p>
+      <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
+      {hint ? <p className="mt-2 text-sm text-neutral-500">{hint}</p> : null}
+    </div>
+  );
+}
+
+function ReadOnlyField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+      <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">{label}</p>
+      <p className="mt-3 text-sm font-medium text-foreground">{value}</p>
+    </div>
+  );
+}
+
 export default function App() {
   const [config, setConfig] = useState<TerraformConfig | null>(null);
+  const [activeTab, setActiveTab] = useState<AppTab>("overview");
   const [runs, setRuns] = useState<TerraformRun[]>([]);
   const [selectedSubjectKey, setSelectedSubjectKey] = useState<string>("");
   const [selectedAppIndex, setSelectedAppIndex] = useState(0);
@@ -749,12 +785,14 @@ export default function App() {
   const [selectedRun, setSelectedRun] = useState<TerraformRun | null>(null);
   const [selectedRunLogs, setSelectedRunLogs] = useState<string[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown> | null>(null);
+  const [observabilityLinks, setObservabilityLinks] = useState<ObservabilityLinksResponse | null>(null);
   const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
   const [isAppModalOpen, setIsAppModalOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const selectedRunStatusRef = useRef<TerraformRun["status"] | undefined>(undefined);
+  const workspaceScrollRef = useRef<HTMLDivElement | null>(null);
 
   const subjectKeys = useMemo(() => Object.keys(config?.analysis_subjects ?? {}), [config?.analysis_subjects]);
   const selectedSubject = useMemo(() => {
@@ -762,6 +800,13 @@ export default function App() {
     return config.analysis_subjects[selectedSubjectKey] ?? null;
   }, [config, selectedSubjectKey]);
   const selectedApp = useMemo(() => config?.ward_applications[selectedAppIndex] ?? null, [config, selectedAppIndex]);
+  const appsForSelectedSubject = useMemo(
+    () =>
+      (config?.ward_applications ?? [])
+        .map((application, index) => ({ application, index }))
+        .filter(({ application }) => application.namespace === selectedSubjectKey),
+    [config?.ward_applications, selectedSubjectKey],
+  );
   const latestCoreRun = useMemo(() => runs.find((run) => run.stage === "core") ?? null, [runs]);
   const latestPoliciesRun = useMemo(() => runs.find((run) => run.stage === "policies") ?? null, [runs]);
   const hasAppliedCoreRun = useMemo(
@@ -769,6 +814,18 @@ export default function App() {
     [runs],
   );
   const apiTokenValue = getApiToken();
+  const totalAppsWithIngress = useMemo(
+    () => config?.ward_applications.filter((application) => application.ingress?.enabled).length ?? 0,
+    [config?.ward_applications],
+  );
+  const totalAppsWithService = useMemo(
+    () => config?.ward_applications.filter((application) => application.service?.enabled !== false).length ?? 0,
+    [config?.ward_applications],
+  );
+  const totalContainers = useMemo(
+    () => config?.ward_applications.reduce((count, application) => count + (application.containers?.length ?? 0), 0) ?? 0,
+    [config?.ward_applications],
+  );
 
   useEffect(() => {
     selectedRunStatusRef.current = selectedRun?.status;
@@ -894,11 +951,21 @@ export default function App() {
     };
   }, [isSubjectModalOpen, isAppModalOpen]);
 
+  useEffect(() => {
+    workspaceScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeTab]);
+
   async function loadInitial() {
     try {
-      const [loadedConfig, runResponse, health] = await Promise.all([api.getConfig(), api.listRuns(), api.getHealth()]);
+      const [loadedConfig, runResponse, health, links] = await Promise.all([
+        api.getConfig(),
+        api.listRuns(),
+        api.getHealth(),
+        api.getObservabilityLinks(),
+      ]);
       setConfig(loadedConfig);
       setRuns(sortRuns(runResponse.items));
+      setObservabilityLinks(links);
       setSelectedSubjectKey(Object.keys(loadedConfig.analysis_subjects)[0] ?? "");
       setSelectedAppIndex(0);
       setStatusMessage(`Ready. Queue depth ${health.queue_depth}.`);
@@ -912,6 +979,10 @@ export default function App() {
     } catch (error) {
       setErrorMessage((error as Error).message);
     }
+  }
+
+  function openHubbleUi() {
+    window.open(buildObservabilityLaunchUrl("hubble-ui"), "_blank", "noopener,noreferrer");
   }
 
   async function refreshOutputs() {
@@ -999,6 +1070,14 @@ export default function App() {
     const remainingKeys = subjectKeys.filter((key) => key !== selectedSubjectKey);
     setSelectedSubjectKey(remainingKeys[0] ?? "");
     setSelectedAppIndex(0);
+  }
+
+  function selectSubject(subjectKey: string) {
+    setSelectedSubjectKey(subjectKey);
+    const firstAppIndex = config?.ward_applications.findIndex((application) => application.namespace === subjectKey) ?? -1;
+    if (firstAppIndex >= 0) {
+      setSelectedAppIndex(firstAppIndex);
+    }
   }
 
   function addApp() {
@@ -1197,189 +1276,596 @@ export default function App() {
     );
   }
 
+  const tabs: Array<{ id: AppTab; label: string }> = [
+    { id: "overview", label: "Overview" },
+    { id: "assets", label: "Assets" },
+    { id: "activity", label: "Activity" },
+    { id: "settings", label: "Settings" },
+  ];
+
   return (
     <div className="app-shell">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Control Plane</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-6">
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_380px]">
-              <div className="rounded-[28px] border border-border bg-muted/60 p-6">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="space-y-3">
-                    <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">Operations deck</p>
-                      <h1 className="text-3xl font-bold tracking-tight">Isolens Control Plane</h1>
-                    </div>
-                    <p className="max-w-2xl text-sm leading-6 text-neutral-400">
-                      Manage the shared lab config, run the core infrastructure stage, and layer runtime policies on top when the cluster is ready.
-                    </p>
-                  </div>
+      <div className="mx-auto max-w-[1560px] space-y-6">
+        <Card className="overflow-hidden">
+          <CardContent className="space-y-6 px-6 py-6">
+            <div className="flex flex-col gap-6 2xl:flex-row 2xl:items-start 2xl:justify-between">
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">Cluster Flow</p>
+                  <h2 className="text-3xl font-semibold tracking-tight">Keep the important context visible while you work.</h2>
                 </div>
-
-                <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Status</p>
-                    <p className="mt-2 font-semibold">{statusMessage || "Ready"}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Queue</p>
-                    <p className="mt-2 font-semibold">{selectedRun?.queue_position ? `#${selectedRun.queue_position}` : "Ready"}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Current run</p>
-                    <p className="mt-2 font-semibold">{selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind} / ${selectedRun.status}` : "Idle"}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Current stage</p>
-                    <p className="mt-2 font-semibold">{selectedRun ? stageLabel(selectedRun.stage) : "Core first"}</p>
-                  </div>
-                </div>
-
-                {errorMessage ? (
-                  <div className="mt-5 rounded-2xl border border-warning/30 bg-warning/15 px-4 py-3 text-sm text-warning">
-                    {errorMessage}
-                  </div>
-                ) : null}
+                <p className="max-w-3xl text-sm leading-7 text-neutral-400">
+                  Shape workloads, stage Terraform safely, and hand off to native observability tools without losing the current cluster context.
+                </p>
               </div>
 
-              <div className="grid gap-4 rounded-[28px] border border-border bg-card p-6">
-                <div className="grid gap-3">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <MetricTile label="Status" value={statusMessage || "Ready"} />
+                <MetricTile
+                  label="Queue"
+                  value={selectedRun?.queue_position ? `#${selectedRun.queue_position}` : "Idle"}
+                  hint={selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "No active run"}
+                />
+                <MetricTile label="Applications" value={config.ward_applications.length} />
+                <MetricTile label="Containers" value={totalContainers} />
+              </div>
+            </div>
+
+            {errorMessage ? (
+              <div className="rounded-[1.4rem] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+                {errorMessage}
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+              <div className="rounded-[1.6rem] border border-border/80 bg-muted/45 p-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <ReadOnlyField label="Selected Subject" value={selectedSubjectKey || "None"} />
+                  <ReadOnlyField label="Selected App" value={selectedApp?.name ?? "None"} />
+                  <ReadOnlyField label="API Token" value={apiTokenValue || "Not set"} />
+                </div>
+              </div>
+              <div className="rounded-[1.6rem] border border-border/80 bg-muted/45 p-4">
+                <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Current Run</p>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Session</p>
+                    <p className="text-lg font-semibold">
+                      {selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "No selected run"}
+                    </p>
+                    <p className="mt-1 text-sm text-neutral-400">
+                      {selectedRun ? `Status: ${selectedRun.status}` : "Move to Activity to inspect queued and completed work."}
+                    </p>
                   </div>
-                  <div className="grid gap-1 text-sm">
-                    <span>API token</span>
-                    <Input value={apiTokenValue} readOnly placeholder="API token" />
-                    <p className="text-xs text-neutral-500">Read-only. Set via `VITE_API_TOKEN` or saved browser state.</p>
+                  {selectedRun ? <Badge>{selectedRun.status}</Badge> : null}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <CardContent className="px-0 py-0">
+            <div className="sticky top-0 z-20 border-b border-border/80 bg-card/96 px-5 py-4 backdrop-blur-2xl">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-6">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">Operator Console</p>
+                    <h1 className="mt-1 text-2xl font-bold tracking-tight">Isolens</h1>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge>{selectedSubjectKey || "No subject"}</Badge>
+                    <Badge>{selectedApp?.name ?? "No app"}</Badge>
+                    <Badge>{selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.status}` : "No active run"}</Badge>
                   </div>
                 </div>
-                <div className="border-t border-border/70 pt-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Config actions</p>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <Button className="w-full" variant="ghost" onClick={() => void saveManagedConfig()} disabled={isBusy}>
-                      Save config
-                    </Button>
-                    <Button
-                      className="w-full"
-                      variant="danger"
-                      onClick={() => void cancelSelectedRun()}
-                      disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
-                    >
-                      Cancel run
-                    </Button>
-                  </div>
-                  <Button className="mt-3 w-full" variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
-                    Reset managed config
+
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={() => void saveManagedConfig()} disabled={isBusy}>
+                    Save config
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => void cancelSelectedRun()}
+                    disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
+                  >
+                    Cancel run
+                  </Button>
+                  <Button variant="ghost" onClick={() => void resetConfig()} disabled={isBusy}>
+                    Reset config
                   </Button>
                 </div>
               </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={classNames(
+                      "rounded-full border px-4 py-2.5 text-sm font-medium transition",
+                      activeTab === tab.id
+                        ? "border-accent/70 bg-accent text-accentForeground"
+                        : "border-border/80 bg-card/70 text-foreground/80 hover:bg-muted/70 hover:text-foreground",
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="rounded-[28px] border border-border bg-muted/60 p-6">
-              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Deployment stages</p>
-
-              <div className="mt-5 grid gap-3 xl:grid-cols-2">
-                <div className="rounded-2xl border border-border bg-card p-4">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <p className="text-sm font-semibold">Core</p>
-                        <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
+            <div ref={workspaceScrollRef} className="themed-scrollbar h-[calc(100vh-12.5rem)] overflow-y-auto px-5 py-5">
+        <div className="grid h-full gap-6">
+            {activeTab === "overview" ? (
+              <>
+                <Card className="overflow-hidden">
+                  <CardContent className="grid gap-8 px-6 py-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+                    <div className="space-y-4">
+                      <div className="space-y-3">
+                        <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">Overview</p>
+                        <h2 className="text-4xl font-semibold tracking-tight">Operate the cluster in the order it actually wants to be used.</h2>
+                        <p className="max-w-3xl text-sm leading-7 text-neutral-400">
+                          Start with core, layer policies second, and keep observability one click away. This tab should answer what to do next before
+                          you drill into assets or logs.
+                        </p>
                       </div>
-                      <p className="mt-2 text-sm text-neutral-500">AWS, EKS, add-ons, wards, workloads, and cluster outputs.</p>
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <Button onClick={() => void startPlan("core")} disabled={isBusy}>
-                        Plan core
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => void startApply("core")}
-                        disabled={isBusy || !latestPlannedRun("core")}
-                      >
-                        Apply core
-                      </Button>
-                    </div>
-                  </div>
-                </div>
 
-                <div className="rounded-2xl border border-border bg-card p-4">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <p className="text-sm font-semibold">Policies</p>
-                        <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <MetricTile label="Subjects" value={subjectKeys.length} />
+                        <MetricTile label="Applications" value={config.ward_applications.length} />
+                        <MetricTile label="Service-backed" value={totalAppsWithService} />
+                        <MetricTile label="Ingress-enabled" value={totalAppsWithIngress} />
                       </div>
-                      <p className="mt-2 text-sm text-neutral-500">Kyverno ClusterPolicies and per-ward Tetragon tracing manifests.</p>
-                      <p className="mt-2 text-xs text-neutral-500">
-                        {hasAppliedCoreRun ? "Core is applied. You can plan or apply the policies stage." : "Apply the core stage first to unlock policies."}
+                    </div>
+
+                    <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                      <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">Current Focus</p>
+                      <p className="mt-4 text-xl font-semibold">{selectedApp?.name ?? "No selected app"}</p>
+                      <p className="mt-2 text-sm text-neutral-400">
+                        {selectedApp
+                          ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers • ${selectedApp.replicas ?? 1} replicas`
+                          : "Move to Assets to choose a subject and workload before editing."}
                       </p>
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <MetricTile label="Current Run" value={selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "Idle"} />
+                        <MetricTile label="Run Status" value={selectedRun?.status ?? "Ready"} />
+                      </div>
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAppliedCoreRun}>
-                        Plan policies
-                      </Button>
+                  </CardContent>
+                </Card>
+
+                <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Deployment Stages</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid gap-4">
+                      <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-lg font-semibold">Core</p>
+                            <p className="mt-2 text-sm leading-6 text-neutral-400">
+                              VPC, EKS, add-ons, ward namespaces, workloads, and the main operator outputs.
+                            </p>
+                          </div>
+                          <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
+                        </div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-3">
+                          <MetricTile label="Subjects" value={subjectKeys.length} />
+                          <MetricTile label="Apps" value={config.ward_applications.length} />
+                          <MetricTile label="Services" value={totalAppsWithService} />
+                        </div>
+                        <div className="mt-5 flex flex-wrap gap-2">
+                          <Button onClick={() => void startPlan("core")} disabled={isBusy}>Plan core</Button>
+                          <Button variant="secondary" onClick={() => void startApply("core")} disabled={isBusy || !latestPlannedRun("core")}>
+                            Apply core
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-lg font-semibold">Policies</p>
+                            <p className="mt-2 text-sm leading-6 text-neutral-400">
+                              Kyverno and Tetragon custom resources applied only after the core platform is ready.
+                            </p>
+                          </div>
+                          <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
+                        </div>
+                        <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
+                          {hasAppliedCoreRun ? "Core applied, policy stage unlocked" : "Apply core first to unlock this stage"}
+                        </p>
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          <MetricTile label="Selected Run" value={selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "None"} />
+                          <MetricTile label="Queue Depth" value={selectedRun?.queue_position ?? 0} />
+                        </div>
+                        <div className="mt-5 flex flex-wrap gap-2">
+                          <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAppliedCoreRun}>Plan policies</Button>
+                          <Button
+                            variant="secondary"
+                            onClick={() => void startApply("policies")}
+                            disabled={isBusy || !hasAppliedCoreRun || !latestPlannedRun("policies")}
+                          >
+                            Apply policies
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Observability Handoff</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid gap-4">
+                      <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-lg font-semibold">Hubble UI</p>
+                            <p className="mt-2 text-sm leading-6 text-neutral-400">
+                              Keep flow analysis in the native UI instead of flattening it into this dashboard.
+                            </p>
+                          </div>
+                          <Badge>{observabilityLinks?.hubble_available ? "Ready" : "Needs URL"}</Badge>
+                        </div>
+
+                        <div className="mt-4 rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Target</p>
+                          <p className="mt-3 break-all text-sm font-medium">
+                            {observabilityLinks?.hubble_ui_url ?? "Set ISOLENS_HUBBLE_UI_URL in backend/.env"}
+                          </p>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Button onClick={openHubbleUi} disabled={!observabilityLinks?.hubble_available}>Open Hubble UI</Button>
+                          <Button variant="ghost" onClick={() => void loadInitial()} disabled={isBusy}>Refresh status</Button>
+                        </div>
+                        <p className="mt-3 text-xs text-neutral-500">
+                          Local path: `kubectl -n kube-system port-forward svc/hubble-ui 12000:80`
+                        </p>
+                      </div>
+
+                      <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                        <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Where To Go Next</p>
+                        <div className="mt-4 grid gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab("assets")}
+                            className="rounded-[1.2rem] border border-border/80 bg-card/75 px-4 py-4 text-left transition hover:bg-card"
+                          >
+                            <p className="font-medium">Assets</p>
+                            <p className="mt-1 text-sm text-neutral-400">Select a subject, pick its app, and open the form editors.</p>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab("activity")}
+                            className="rounded-[1.2rem] border border-border/80 bg-card/75 px-4 py-4 text-left transition hover:bg-card"
+                          >
+                            <p className="font-medium">Activity</p>
+                            <p className="mt-1 text-sm text-neutral-400">Inspect run logs, plan summaries, and Terraform outputs.</p>
+                          </button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
+            ) : null}
+
+            {activeTab === "assets" ? (
+              <div className="grid gap-6 2xl:h-full 2xl:grid-cols-[320px_minmax(0,1fr)] 2xl:items-stretch">
+                <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
+                  <CardHeader>
+                    <CardTitle>Subjects</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+                    <div className="themed-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                      {subjectKeys.map((subjectKey) => (
+                        <button
+                          key={subjectKey}
+                          className={classNames(
+                            "w-full rounded-[1.4rem] border px-4 py-4 text-left transition",
+                            subjectKey === selectedSubjectKey
+                              ? "border-accent/70 bg-accent/10"
+                              : "border-border/80 bg-card/75 hover:bg-muted/70",
+                          )}
+                          onClick={() => selectSubject(subjectKey)}
+                        >
+                          <p className="font-medium">{subjectKey}</p>
+                          <p className="mt-2 text-xs uppercase tracking-[0.2em] text-neutral-500">
+                            {config.analysis_subjects[subjectKey]?.tier ?? "ward"}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid gap-2 pt-1">
+                      <Button variant="secondary" onClick={addSubject}>Add subject</Button>
+                      <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>Remove subject</Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="grid gap-6 2xl:min-h-0 2xl:grid-rows-[auto_minmax(0,1fr)]">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Selected Subject</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid gap-4">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px]">
+                        <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                          <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Namespace</p>
+                          <p className="mt-3 text-2xl font-semibold">{selectedSubjectKey || "None"}</p>
+                          <p className="mt-3 text-sm leading-6 text-neutral-400">
+                            {selectedSubject?.description || "Choose a subject to inspect quota, labels, and ward metadata."}
+                          </p>
+                          {selectedSubject ? <Button className="mt-5" onClick={() => setIsSubjectModalOpen(true)}>Edit subject</Button> : null}
+                        </div>
+                        <div className="grid gap-3">
+                          <MetricTile label="Tier" value={selectedSubject?.tier ?? "-"} />
+                          <MetricTile label="Labels" value={Object.keys(selectedSubject?.labels ?? {}).length} />
+                          <MetricTile label="Apps In Ward" value={appsForSelectedSubject.length} />
+                        </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <MetricTile label="Pods quota" value={selectedSubject?.resource_quota?.pods ?? "-"} />
+                        <MetricTile label="CPU request" value={selectedSubject?.resource_quota?.requests_cpu ?? "-"} />
+                        <MetricTile label="CPU limit" value={selectedSubject?.resource_quota?.limits_cpu ?? "-"} />
+                        <MetricTile label="Memory limit" value={selectedSubject?.resource_quota?.limits_memory ?? "-"} />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="grid gap-6 2xl:min-h-0 2xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] 2xl:items-stretch">
+                    <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
+                      <CardHeader>
+                        <CardTitle>Applications In This Subject</CardTitle>
+                      </CardHeader>
+                      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+                        <div className="themed-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                          {appsForSelectedSubject.length === 0 ? (
+                            <div className="rounded-[1.4rem] border border-border/80 bg-card/75 px-4 py-4 text-sm text-neutral-400">
+                              No applications are currently assigned to this subject.
+                            </div>
+                          ) : null}
+                          {appsForSelectedSubject.map(({ application, index }) => (
+                            <button
+                              key={`${application.name}-${index}`}
+                              className={classNames(
+                                "w-full rounded-[1.4rem] border px-4 py-4 text-left transition",
+                                index === selectedAppIndex
+                                  ? "border-accent/70 bg-accent/10"
+                                  : "border-border/80 bg-card/75 hover:bg-muted/70",
+                              )}
+                              onClick={() => setSelectedAppIndex(index)}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="font-medium">{application.name}</p>
+                                  <p className="mt-2 text-xs uppercase tracking-[0.2em] text-neutral-500">
+                                    {application.containers?.length ?? 0} containers • {application.replicas ?? 1} replicas
+                                  </p>
+                                </div>
+                                <Badge>{application.ingress?.enabled ? "Ingress" : "Internal"}</Badge>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="grid gap-2 pt-1 sm:grid-cols-2">
+                          <Button variant="secondary" onClick={addApp}>Add app</Button>
+                          <Button variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>Remove app</Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="h-full">
+                      <CardHeader>
+                        <CardTitle>Selected Application</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                          <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Workload</p>
+                              <p className="mt-3 text-2xl font-semibold">{selectedApp?.name || "None"}</p>
+                              <p className="mt-3 text-sm leading-6 text-neutral-400">
+                                {selectedApp
+                                  ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers • ${selectedApp.replicas ?? 1} replicas`
+                                  : "Choose an application to inspect service, ingress, and runtime shape."}
+                              </p>
+                            </div>
+                            {selectedApp ? <Button onClick={() => setIsAppModalOpen(true)}>Edit app</Button> : null}
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-4">
+                          <MetricTile label="Replicas" value={selectedApp?.replicas ?? 0} />
+                          <MetricTile label="Service" value={selectedApp?.service?.enabled === false ? "Off" : "On"} />
+                          <MetricTile label="Ingress" value={selectedApp?.ingress?.enabled ? "On" : "Off"} />
+                          <MetricTile label="Volumes" value={selectedApp?.volumes?.length ?? 0} />
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+                            <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Container Images</p>
+                            <div className="mt-3 space-y-2 text-sm text-foreground/80">
+                              {(selectedApp?.containers ?? []).length === 0 ? <p>No containers.</p> : null}
+                              {(selectedApp?.containers ?? []).map((container) => (
+                                <p key={container.name}>
+                                  {container.name}: {container.image}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+                            <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Exposure</p>
+                            <div className="mt-3 space-y-2 text-sm text-foreground/80">
+                              <p>Service type: {selectedApp?.service?.type ?? "ClusterIP"}</p>
+                              <p>Port: {selectedApp?.service?.port ?? "-"}</p>
+                              <p>Ingress host: {selectedApp?.ingress?.host || "Not configured"}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "activity" ? (
+              <div className="grid gap-6 2xl:grid-cols-[340px_minmax(0,1fr)] 2xl:items-stretch">
+                <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
+                  <CardHeader>
+                    <CardTitle>Runs</CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+                    <div className="themed-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                      {runs.length === 0 ? <p className="text-sm text-neutral-500">No runs.</p> : null}
+                      {runs.map((run) => (
+                        <button
+                          key={run.id}
+                          className={classNames(
+                            "w-full rounded-[1.4rem] border px-4 py-4 text-left transition",
+                            selectedRunId === run.id ? "border-accent/70 bg-accent/10" : "border-border/80 bg-card/75 hover:bg-muted/70",
+                          )}
+                          onClick={() => {
+                            setSelectedRunId(run.id);
+                            setSelectedRun(run);
+                            setSelectedRunLogs([]);
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-medium">{stageLabel(run.stage)} {run.kind}</p>
+                              <p className="mt-1 text-xs text-neutral-500">{run.id}</p>
+                            </div>
+                            <Badge className={statusTone(run.status) === "danger" ? "border-warning/30 bg-warning/10 text-warning" : ""}>
+                              {run.status}
+                              {run.queue_position ? ` #${run.queue_position}` : ""}
+                            </Badge>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="grid gap-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Run Summary</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid gap-4">
+                      {selectedRun ? (
+                        <>
+                          <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+                            <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Selected run</p>
+                              <p className="mt-3 text-2xl font-semibold">{stageLabel(selectedRun.stage)} {selectedRun.kind}</p>
+                              <p className="mt-2 text-sm text-neutral-400">
+                                Status: {selectedRun.status}
+                                {selectedRun.queue_position ? ` • Queue #${selectedRun.queue_position}` : ""}
+                              </p>
+                              {selectedRun.error ? (
+                                <div className="mt-4 rounded-[1.2rem] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+                                  {selectedRun.error}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              <MetricTile label="Create" value={selectedRun.plan_summary?.create ?? 0} />
+                              <MetricTile label="Update" value={selectedRun.plan_summary?.update ?? 0} />
+                              <MetricTile label="Delete" value={selectedRun.plan_summary?.delete ?? 0} />
+                              <MetricTile label="Replace" value={selectedRun.plan_summary?.replace ?? 0} />
+                            </div>
+                          </div>
+
+                          <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                            <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Changed resources</p>
+                            <div className="themed-scrollbar mt-4 max-h-56 overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-foreground/80">
+                              {(selectedRun.plan_summary?.addresses ?? []).length === 0 ? (
+                                <p>No structured plan summary yet.</p>
+                              ) : (
+                                <ul className="space-y-1.5">
+                                  {(selectedRun.plan_summary?.addresses ?? []).map((address) => (
+                                    <li key={address}>{address}</li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-neutral-500">Select a run.</p>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Run Logs</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <pre className="themed-scrollbar max-h-[32rem] overflow-auto rounded-[1.2rem] border border-border/80 bg-[#383f51] p-4 font-mono text-xs text-[#f6f4fb]">
+                          {selectedRunLogs.length > 0 ? selectedRunLogs.join("\n") : "No logs yet."}
+                        </pre>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Terraform Outputs</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <pre className="themed-scrollbar max-h-[32rem] overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 font-mono text-xs text-foreground/80">
+                          {outputs ? prettyPrint(outputs) : "No outputs available."}
+                        </pre>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "settings" ? (
+              <div className="grid gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Cluster Profile</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    <p className="text-sm leading-6 text-neutral-400">
+                      Read-only cluster identity and environment metadata from the shared Terraform configuration.
+                    </p>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <ReadOnlyField label="Project" value={config.project_name} />
+                      <ReadOnlyField label="Environment" value={config.environment} />
+                      <ReadOnlyField label="Cluster name" value={config.cluster_name} />
+                      <ReadOnlyField label="Kubernetes version" value={config.kubernetes_version} />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Admin Access</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">ARNs ({config.cluster_admin_principal_arns.length})</p>
                       <Button
-                        variant="secondary"
-                        onClick={() => void startApply("policies")}
-                        disabled={isBusy || !hasAppliedCoreRun || !latestPlannedRun("policies")}
+                        variant="ghost"
+                        type="button"
+                        className="h-9 w-9 rounded-full px-0 text-xl leading-none"
+                        onClick={addClusterAdminArn}
                       >
-                        Apply policies
+                        +
                       </Button>
                     </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-border bg-muted/60 p-6">
-                <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Cluster profile</p>
-                <p className="mt-3 text-sm leading-6 text-neutral-400">
-                  Read-only cluster identity and environment metadata managed by the shared Terraform configuration.
-                </p>
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Project</p>
-                    <p className="mt-2 font-semibold">{config.project_name}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Environment</p>
-                    <p className="mt-2 font-semibold">{config.environment}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Cluster name</p>
-                    <p className="mt-2 font-semibold">{config.cluster_name}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">Kubernetes version</p>
-                    <p className="mt-2 font-semibold">{config.kubernetes_version}</p>
-                  </div>
-                </div>
-            </div>
-
-            <div className="rounded-[28px] border border-border bg-muted/60 p-6">
-              <div className="flex items-center gap-3">
-                <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Admin access</p>
-              </div>
-              <div className="mt-4 rounded-2xl border border-border bg-card p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">ARNs ({config.cluster_admin_principal_arns.length})</p>
-                    <Button
-                      variant="ghost"
-                      type="button"
-                      className="h-8 w-8 px-0 text-xl leading-none"
-                      onClick={addClusterAdminArn}
-                    >
-                      +
-                    </Button>
-                  </div>
-                  <div className="themed-scrollbar h-[5.5rem] overflow-y-auto pr-1">
-                    {config.cluster_admin_principal_arns.length === 0 ? (
-                      null
-                    ) : (
+                    <div className="themed-scrollbar max-h-[18rem] overflow-y-auto pr-1">
                       <div className="grid gap-2">
                         {config.cluster_admin_principal_arns.map((arn, index) => (
                           <div key={`${arn}-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
@@ -1394,225 +1880,12 @@ export default function App() {
                           </div>
                         ))}
                       </div>
-                    )}
-                  </div>
-                </div>
-              
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-6 xl:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Subjects</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                {subjectKeys.map((subjectKey) => (
-                    <button
-                      key={subjectKey}
-                      className={classNames(
-                        "w-full rounded-2xl border px-4 py-3 text-left transition",
-                      subjectKey === selectedSubjectKey ? "border-accent bg-muted" : "border-border bg-card hover:bg-muted",
-                      )}
-                      onClick={() => {
-                        setSelectedSubjectKey(subjectKey);
-                      }}
-                    >
-                    <p className="font-medium">{subjectKey}</p>
-                    <p className="mt-1 text-xs text-neutral-500">{config.analysis_subjects[subjectKey]?.tier ?? "ward"}</p>
-                  </button>
-                ))}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-              <div className="grid gap-2">
-                <Button variant="ghost" onClick={addSubject}>
-                  Add subject
-                </Button>
-                <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>
-                  Remove subject
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Applications</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                {config.ward_applications.map((application, index) => (
-                  <button
-                    key={`${application.name}-${index}`}
-                    className={classNames(
-                      "w-full rounded-2xl border px-4 py-3 text-left transition",
-                      index === selectedAppIndex ? "border-accent bg-muted" : "border-border bg-card hover:bg-muted",
-                    )}
-                    onClick={() => {
-                      setSelectedAppIndex(index);
-                    }}
-                  >
-                    <p className="font-medium">{application.name}</p>
-                    <p className="mt-1 text-xs text-neutral-500">{application.namespace}</p>
-                  </button>
-                ))}
-              </div>
-              <div className="grid gap-2">
-                <Button variant="ghost" onClick={addApp}>
-                  Add app
-                </Button>
-                <Button variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>
-                  Remove app
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+            ) : null}
         </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Workspace</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <div className="grid gap-4">
-              <div className="rounded-2xl border border-border bg-muted/60 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Selected subject</p>
-                <p className="mt-2 font-semibold">{selectedSubjectKey || "None"}</p>
-                <p className="mt-1 text-sm text-neutral-600">{selectedSubject?.description || "Click a subject above to edit it."}</p>
-                {selectedSubject ? (
-                  <Button className="mt-4" onClick={() => setIsSubjectModalOpen(true)}>
-                    Edit subject
-                  </Button>
-                ) : null}
-              </div>
-              <div className="rounded-2xl border border-border bg-muted/60 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Selected app</p>
-                <p className="mt-2 font-semibold">{selectedApp?.name || "None"}</p>
-                <p className="mt-1 text-sm text-neutral-600">
-                  {selectedApp ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers` : "Click an app above to edit it."}
-                </p>
-                {selectedApp ? (
-                  <Button className="mt-4" onClick={() => setIsAppModalOpen(true)}>
-                    Edit app
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="grid gap-4">
-              <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-                <Card className="border-none shadow-none">
-                  <CardHeader className="px-0 pt-0">
-                    <CardTitle>Runs</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3 px-0 pb-0">
-                    {runs.length === 0 ? <p className="text-sm text-neutral-500">No runs.</p> : null}
-                    {runs.map((run) => (
-                      <button
-                        key={run.id}
-                        className={classNames(
-                          "w-full rounded-2xl border px-4 py-3 text-left transition",
-                          selectedRunId === run.id ? "border-accent bg-card" : "border-border bg-card/70 hover:bg-card",
-                        )}
-                        onClick={() => {
-                          setSelectedRunId(run.id);
-                          setSelectedRun(run);
-                          setSelectedRunLogs([]);
-                        }}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="font-medium">{stageLabel(run.stage)} {run.kind}</p>
-                            <p className="text-xs text-neutral-500">{run.id}</p>
-                          </div>
-                          <Badge className={statusTone(run.status) === "danger" ? "bg-warning text-white" : ""}>
-                            {run.status}
-                            {run.queue_position ? ` #${run.queue_position}` : ""}
-                          </Badge>
-                        </div>
-                      </button>
-                    ))}
-                  </CardContent>
-                </Card>
-
-                <Card className="border-none shadow-none">
-                  <CardHeader className="px-0 pt-0">
-                    <CardTitle>Run Summary</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4 px-0 pb-0">
-                    {selectedRun ? (
-                      <>
-                        <div className="rounded-2xl border border-border bg-card p-4">
-                          <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Stage</p>
-                          <p className="mt-2 font-semibold">{stageLabel(selectedRun.stage)}</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 2xl:grid-cols-4">
-                          <div className="rounded-2xl border border-border bg-card p-3 text-center">
-                            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Create</p>
-                            <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.create ?? 0}</p>
-                          </div>
-                          <div className="rounded-2xl border border-border bg-card p-3 text-center">
-                            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Update</p>
-                            <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.update ?? 0}</p>
-                          </div>
-                          <div className="rounded-2xl border border-border bg-card p-3 text-center">
-                            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Delete</p>
-                            <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.delete ?? 0}</p>
-                          </div>
-                          <div className="rounded-2xl border border-border bg-card p-3 text-center">
-                            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Replace</p>
-                            <p className="mt-2 text-xl font-semibold">{selectedRun.plan_summary?.replace ?? 0}</p>
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Changed resources</p>
-                          <div className="max-h-56 overflow-auto rounded-2xl border border-border bg-card p-3 text-xs text-neutral-300">
-                            {(selectedRun.plan_summary?.addresses ?? []).length === 0 ? (
-                              <p>No structured plan summary yet.</p>
-                            ) : (
-                              <ul className="space-y-1">
-                                {(selectedRun.plan_summary?.addresses ?? []).map((address) => (
-                                  <li key={address}>{address}</li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        </div>
-                        {selectedRun.error ? (
-                          <div className="rounded-2xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">{selectedRun.error}</div>
-                        ) : null}
-                      </>
-                    ) : (
-                      <p className="text-sm text-neutral-500">Select a run.</p>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-                <Card className="border-none shadow-none">
-                  <CardHeader className="px-0 pt-0">
-                    <CardTitle>Run Logs</CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-0 pb-0">
-                    <pre className="max-h-96 overflow-auto rounded-2xl border border-border bg-neutral-950 p-4 font-mono text-xs text-neutral-100">
-                      {selectedRunLogs.length > 0 ? selectedRunLogs.join("\n") : "No logs yet."}
-                    </pre>
-                  </CardContent>
-                </Card>
-
-                <Card className="border-none shadow-none">
-                  <CardHeader className="px-0 pt-0">
-                    <CardTitle>Terraform Outputs</CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-0 pb-0">
-                    <pre className="max-h-96 overflow-auto rounded-2xl border border-border bg-card p-4 font-mono text-xs text-neutral-300">
-                      {outputs ? prettyPrint(outputs) : "No outputs available."}
-                    </pre>
-                  </CardContent>
-                </Card>
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -2104,6 +2377,7 @@ export default function App() {
             </div>
           ) : null}
         </Modal>
+
       </div>
     </div>
   );

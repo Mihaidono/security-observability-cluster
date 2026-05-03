@@ -176,6 +176,11 @@ export interface HealthResponse {
   stages: RunStage[];
 }
 
+export interface ObservabilityLinksResponse {
+  hubble_ui_url?: string | null;
+  hubble_available: boolean;
+}
+
 export interface RunEventSnapshot {
   type: "run.snapshot";
   run: TerraformRun;

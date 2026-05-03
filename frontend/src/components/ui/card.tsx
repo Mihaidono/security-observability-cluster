@@ -5,7 +5,7 @@ export function Card({ children, className = "" }: PropsWithChildren<{ className
 }
 
 export function CardHeader({ children, className = "" }: PropsWithChildren<{ className?: string }>) {
-  return <div className={`border-b border-border px-5 py-4 ${className}`}>{children}</div>;
+  return <div className={`border-b border-border/80 px-5 py-4 ${className}`}>{children}</div>;
 }
 
 export function CardTitle({ children, className = "" }: PropsWithChildren<{ className?: string }>) {

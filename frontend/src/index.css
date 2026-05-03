@@ -12,45 +12,61 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     background-image:
-      radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 30%),
-      radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 24%),
-      radial-gradient(circle at bottom right, rgba(249, 115, 22, 0.12), transparent 26%),
-      linear-gradient(180deg, rgba(9, 17, 27, 0.98), rgba(5, 10, 18, 1));
+      radial-gradient(circle at top left, rgba(60, 79, 118, 0.16), transparent 28%),
+      radial-gradient(circle at 84% 10%, rgba(209, 190, 176, 0.24), transparent 24%),
+      radial-gradient(circle at bottom right, rgba(171, 159, 157, 0.22), transparent 24%),
+      linear-gradient(180deg, rgba(221, 219, 241, 0.98), rgba(241, 237, 248, 1));
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(56, 63, 81, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56, 63, 81, 0.045) 1px, transparent 1px);
+    background-size: 36px 36px;
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 82%);
+    opacity: 0.28;
   }
 }
 
 @layer components {
   .app-shell {
-    @apply min-h-screen px-4 py-6 md:px-8;
+    @apply min-h-screen px-4 py-5 md:px-6 lg:px-8;
   }
 
   .panel {
-    @apply rounded-3xl border border-border bg-card shadow-panel;
+    @apply rounded-[1.9rem] border border-border/80 bg-card shadow-panel backdrop-blur-xl;
   }
 
   .themed-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: rgba(56, 189, 248, 0.42) transparent;
+    scrollbar-color: rgba(60, 79, 118, 0.72) rgba(209, 190, 176, 0.72);
   }
 
   .themed-scrollbar::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
 
   .themed-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
+    background: rgba(209, 190, 176, 0.72);
+    border: 2px solid transparent;
+    background-clip: padding-box;
     border-radius: 9999px;
   }
 
   .themed-scrollbar::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(56, 189, 248, 0.72), rgba(14, 165, 233, 0.52));
-    border: 1px solid transparent;
+    background: linear-gradient(180deg, rgba(60, 79, 118, 0.95), rgba(56, 63, 81, 0.72));
+    border: 2px solid transparent;
     background-clip: padding-box;
     border-radius: 9999px;
   }
 
   .themed-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, rgba(125, 211, 252, 0.78), rgba(56, 189, 248, 0.62));
+    background: linear-gradient(180deg, rgba(60, 79, 118, 1), rgba(56, 63, 81, 0.86));
   }
 }

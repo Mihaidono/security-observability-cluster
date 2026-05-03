@@ -1,4 +1,4 @@
-import type { HealthResponse, RunStage, TerraformConfig, TerraformRun } from "./types";
+import type { HealthResponse, ObservabilityLinksResponse, RunStage, TerraformConfig, TerraformRun } from "./types";
 
 const tokenStorageKey = "isolens-api-token";
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/$/, "");
@@ -28,6 +28,11 @@ function getApiBaseUrl(): string {
   }
 
   return window.location.origin;
+}
+
+export function buildObservabilityLaunchUrl(path: "hubble-ui"): string {
+  const token = encodeURIComponent(getApiToken());
+  return `${getApiBaseUrl()}/api/observability/${path}?token=${token}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -70,4 +75,5 @@ export const api = {
   cancelRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/cancel`, { method: "POST" }),
   getOutputs: () => request<{ outputs: Record<string, unknown> }>("/api/outputs"),
   getHealth: () => request<HealthResponse>("/api/health"),
+  getObservabilityLinks: () => request<ObservabilityLinksResponse>("/api/observability/links"),
 };

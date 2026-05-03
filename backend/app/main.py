@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from .auth import require_api_token, require_websocket_token
 from .config import Settings, get_settings
 from .events import RunEventBroker
-from .models import HealthResponse, OutputsResponse, RunListResponse, RunLogsResponse, RunStage, TerraformConfig, TerraformRun
+from .models import HealthResponse, ObservabilityLinksResponse, OutputsResponse, RunListResponse, RunLogsResponse, RunStage, TerraformConfig, TerraformRun
 from .store import SqliteStore
 from .terraform_runner import TerraformRunner
 
@@ -119,6 +120,22 @@ async def get_outputs() -> OutputsResponse:
     if outputs is None:
         raise HTTPException(status_code=404, detail="No outputs are available yet.")
     return OutputsResponse(outputs=outputs)
+
+
+@app.get("/api/observability/links", response_model=ObservabilityLinksResponse, dependencies=[Depends(auth_dependency)])
+async def get_observability_links() -> ObservabilityLinksResponse:
+    return ObservabilityLinksResponse(
+        hubble_ui_url=settings.hubble_ui_url,
+        hubble_available=bool(settings.hubble_ui_url),
+    )
+
+
+@app.get("/api/observability/hubble-ui")
+async def open_hubble_ui(token: str | None = Query(default=None)) -> RedirectResponse:
+    require_api_token(settings=settings, authorization=f"Bearer {token}" if token else None)
+    if not settings.hubble_ui_url:
+        raise HTTPException(status_code=404, detail="Hubble UI is not configured.")
+    return RedirectResponse(url=settings.hubble_ui_url, status_code=307)
 
 
 @app.websocket("/api/runs/{run_id}/events")

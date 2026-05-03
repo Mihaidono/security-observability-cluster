@@ -78,6 +78,11 @@ class OutputsResponse(BaseModel):
     outputs: dict[str, Any]
 
 
+class ObservabilityLinksResponse(BaseModel):
+    hubble_ui_url: str | None = None
+    hubble_available: bool = False
+
+
 class HealthResponse(BaseModel):
     status: str
     active_run_id: str | None = None

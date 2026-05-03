@@ -173,7 +173,9 @@ The backend writes the frontend-managed configuration to `infrastructure/fronten
 The control plane is intentionally small and operator-oriented:
 * `backend/` runs a FastAPI API with bearer-token auth, SQLite-backed run history, queued Terraform execution, cancel support, and WebSocket event streaming.
 * `frontend/` runs a Vite + React UI with Tailwind styling and lightweight shadcn-style components.
-* The UI is form-driven: ward subjects, services, ingress, containers, probes, volumes, and network policy rules are edited with fields and add/remove controls.
+* The UI is organized as a tabbed operator shell with `Overview`, `Assets`, `Activity`, and `Settings`.
+* `Assets` is subject-first: pick a ward, see the applications assigned to it, then open the selected subject or app in a modal editor.
+* Ward subjects, services, ingress, containers, probes, volumes, and network policy rules are edited through form-based modals.
 * The control plane exposes staged Terraform actions for `core` and `policies`.
 
 Backend auth defaults to:
@@ -200,6 +202,8 @@ Backend endpoints:
 * `GET /api/runs/{id}`
 * `GET /api/runs/{id}/logs`
 * `GET /api/outputs`
+* `GET /api/observability/links`
+* `GET /api/observability/hubble-ui?token=...`
 * `WS /api/runs/{id}/events?token=...`
 
 Run the backend:
@@ -218,6 +222,7 @@ uvicorn app.main:app --port 8000
 `uvicorn[standard]` is installed through the backend package, so websocket support for `/api/runs/{id}/events` is included after `pip install -e .`.
 The backend loads [backend/.env](/home/mihandrei/work/security-observability-cluster/backend/.env.example) on startup, and Terraform inherits AWS credentials from that backend environment.
 Use `--reload` only if you specifically want hot reload during backend development. Running without it shuts down more cleanly.
+If you want the frontend to launch the real Hubble UI, set `ISOLENS_HUBBLE_UI_URL` in `backend/.env`. A common local choice is `http://127.0.0.1:12000` after port-forwarding `svc/hubble-ui`.
 
 Run the frontend:
 
