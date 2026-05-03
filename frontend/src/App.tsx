@@ -708,7 +708,7 @@ function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-neutral-950/70 backdrop-blur-sm p-4" onClick={onClose}>
       <div
         className="panel flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden"
         onClick={(event) => event.stopPropagation()}
@@ -881,6 +881,18 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    const hasOpenModal = isSubjectModalOpen || isAppModalOpen;
+    if (!hasOpenModal) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isSubjectModalOpen, isAppModalOpen]);
 
   async function loadInitial() {
     try {
@@ -2089,62 +2101,6 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="rounded-[28px] border border-border bg-muted/60 p-6">
-                <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Deployment stages</p>
-
-                <div className="mt-5 grid gap-3 xl:grid-cols-2">
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <p className="text-sm font-semibold">Core</p>
-                          <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
-                        </div>
-                        <p className="mt-2 text-sm text-neutral-500">AWS, EKS, add-ons, wards, workloads, and cluster outputs.</p>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Button onClick={() => void startPlan("core")} disabled={isBusy}>
-                          Plan core
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => void startApply("core")}
-                          disabled={isBusy || !latestPlannedRun("core")}
-                        >
-                          Apply core
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-border bg-card p-4">
-                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <p className="text-sm font-semibold">Policies</p>
-                          <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
-                        </div>
-                        <p className="mt-2 text-sm text-neutral-500">Kyverno ClusterPolicies and per-ward Tetragon tracing manifests.</p>
-                        <p className="mt-2 text-xs text-neutral-500">
-                          {hasAppliedCoreRun ? "Core is applied. You can plan or apply the policies stage." : "Apply the core stage first to unlock policies."}
-                        </p>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAppliedCoreRun}>
-                          Plan policies
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => void startApply("policies")}
-                          disabled={isBusy || !hasAppliedCoreRun || !latestPlannedRun("policies")}
-                        >
-                          Apply policies
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           ) : null}
         </Modal>

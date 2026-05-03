@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +44,7 @@ class TerraformRunner:
         self._active_process: asyncio.subprocess.Process | None = None
         self._worker_task: asyncio.Task[None] | None = None
         self._cancel_requested: set[str] = set()
+        self._stopping = False
 
     @property
     def active_run_id(self) -> str | None:
@@ -52,20 +55,23 @@ class TerraformRunner:
         return len(self._queue_order)
 
     async def start(self) -> None:
+        self._stopping = False
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker_loop())
 
     async def stop(self) -> None:
+        self._stopping = True
+
         if self._worker_task is not None:
             self._worker_task.cancel()
+        await self._terminate_active_process()
+        if self._worker_task is not None:
             try:
-                await self._worker_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self._worker_task, timeout=8)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             self._worker_task = None
-
-        if self._active_process is not None and self._active_process.returncode is None:
-            self._active_process.terminate()
+        self._active_process = None
 
     async def start_plan(self, stage: RunStage) -> TerraformRun:
         if stage == RunStage.policies and not self._has_successful_core_apply():
@@ -155,8 +161,7 @@ class TerraformRunner:
             run.updated_at = utc_now()
             run.error = "Cancellation requested."
             await self._persist_run(run)
-            if self._active_process is not None and self._active_process.returncode is None:
-                self._active_process.terminate()
+            await self._terminate_active_process()
             return run
 
         raise HTTPException(status_code=409, detail="The run is not queued or active.")
@@ -182,8 +187,9 @@ class TerraformRunner:
 
     async def _worker_loop(self) -> None:
         while True:
-            run_id = await self._queue.get()
+            run_id: str | None = None
             try:
+                run_id = await self._queue.get()
                 if run_id in self._queue_order:
                     self._queue_order.remove(run_id)
                 await self._refresh_queue_positions()
@@ -197,11 +203,14 @@ class TerraformRunner:
                     await self._execute_plan(run)
                 else:
                     await self._execute_apply(run)
+            except asyncio.CancelledError:
+                break
             finally:
                 self._active_run_id = None
                 self._active_process = None
-                self._cancel_requested.discard(run_id)
-                self._queue.task_done()
+                if run_id is not None:
+                    self._cancel_requested.discard(run_id)
+                    self._queue.task_done()
 
     async def _execute_plan(self, run: TerraformRun) -> None:
         run.status = RunStatus.running
@@ -316,27 +325,35 @@ class TerraformRunner:
             cwd=str(cwd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
         )
         self._active_process = proc
         recent_lines: list[str] = []
 
-        assert proc.stdout is not None
-        while True:
-            raw = await proc.stdout.readline()
-            if not raw:
-                break
-            line = raw.decode("utf-8", errors="replace").rstrip()
-            if line:
-                recent_lines.append(line)
-                recent_lines = recent_lines[-20:]
-            self.store.append_logs(run_id, [line])
-            await self._publish_logs(run_id, [line])
+        try:
+            assert proc.stdout is not None
+            while True:
+                raw = await proc.stdout.readline()
+                if not raw:
+                    break
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    recent_lines.append(line)
+                    recent_lines = recent_lines[-20:]
+                self.store.append_logs(run_id, [line])
+                await self._publish_logs(run_id, [line])
 
-        exit_code = await proc.wait()
-        if run_id in self._cancel_requested:
-            raise RunCanceledError("Run canceled by user.")
-        if exit_code != 0:
-            raise CommandFailedError(command, exit_code, recent_lines)
+            exit_code = await proc.wait()
+            if run_id in self._cancel_requested or self._stopping:
+                raise RunCanceledError("Run canceled by user.")
+            if exit_code != 0:
+                raise CommandFailedError(command, exit_code, recent_lines)
+        except asyncio.CancelledError:
+            await self._terminate_active_process()
+            raise
+        finally:
+            if self._active_process is proc:
+                self._active_process = None
 
     async def _capture_json(self, command: list[str], cwd: Path) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
@@ -344,11 +361,51 @@ class TerraformRunner:
             cwd=str(cwd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(stderr.decode("utf-8", errors="replace").strip() or "Terraform command failed.")
-        return json.loads(stdout.decode("utf-8"))
+        self._active_process = proc
+        try:
+            stdout, stderr = await proc.communicate()
+            if self._stopping:
+                raise RunCanceledError("Run canceled by user.")
+            if proc.returncode != 0:
+                raise RuntimeError(stderr.decode("utf-8", errors="replace").strip() or "Terraform command failed.")
+            return json.loads(stdout.decode("utf-8"))
+        except asyncio.CancelledError:
+            await self._terminate_active_process()
+            raise
+        finally:
+            if self._active_process is proc:
+                self._active_process = None
+
+    async def _terminate_active_process(self) -> None:
+        proc = self._active_process
+        if proc is None or proc.returncode is not None:
+            return
+
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=8)
+            return
+        except (asyncio.TimeoutError, ProcessLookupError):
+            pass
+
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=3)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            pass
+        finally:
+            if self._active_process is proc:
+                self._active_process = None
 
     def _terraform_root_for_stage(self, stage: RunStage) -> Path:
         if stage == RunStage.core:

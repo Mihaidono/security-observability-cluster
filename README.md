@@ -212,11 +212,12 @@ pip install -e .
 cp .env.example .env
 # edit .env with your AWS profile and token values
 aws sso login --profile <your-profile>
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --port 8000
 ```
 
 `uvicorn[standard]` is installed through the backend package, so websocket support for `/api/runs/{id}/events` is included after `pip install -e .`.
 The backend loads [backend/.env](/home/mihandrei/work/security-observability-cluster/backend/.env.example) on startup, and Terraform inherits AWS credentials from that backend environment.
+Use `--reload` only if you specifically want hot reload during backend development. Running without it shuts down more cleanly.
 
 Run the frontend:
 
@@ -227,6 +228,29 @@ VITE_API_TOKEN=dev-token npm run dev
 ```
 
 In local dev, the frontend talks directly to `http://127.0.0.1:8000` for both HTTP and websocket traffic. You can override that with `VITE_API_BASE_URL` if needed.
+
+## Docker Compose
+
+You can run the full app with Docker Compose:
+
+```bash
+cp backend/.env.example backend/.env
+# edit backend/.env
+aws sso login --profile <your-profile>
+docker compose up --build
+```
+
+This starts:
+* the backend on `http://localhost:8000`
+* the frontend on `http://localhost:5173`
+
+The backend container runs without `--reload` on purpose, because the Uvicorn reloader is much more likely to hang on shutdown or get killed inside Docker development setups.
+
+The compose stack mounts:
+* [backend/.env.example](/home/mihandrei/work/security-observability-cluster/backend/.env.example) as your local backend configuration source
+* `${HOME}/.aws` into the backend container so Terraform can use your local AWS profile and SSO cache
+
+If you use static AWS credentials instead of `AWS_PROFILE`, place `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN` in `backend/.env`.
 
 For a practical walkthrough on testing the control plane and playing with the template app, see [TESTING_AND_USAGE.md](/home/mihandrei/work/security-observability-cluster/TESTING_AND_USAGE.md).
 

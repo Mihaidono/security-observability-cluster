@@ -1,0 +1,15 @@
+.git
+.gitignore
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.tsbuildinfo
+**/.DS_Store
+backend/.env
+backend/state
+frontend/node_modules
+frontend/dist
+infrastructure/**/.terraform
+infrastructure/**/*.tfstate
+infrastructure/**/*.tfstate.*

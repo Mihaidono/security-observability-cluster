@@ -41,11 +41,12 @@ pip install -e .
 cp .env.example .env
 # edit .env with your AWS profile and token values
 aws sso login --profile <your-profile>
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --port 8000
 ```
 
 That install now pulls in `uvicorn[standard]`, which is required for websocket run events.
 The backend loads [backend/.env](/home/mihandrei/work/security-observability-cluster/backend/.env.example) on startup, and Terraform inherits AWS credentials from that backend environment.
+Use `--reload` only when you explicitly want backend hot reload. Running without it is the cleaner default.
 
 ### 2. Start the frontend
 
@@ -62,6 +63,25 @@ http://127.0.0.1:5173
 ```
 
 The frontend uses `http://127.0.0.1:8000` directly for API and websocket traffic during local dev. If you want a different backend origin, set `VITE_API_BASE_URL`.
+
+## Docker Compose Quick Start
+
+```bash
+cp backend/.env.example backend/.env
+# edit backend/.env
+aws sso login --profile <your-profile>
+docker compose up --build
+```
+
+Then open:
+* `http://127.0.0.1:5173` for the frontend
+* `http://127.0.0.1:8000/api/health` for backend health
+
+Notes:
+* the compose stack mounts `${HOME}/.aws` into the backend container
+* if you use static AWS credentials instead of a profile, place them in `backend/.env`
+* Terraform still runs inside the backend container, so that container must have valid AWS auth
+* the backend container intentionally runs without Uvicorn `--reload` to avoid sticky shutdowns and unnecessary reloader process churn
 
 You should see:
 * a control-plane panel with `Plan core`, `Apply core`, `Plan policies`, and `Apply policies`
@@ -375,7 +395,7 @@ pip install -e .
 cp .env.example .env
 # edit .env with your AWS profile and token values
 aws sso login --profile <your-profile>
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --port 8000
 ```
 
 ```bash
