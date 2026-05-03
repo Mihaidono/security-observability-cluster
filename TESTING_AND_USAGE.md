@@ -83,6 +83,25 @@ Notes:
 * if you use static AWS credentials instead of a profile, place them in `backend/.env`
 * Terraform still runs inside the backend container, so that container must have valid AWS auth
 * the backend container intentionally runs without Uvicorn `--reload` to avoid sticky shutdowns and unnecessary reloader process churn
+* for SSO profiles, `backend/.env` should include the real `AWS_PROFILE` name plus `AWS_SDK_LOAD_CONFIG=true`
+
+Recommended `backend/.env` entries for SSO:
+
+```text
+AWS_PROFILE=your-real-sso-profile
+AWS_SDK_LOAD_CONFIG=true
+AWS_CONFIG_FILE=/root/.aws/config
+AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials
+```
+
+Then refresh the SSO session on the host before starting Compose:
+
+```bash
+aws sso login --profile your-real-sso-profile
+docker compose up --build
+```
+
+If you see `InvalidGrantException`, the SSO token in `~/.aws/sso/cache` is expired. Run `aws sso login` again on the host and restart the backend container.
 
 You should see:
 * a top control header with status, navigation, and config actions

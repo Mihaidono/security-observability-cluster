@@ -7,6 +7,10 @@ services:
     working_dir: /app/backend
     env_file:
       - backend/.env
+    environment:
+      AWS_SDK_LOAD_CONFIG: ${AWS_SDK_LOAD_CONFIG:-true}
+      AWS_CONFIG_FILE: ${AWS_CONFIG_FILE:-/root/.aws/config}
+      AWS_SHARED_CREDENTIALS_FILE: ${AWS_SHARED_CREDENTIALS_FILE:-/root/.aws/credentials}
     ports:
       - "8000:8000"
     volumes:

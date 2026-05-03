@@ -1527,27 +1527,6 @@ export default function App() {
                         </p>
                       </div>
 
-                      <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                        <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Where To Go Next</p>
-                        <div className="mt-4 grid gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab("assets")}
-                            className="rounded-[1.2rem] border border-border/80 bg-card/75 px-4 py-4 text-left transition hover:bg-card"
-                          >
-                            <p className="font-medium">Assets</p>
-                            <p className="mt-1 text-sm text-neutral-400">Select a subject, pick its app, and open the form editors.</p>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab("activity")}
-                            className="rounded-[1.2rem] border border-border/80 bg-card/75 px-4 py-4 text-left transition hover:bg-card"
-                          >
-                            <p className="font-medium">Activity</p>
-                            <p className="mt-1 text-sm text-neutral-400">Inspect run logs, plan summaries, and Terraform outputs.</p>
-                          </button>
-                        </div>
-                      </div>
                     </CardContent>
                   </Card>
                 </div>

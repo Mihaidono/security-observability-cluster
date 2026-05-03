@@ -255,6 +255,24 @@ The compose stack mounts:
 * [backend/.env.example](/home/mihandrei/work/security-observability-cluster/backend/.env.example) as your local backend configuration source
 * `${HOME}/.aws` into the backend container so Terraform can use your local AWS profile and SSO cache
 
+For SSO-backed profiles, make sure `backend/.env` points at the exact profile name you logged into:
+
+```text
+AWS_PROFILE=your-real-sso-profile
+AWS_SDK_LOAD_CONFIG=true
+AWS_CONFIG_FILE=/root/.aws/config
+AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials
+```
+
+Then refresh the SSO session on the host before starting Compose:
+
+```bash
+aws sso login --profile your-real-sso-profile
+docker compose up --build
+```
+
+If Terraform fails with `InvalidGrantException`, the profile name is usually correct but the cached SSO token is expired, so run `aws sso login` again on the host and restart the backend container.
+
 If you use static AWS credentials instead of `AWS_PROFILE`, place `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN` in `backend/.env`.
 
 For a practical walkthrough on testing the control plane and playing with the template app, see [TESTING_AND_USAGE.md](/home/mihandrei/work/security-observability-cluster/TESTING_AND_USAGE.md).
