@@ -956,10 +956,12 @@ export default function App() {
   const [armedDestroyStage, setArmedDestroyStage] = useState<RunStage | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [showCopiedLogsHint, setShowCopiedLogsHint] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const selectedRunStatusRef = useRef<TerraformRun["status"] | undefined>(undefined);
   const workspaceScrollRef = useRef<HTMLDivElement | null>(null);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
+  const copiedLogsHintTimerRef = useRef<number | null>(null);
 
   const subjectKeys = useMemo(() => Object.keys(config?.analysis_subjects ?? {}), [config?.analysis_subjects]);
   const selectedSubject = useMemo(() => {
@@ -1048,6 +1050,14 @@ export default function App() {
 
   useEffect(() => {
     void loadInitial();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copiedLogsHintTimerRef.current !== null) {
+        window.clearTimeout(copiedLogsHintTimerRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -1513,8 +1523,15 @@ export default function App() {
 
     try {
       await navigator.clipboard.writeText(selectedRunLogs.join("\n"));
-      setStatusMessage("Run logs copied.");
       setErrorMessage("");
+      setShowCopiedLogsHint(true);
+      if (copiedLogsHintTimerRef.current !== null) {
+        window.clearTimeout(copiedLogsHintTimerRef.current);
+      }
+      copiedLogsHintTimerRef.current = window.setTimeout(() => {
+        setShowCopiedLogsHint(false);
+        copiedLogsHintTimerRef.current = null;
+      }, 1600);
     } catch {
       setErrorMessage("Unable to copy logs from this browser session.");
     }
@@ -2078,7 +2095,28 @@ export default function App() {
                               </div>
                               {selectedRun.error ? (
                                 <div className="mt-4 rounded-[1.2rem] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
-                                  <div className="mb-2 text-[11px] uppercase tracking-[0.22em] text-warning/75">Details</div>
+                                  <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.22em] text-warning/75">
+                                    <span>Details</span>
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`text-[10px] tracking-[0.2em] transition-all duration-200 ${showCopiedLogsHint ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-0.5 opacity-0"}`}
+                                      >
+                                        Copied
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="shrink-0 bg-transparent p-0 text-warning/75 transition hover:text-warning"
+                                        onClick={() => void copySelectedRunLogs()}
+                                        title="Copy logs"
+                                        aria-label="Copy logs"
+                                      >
+                                        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                          <rect x="9" y="9" width="10" height="10" rx="2" />
+                                          <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
                                   <div className="themed-scrollbar max-h-48 overflow-auto break-words whitespace-pre-wrap pr-2 text-foreground/88">
                                     {formatRunErrorText(selectedRun.error)}
                                   </div>
@@ -2155,19 +2193,6 @@ export default function App() {
                       <CardHeader className="flex flex-wrap items-center justify-between gap-3">
                         <CardTitle>Run Logs</CardTitle>
                         <div className="flex items-center gap-2">
-                          <Button
-                            variant="secondary"
-                            className="gap-2 px-3 py-1.5 text-xs"
-                            onClick={() => void copySelectedRunLogs()}
-                            title="Copy logs"
-                            aria-label="Copy logs"
-                          >
-                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <rect x="9" y="9" width="10" height="10" rx="2" />
-                              <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
-                            </svg>
-                            Copy logs
-                          </Button>
                           <Button variant={autoScrollLogs ? "secondary" : "ghost"} className="px-3 py-1.5 text-xs" onClick={() => setAutoScrollLogs((current) => !current)}>
                             Auto-scroll {autoScrollLogs ? "On" : "Off"}
                           </Button>
