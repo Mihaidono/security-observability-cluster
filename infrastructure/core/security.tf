@@ -3,7 +3,7 @@ resource "kubernetes_namespace" "kyverno" {
     name = "kyverno"
     labels = {
       "pod-security.kubernetes.io/enforce"         = "baseline"
-      "pod-security.kubernetes.io/enforce-version" = var.kubernetes_version
+      "pod-security.kubernetes.io/enforce-version" = local.kubernetes_psa_version
       "observability-role"                         = "policy-engine"
     }
   }
@@ -15,6 +15,7 @@ resource "helm_release" "kyverno" {
   chart      = "kyverno"
   namespace  = kubernetes_namespace.kyverno.metadata[0].name
   wait       = true
+  timeout    = 900
 
   depends_on = [kubernetes_namespace.kyverno]
 }

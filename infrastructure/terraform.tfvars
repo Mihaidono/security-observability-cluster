@@ -109,7 +109,6 @@ ward_applications = [
           APP_PROFILE = "template"
           APP_MODE    = "frontend-managed"
         }
-        env_from_secret_names = ["template-app-env"]
         probes = {
           readiness = {
             enabled = true
@@ -124,12 +123,6 @@ ward_applications = [
           limits_cpu      = "500m"
           limits_memory   = "256Mi"
         }
-        volume_mounts = [
-          {
-            name       = "tls-bundle"
-            mount_path = "/etc/template/certs"
-          }
-        ]
       },
       {
         name  = "log-sidecar"
@@ -148,10 +141,6 @@ ward_applications = [
       {
         name      = "shared-cache"
         empty_dir = true
-      },
-      {
-        name        = "tls-bundle"
-        secret_name = "template-app-tls"
       }
     ]
     config_map = {

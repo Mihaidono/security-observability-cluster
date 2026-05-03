@@ -175,6 +175,7 @@ class SqliteStore:
                 SELECT outputs_json FROM runs
                 WHERE outputs_json IS NOT NULL
                   AND stage = 'core'
+                  AND status = 'applied'
                 ORDER BY updated_at DESC
                 LIMIT 1
                 """
@@ -184,6 +185,7 @@ class SqliteStore:
                     """
                     SELECT outputs_json FROM runs
                     WHERE outputs_json IS NOT NULL
+                      AND status = 'applied'
                     ORDER BY updated_at DESC
                     LIMIT 1
                     """

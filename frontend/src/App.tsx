@@ -145,6 +145,30 @@ function prettyPrint(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function formatTerraformOutputValue(entry: unknown) {
+  if (
+    entry &&
+    typeof entry === "object" &&
+    !Array.isArray(entry) &&
+    ("value" in entry || "sensitive" in entry || "type" in entry)
+  ) {
+    const record = entry as { value?: unknown; sensitive?: unknown; type?: unknown };
+    return {
+      value: record.value,
+      sensitive: Boolean(record.sensitive),
+      type: record.type,
+      wrapped: true,
+    };
+  }
+
+  return {
+    value: entry,
+    sensitive: false,
+    type: undefined,
+    wrapped: false,
+  };
+}
+
 type ParsedLogLine = {
   kind: "plain" | "structured";
   message: string;
@@ -210,6 +234,32 @@ function parseLogLine(line: string): ParsedLogLine {
   } catch {
     return { kind: "plain", message: line };
   }
+}
+
+function parseRunErrorText(errorText: string): ParsedLogLine[] {
+  return errorText
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line, index, lines) => {
+      if (!line.trim()) {
+        return false;
+      }
+      if (line === "Recent Terraform output:") {
+        return false;
+      }
+      if (index === 0 && line.includes(" failed with exit code ")) {
+        return false;
+      }
+      return true;
+    })
+    .map((line) => parseLogLine(line));
+}
+
+function formatRunErrorText(errorText: string): string {
+  return parseRunErrorText(errorText)
+    .map((entry) => [entry.message, entry.detail].filter(Boolean).join("\n"))
+    .filter((entry) => entry.trim() !== "")
+    .join("\n\n");
 }
 
 function logLevelTone(level?: string): string {
@@ -1455,6 +1505,21 @@ export default function App() {
     }
   }
 
+  async function copySelectedRunLogs() {
+    if (selectedRunLogs.length === 0) {
+      setErrorMessage("No logs available to copy.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(selectedRunLogs.join("\n"));
+      setStatusMessage("Run logs copied.");
+      setErrorMessage("");
+    } catch {
+      setErrorMessage("Unable to copy logs from this browser session.");
+    }
+  }
+
   async function cancelSelectedRun() {
     if (!selectedRun) return;
     setIsBusy(true);
@@ -1933,7 +1998,7 @@ export default function App() {
             ) : null}
 
             {activeTab === "activity" ? (
-              <div className="grid gap-6 2xl:grid-cols-[340px_minmax(0,1fr)] 2xl:items-stretch">
+              <div className="grid h-full min-h-0 gap-6 2xl:grid-cols-[340px_minmax(0,1fr)] 2xl:items-stretch">
                 <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
                   <CardHeader>
                     <CardTitle>Runs</CardTitle>
@@ -1971,11 +2036,11 @@ export default function App() {
                 </Card>
 
                 <div className="grid min-w-0 gap-6">
-                  <Card>
+                  <Card className="flex min-h-0 flex-col">
                     <CardHeader>
                       <CardTitle>Run Summary</CardTitle>
                     </CardHeader>
-                    <CardContent className="grid min-w-0 gap-4">
+                    <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
                       {selectedRun ? (
                         <>
                           <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
@@ -2014,8 +2079,8 @@ export default function App() {
                               {selectedRun.error ? (
                                 <div className="mt-4 rounded-[1.2rem] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
                                   <div className="mb-2 text-[11px] uppercase tracking-[0.22em] text-warning/75">Details</div>
-                                  <div className="themed-scrollbar max-h-40 overflow-auto break-words whitespace-pre-wrap pr-2">
-                                    {selectedRun.error}
+                                  <div className="themed-scrollbar max-h-48 overflow-auto break-words whitespace-pre-wrap pr-2 text-foreground/88">
+                                    {formatRunErrorText(selectedRun.error)}
                                   </div>
                                 </div>
                               ) : null}
@@ -2061,11 +2126,11 @@ export default function App() {
                           </div>
 
                           {selectedRun.kind !== "destroy" ? (
-                            <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                            <div className="flex min-h-0 flex-col rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
                               <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
                                 {selectedRun.kind === "apply" ? "Resources in saved plan" : "Changed resources"}
                               </p>
-                              <div className="themed-scrollbar mt-4 max-h-56 overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-foreground/80">
+                              <div className="themed-scrollbar mt-4 min-h-[12rem] max-h-[18rem] overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-foreground/80">
                                 {(displayedPlanSummary?.addresses ?? []).length === 0 ? (
                                   <p>No structured plan summary yet.</p>
                                 ) : (
@@ -2089,9 +2154,24 @@ export default function App() {
                     <Card>
                       <CardHeader className="flex flex-wrap items-center justify-between gap-3">
                         <CardTitle>Run Logs</CardTitle>
-                        <Button variant={autoScrollLogs ? "secondary" : "ghost"} className="px-3 py-1.5 text-xs" onClick={() => setAutoScrollLogs((current) => !current)}>
-                          Auto-scroll {autoScrollLogs ? "On" : "Off"}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="secondary"
+                            className="gap-2 px-3 py-1.5 text-xs"
+                            onClick={() => void copySelectedRunLogs()}
+                            title="Copy logs"
+                            aria-label="Copy logs"
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <rect x="9" y="9" width="10" height="10" rx="2" />
+                              <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
+                            </svg>
+                            Copy logs
+                          </Button>
+                          <Button variant={autoScrollLogs ? "secondary" : "ghost"} className="px-3 py-1.5 text-xs" onClick={() => setAutoScrollLogs((current) => !current)}>
+                            Auto-scroll {autoScrollLogs ? "On" : "Off"}
+                          </Button>
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <div className="overflow-hidden rounded-[1.2rem] border border-[#ab9f9d]/45 bg-[#f5f1fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
@@ -2116,7 +2196,7 @@ export default function App() {
                                             ) : null}
                                             {entry.source ? <span className="text-[#3c4f76]/82">{entry.source}</span> : null}
                                             {entry.address ? <span className="break-all text-[#383f51]/62">{entry.address}</span> : null}
-                                            {entry.timestamp ? <span className="text-[#383f51]/58">{entry.timestamp}</span> : null}
+                                            {entry.timestamp ? <span className="text-[#383f51]/58">{formatRunTimestamp(entry.timestamp)}</span> : null}
                                           </div>
                                           <p className="mt-2 break-words whitespace-pre-wrap font-sans text-sm leading-6 text-[#383f51]">
                                             {entry.message}
@@ -2144,9 +2224,41 @@ export default function App() {
                         <CardTitle>Terraform Outputs</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <pre className="themed-scrollbar max-h-[32rem] overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 font-mono text-xs text-foreground/80">
-                          {outputs ? prettyPrint(outputs) : "No outputs available."}
-                        </pre>
+                        {outputs ? (
+                          <div className="themed-scrollbar max-h-[32rem] space-y-3 overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4">
+                            {Object.entries(outputs).map(([key, entry]) => {
+                              const normalized = formatTerraformOutputValue(entry);
+                              return (
+                                <div key={key} className="rounded-[1rem] border border-border/70 bg-background/45 p-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="font-mono text-xs uppercase tracking-[0.2em] text-neutral-500">{key}</p>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {normalized.type ? (
+                                        <Badge className="border-border/80 bg-card/80 text-foreground/70">
+                                          {typeof normalized.type === "string" ? normalized.type : prettyPrint(normalized.type)}
+                                        </Badge>
+                                      ) : null}
+                                      {normalized.sensitive ? (
+                                        <Badge className="border-warning/40 bg-warning/12 text-warning">Sensitive</Badge>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <pre className="mt-3 overflow-auto rounded-[0.9rem] border border-border/60 bg-white/30 p-3 font-mono text-xs text-foreground/82">
+                                    {normalized.sensitive
+                                      ? "(sensitive output)"
+                                      : typeof normalized.value === "string"
+                                        ? normalized.value
+                                        : prettyPrint(normalized.value)}
+                                  </pre>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-neutral-500">
+                            No outputs available.
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   </div>

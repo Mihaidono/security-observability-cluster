@@ -329,6 +329,60 @@ class TerraformRunner:
             run.error = None
             await self._persist_run(run)
             self.store.save_json_artifact(run.id, "outputs.json", outputs_payload)
+        except CommandFailedError as exc:
+            if self._should_retry_core_bootstrap_auth(run, exc):
+                await self._append_internal_log(
+                    run.id,
+                    "Detected initial EKS bootstrap authorization delay. Waiting for access propagation and retrying core apply with a fresh Terraform invocation.",
+                )
+                await asyncio.sleep(12)
+                retry_command = [
+                    self.settings.terraform_bin,
+                    "apply",
+                    "-auto-approve",
+                    "-input=false",
+                    "-no-color",
+                    "-var-file",
+                    str(self.settings.managed_tfvars_path),
+                ]
+                run.command = retry_command
+                run.updated_at = utc_now()
+                await self._persist_run(run)
+
+                try:
+                    await self._stream_command(run.id, retry_command, cwd=self._terraform_root_for_stage(run.stage))
+                    outputs_payload = await self._capture_json(
+                        [self.settings.terraform_bin, "output", "-json"],
+                        cwd=self._terraform_root_for_stage(run.stage),
+                    )
+                    run.outputs = outputs_payload
+                    run.status = RunStatus.applied
+                    run.completed_at = utc_now()
+                    run.updated_at = utc_now()
+                    run.error = None
+                    await self._persist_run(run)
+                    self.store.save_json_artifact(run.id, "outputs.json", outputs_payload)
+                    return
+                except RunCanceledError as retry_exc:
+                    run.status = RunStatus.canceled
+                    run.completed_at = utc_now()
+                    run.updated_at = utc_now()
+                    run.error = str(retry_exc)
+                    await self._persist_run(run)
+                    return
+                except Exception as retry_exc:  # noqa: BLE001
+                    run.status = RunStatus.failed
+                    run.completed_at = utc_now()
+                    run.updated_at = utc_now()
+                    run.error = str(retry_exc)
+                    await self._persist_run(run)
+                    return
+
+            run.status = RunStatus.failed
+            run.completed_at = utc_now()
+            run.updated_at = utc_now()
+            run.error = str(exc)
+            await self._persist_run(run)
         except RunCanceledError as exc:
             run.status = RunStatus.canceled
             run.completed_at = utc_now()
@@ -397,6 +451,10 @@ class TerraformRunner:
         if not lines:
             return
         await self.broker.publish(run_id, {"type": "run.logs", "lines": lines})
+
+    async def _append_internal_log(self, run_id: str, line: str) -> None:
+        self.store.append_logs(run_id, [line])
+        await self._publish_logs(run_id, [line])
 
     async def _stream_command(self, run_id: str, command: list[str], cwd: Path) -> None:
         proc = await asyncio.create_subprocess_exec(
@@ -523,6 +581,21 @@ class TerraformRunner:
                 "manage or destroy the in-cluster Kubernetes and Helm resources safely."
             ),
         )
+
+    def _should_retry_core_bootstrap_auth(self, run: TerraformRun, exc: CommandFailedError) -> bool:
+        if run.stage != RunStage.core or run.kind != RunKind.apply:
+            return False
+
+        haystack = "\n".join(exc.recent_lines)
+        auth_markers = [
+            "Kubernetes cluster unreachable: the server has asked for the client to provide credentials",
+            "Unauthorized",
+        ]
+        access_entry_markers = [
+            "aws_eks_access_entry.cluster_admins",
+            "aws_eks_access_policy_association.cluster_admins",
+        ]
+        return any(marker in haystack for marker in auth_markers) and any(marker in haystack for marker in access_entry_markers)
 
 
 def summarize_plan(payload: dict[str, Any]) -> PlanSummary:

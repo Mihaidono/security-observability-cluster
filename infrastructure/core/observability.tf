@@ -5,6 +5,7 @@ resource "helm_release" "cilium" {
   namespace  = "kube-system"
   version    = "1.19.2"
   wait       = true
+  timeout    = 900
 
   set {
     name  = "eni.enabled"
@@ -47,8 +48,9 @@ resource "helm_release" "tetragon" {
   repository = "https://helm.cilium.io/"
   chart      = "tetragon"
   namespace  = "kube-system"
-  version    = "0.12.0"
+  version    = "1.6.1"
   wait       = true
+  timeout    = 900
 
   depends_on = [helm_release.cilium]
 }
@@ -58,7 +60,7 @@ resource "kubernetes_namespace" "monitoring" {
     name = "monitoring-zone"
     labels = {
       "pod-security.kubernetes.io/enforce"         = "baseline"
-      "pod-security.kubernetes.io/enforce-version" = var.kubernetes_version
+      "pod-security.kubernetes.io/enforce-version" = local.kubernetes_psa_version
       "observability-role"                         = "platform"
     }
   }
@@ -70,6 +72,7 @@ resource "helm_release" "lgtm_stack" {
   chart      = "grafana-agent"
   namespace  = kubernetes_namespace.monitoring.metadata[0].name
   wait       = true
+  timeout    = 900
 
   set {
     name  = "fullnameOverride"

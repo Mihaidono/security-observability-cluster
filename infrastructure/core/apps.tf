@@ -5,7 +5,7 @@ resource "kubernetes_namespace" "wards" {
     name = each.key
     labels = merge({
       "pod-security.kubernetes.io/enforce"         = "restricted"
-      "pod-security.kubernetes.io/enforce-version" = var.kubernetes_version
+      "pod-security.kubernetes.io/enforce-version" = local.kubernetes_psa_version
       "analysis-tier"                              = each.value.tier
     }, each.value.labels)
     annotations = merge({
