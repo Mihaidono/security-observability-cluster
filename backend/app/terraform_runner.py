@@ -119,6 +119,11 @@ class TerraformRunner:
             raise HTTPException(status_code=409, detail="Only a completed plan run can be applied.")
         if not source_run.plan_path:
             raise HTTPException(status_code=409, detail="The selected run does not have a saved plan file.")
+        if self._has_apply_attempt_for_plan(source_run.id):
+            raise HTTPException(
+                status_code=409,
+                detail="This saved plan has already been used for an apply attempt. Create a fresh plan before applying again.",
+            )
 
         apply_run_id = uuid.uuid4().hex[:12]
         apply_run = TerraformRun(
@@ -229,7 +234,7 @@ class TerraformRunner:
                 run.completed_at = now
                 run.updated_at = now
                 run.queue_position = None
-                run.error = "Canceled while the backend was restarting."
+                run.error = canceled_run_message(run.kind)
                 await self._persist_run(run)
                 continue
 
@@ -238,7 +243,7 @@ class TerraformRunner:
                 run.completed_at = now
                 run.updated_at = now
                 run.queue_position = None
-                run.error = "Run did not finish because the backend restarted or the worker stopped unexpectedly."
+                run.error = interrupted_run_message(run.kind)
                 await self._persist_run(run)
 
     async def _refresh_queue_positions(self) -> None:
@@ -289,7 +294,7 @@ class TerraformRunner:
         run.queue_position = None
         await self._persist_run(run)
 
-        await self._ensure_stage_initialized(run.stage)
+        await self._ensure_stage_initialized(run.stage, run.id)
 
         plan_file = Path(run.plan_path or self.store.run_dir(run.id) / "planned.tfplan")
         command = [
@@ -304,26 +309,37 @@ class TerraformRunner:
         ]
         run.command = command
         await self._persist_run(run)
+        self._raise_if_canceled(run.id)
 
         try:
             await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
 
-            show_payload = await self._capture_json(
-                [self.settings.terraform_bin, "show", "-json", str(plan_file)],
-                cwd=self._terraform_root_for_stage(run.stage),
-            )
-            self.store.save_json_artifact(run.id, "plan.json", show_payload)
-            run.plan_summary = summarize_plan(show_payload)
             run.status = RunStatus.planned
             run.completed_at = utc_now()
             run.updated_at = utc_now()
             run.error = None
             await self._persist_run(run)
+
+            try:
+                show_payload = await self._capture_json(
+                    [self.settings.terraform_bin, "show", "-json", str(plan_file)],
+                    cwd=self._terraform_root_for_stage(run.stage),
+                    run_id=run.id,
+                )
+            except RunCanceledError:
+                await self._append_internal_log(run.id, "Plan completed successfully, but summary generation was canceled.")
+            except Exception as exc:  # noqa: BLE001
+                await self._append_internal_log(run.id, f"Plan completed successfully, but summary generation failed: {exc}")
+            else:
+                self.store.save_json_artifact(run.id, "plan.json", show_payload)
+                run.plan_summary = summarize_plan(show_payload)
+                run.updated_at = utc_now()
+                await self._persist_run(run)
         except RunCanceledError as exc:
             run.status = RunStatus.canceled
             run.completed_at = utc_now()
             run.updated_at = utc_now()
-            run.error = str(exc)
+            run.error = canceled_run_message(run.kind)
             await self._persist_run(run)
         except Exception as exc:  # noqa: BLE001
             run.status = RunStatus.failed
@@ -339,7 +355,7 @@ class TerraformRunner:
         run.queue_position = None
         await self._persist_run(run)
 
-        await self._ensure_stage_initialized(run.stage)
+        await self._ensure_stage_initialized(run.stage, run.id)
 
         command = [
             self.settings.terraform_bin,
@@ -350,69 +366,38 @@ class TerraformRunner:
         ]
         run.command = command
         await self._persist_run(run)
+        self._raise_if_canceled(run.id)
 
         try:
             await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
 
-            outputs_payload = await self._capture_json(
-                [self.settings.terraform_bin, "output", "-json"],
-                cwd=self._terraform_root_for_stage(run.stage),
-            )
-            run.outputs = outputs_payload
             run.status = RunStatus.applied
             run.completed_at = utc_now()
             run.updated_at = utc_now()
             run.error = None
             await self._persist_run(run)
-            self.store.save_json_artifact(run.id, "outputs.json", outputs_payload)
-        except CommandFailedError as exc:
-            if self._should_retry_core_bootstrap_auth(run, exc):
-                await self._append_internal_log(
-                    run.id,
-                    "Detected initial EKS bootstrap authorization delay. Waiting for access propagation and retrying core apply with a fresh Terraform invocation.",
+
+            try:
+                outputs_payload = await self._capture_json(
+                    [self.settings.terraform_bin, "output", "-json"],
+                    cwd=self._terraform_root_for_stage(run.stage),
+                    run_id=run.id,
                 )
-                await asyncio.sleep(12)
-                retry_command = [
-                    self.settings.terraform_bin,
-                    "apply",
-                    "-auto-approve",
-                    "-input=false",
-                    "-no-color",
-                    "-var-file",
-                    str(self.settings.managed_tfvars_path),
-                ]
-                run.command = retry_command
+            except RunCanceledError:
+                await self._append_internal_log(run.id, "Apply completed successfully, but output collection was canceled.")
+            except Exception as exc:  # noqa: BLE001
+                await self._append_internal_log(run.id, f"Apply completed successfully, but output collection failed: {exc}")
+            else:
+                run.outputs = outputs_payload
                 run.updated_at = utc_now()
                 await self._persist_run(run)
-
-                try:
-                    await self._stream_command(run.id, retry_command, cwd=self._terraform_root_for_stage(run.stage))
-                    outputs_payload = await self._capture_json(
-                        [self.settings.terraform_bin, "output", "-json"],
-                        cwd=self._terraform_root_for_stage(run.stage),
-                    )
-                    run.outputs = outputs_payload
-                    run.status = RunStatus.applied
-                    run.completed_at = utc_now()
-                    run.updated_at = utc_now()
-                    run.error = None
-                    await self._persist_run(run)
-                    self.store.save_json_artifact(run.id, "outputs.json", outputs_payload)
-                    return
-                except RunCanceledError as retry_exc:
-                    run.status = RunStatus.canceled
-                    run.completed_at = utc_now()
-                    run.updated_at = utc_now()
-                    run.error = str(retry_exc)
-                    await self._persist_run(run)
-                    return
-                except Exception as retry_exc:  # noqa: BLE001
-                    run.status = RunStatus.failed
-                    run.completed_at = utc_now()
-                    run.updated_at = utc_now()
-                    run.error = str(retry_exc)
-                    await self._persist_run(run)
-                    return
+                self.store.save_json_artifact(run.id, "outputs.json", outputs_payload)
+        except CommandFailedError as exc:
+            if self._is_core_bootstrap_auth_delay(run, exc):
+                await self._append_internal_log(
+                    run.id,
+                    "Detected initial EKS bootstrap authorization delay. The run is stopping here to preserve the reviewed plan. Wait for access propagation, then create a fresh plan and apply again.",
+                )
 
             run.status = RunStatus.failed
             run.completed_at = utc_now()
@@ -423,7 +408,7 @@ class TerraformRunner:
             run.status = RunStatus.canceled
             run.completed_at = utc_now()
             run.updated_at = utc_now()
-            run.error = str(exc)
+            run.error = canceled_run_message(run.kind)
             await self._persist_run(run)
         except Exception as exc:  # noqa: BLE001
             run.status = RunStatus.failed
@@ -439,7 +424,7 @@ class TerraformRunner:
         run.queue_position = None
         await self._persist_run(run)
 
-        await self._ensure_stage_initialized(run.stage)
+        await self._ensure_stage_initialized(run.stage, run.id)
 
         command = [
             self.settings.terraform_bin,
@@ -452,6 +437,7 @@ class TerraformRunner:
         ]
         run.command = command
         await self._persist_run(run)
+        self._raise_if_canceled(run.id)
 
         try:
             await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
@@ -466,7 +452,7 @@ class TerraformRunner:
             run.status = RunStatus.canceled
             run.completed_at = utc_now()
             run.updated_at = utc_now()
-            run.error = str(exc)
+            run.error = canceled_run_message(run.kind)
             await self._persist_run(run)
         except Exception as exc:  # noqa: BLE001
             run.status = RunStatus.failed
@@ -494,7 +480,9 @@ class TerraformRunner:
         self.store.append_logs(run_id, [line])
         await self._publish_logs(run_id, [line])
 
-    async def _ensure_stage_initialized(self, stage: RunStage) -> None:
+    async def _ensure_stage_initialized(self, stage: RunStage, run_id: str | None = None) -> None:
+        if run_id is not None:
+            self._raise_if_canceled(run_id)
         cwd = self._terraform_root_for_stage(stage)
         backend_config = cwd / "backend.hcl"
 
@@ -512,7 +500,7 @@ class TerraformRunner:
         self._active_process = proc
         try:
             stdout, stderr = await proc.communicate()
-            if self._stopping:
+            if self._stopping or (run_id is not None and run_id in self._cancel_requested):
                 raise RunCanceledError("Run canceled by user.")
             if proc.returncode != 0:
                 stderr_text = stderr.decode("utf-8", errors="replace").strip()
@@ -527,6 +515,7 @@ class TerraformRunner:
                 self._active_process = None
 
     async def _stream_command(self, run_id: str, command: list[str], cwd: Path) -> None:
+        self._raise_if_canceled(run_id)
         proc = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(cwd),
@@ -562,7 +551,9 @@ class TerraformRunner:
             if self._active_process is proc:
                 self._active_process = None
 
-    async def _capture_json(self, command: list[str], cwd: Path) -> dict[str, Any]:
+    async def _capture_json(self, command: list[str], cwd: Path, run_id: str | None = None) -> dict[str, Any]:
+        if run_id is not None:
+            self._raise_if_canceled(run_id)
         proc = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(cwd),
@@ -573,7 +564,7 @@ class TerraformRunner:
         self._active_process = proc
         try:
             stdout, stderr = await proc.communicate()
-            if self._stopping:
+            if self._stopping or (run_id is not None and run_id in self._cancel_requested):
                 raise RunCanceledError("Run canceled by user.")
             if proc.returncode != 0:
                 raise RuntimeError(stderr.decode("utf-8", errors="replace").strip() or "Terraform command failed.")
@@ -625,6 +616,13 @@ class TerraformRunner:
             for run in self.store.list_runs()
         )
 
+    def _has_apply_attempt_for_plan(self, plan_run_id: str) -> bool:
+        return any(run.kind == RunKind.apply and run.source_run_id == plan_run_id for run in self.store.list_runs())
+
+    def _raise_if_canceled(self, run_id: str) -> None:
+        if self._stopping or run_id in self._cancel_requested:
+            raise RunCanceledError("Run canceled by user.")
+
     def _has_active_policies_stage(self) -> bool:
         stage_runs = [
             run
@@ -652,7 +650,7 @@ class TerraformRunner:
             ),
         )
 
-    def _should_retry_core_bootstrap_auth(self, run: TerraformRun, exc: CommandFailedError) -> bool:
+    def _is_core_bootstrap_auth_delay(self, run: TerraformRun, exc: CommandFailedError) -> bool:
         if run.stage != RunStage.core or run.kind != RunKind.apply:
             return False
 
@@ -708,6 +706,22 @@ def build_command_error_message(command: list[str], exit_code: int, recent_lines
             f"Recent Terraform output:\n{recent_output}"
         )
 
+    auth_markers = [
+        "Kubernetes cluster unreachable: the server has asked for the client to provide credentials",
+        "Unauthorized",
+    ]
+    access_entry_markers = [
+        "aws_eks_access_entry.cluster_admins",
+        "aws_eks_access_policy_association.cluster_admins",
+    ]
+    if any(marker in recent_output for marker in auth_markers) and any(marker in recent_output for marker in access_entry_markers):
+        return (
+            "Terraform reached the point where cluster admin access had been created, but Kubernetes and Helm access "
+            "had not propagated yet. The apply stopped here to preserve the reviewed plan. Wait briefly for access "
+            "propagation, then create a fresh plan and apply again.\n\n"
+            f"Recent Terraform output:\n{recent_output}"
+        )
+
     if "ResourceAlreadyExistsException" in recent_output and "CloudWatch Logs Log Group" in recent_output:
         return (
             "Terraform found an AWS CloudWatch log group that already exists from an earlier partial apply, "
@@ -724,3 +738,15 @@ def build_command_error_message(command: list[str], exit_code: int, recent_lines
         )
 
     return f"{' '.join(command)} failed with exit code {exit_code}"
+
+
+def canceled_run_message(kind: RunKind) -> str:
+    if kind in {RunKind.apply, RunKind.destroy}:
+        return "Run canceled by user. Terraform may have already changed remote infrastructure or state. Create a fresh plan before continuing."
+    return "Run canceled by user."
+
+
+def interrupted_run_message(kind: RunKind) -> str:
+    if kind in {RunKind.apply, RunKind.destroy}:
+        return "Run was interrupted by a backend restart or worker stop. Terraform may have partially changed remote infrastructure or state. Create a fresh plan before continuing."
+    return "Run was interrupted by a backend restart or worker stop."
