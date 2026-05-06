@@ -13,7 +13,7 @@ variable "environment" {
 variable "region" {
   description = "AWS region where the lab will be deployed."
   type        = string
-  default     = "us-east-1"
+  default     = "eu-north-1"
 }
 
 variable "cluster_name" {

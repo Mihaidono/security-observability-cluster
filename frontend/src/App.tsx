@@ -1655,7 +1655,7 @@ export default function App() {
                   <Button
                     variant="danger"
                     onClick={() => void cancelSelectedRun()}
-                    disabled={isBusy || !selectedRun || ["running", "applying", "queued", "canceling"].includes(selectedRun.status) === false}
+                    disabled={isBusy || !selectedRun || ["running", "applying", "queued"].includes(selectedRun.status) === false}
                   >
                     Cancel run
                   </Button>

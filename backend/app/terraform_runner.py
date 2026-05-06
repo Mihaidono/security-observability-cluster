@@ -56,6 +56,7 @@ class TerraformRunner:
 
     async def start(self) -> None:
         self._stopping = False
+        await self._reconcile_incomplete_runs()
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker_loop())
 
@@ -177,6 +178,8 @@ class TerraformRunner:
         run = self.store.load_run(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found.")
+        if run.status == RunStatus.canceling:
+            return run
         if run.status in {RunStatus.applied, RunStatus.destroyed, RunStatus.failed, RunStatus.canceled, RunStatus.planned}:
             raise HTTPException(status_code=409, detail="This run is already finished.")
 
@@ -208,6 +211,35 @@ class TerraformRunner:
         await self._refresh_queue_positions()
         await self._publish_run(run.id)
         await self._queue.put(run.id)
+
+    async def _reconcile_incomplete_runs(self) -> None:
+        now = utc_now()
+        for run in self.store.list_runs():
+            if run.status == RunStatus.queued:
+                run.status = RunStatus.canceled
+                run.completed_at = now
+                run.updated_at = now
+                run.queue_position = None
+                run.error = "Canceled because the backend restarted before execution began."
+                await self._persist_run(run)
+                continue
+
+            if run.status == RunStatus.canceling:
+                run.status = RunStatus.canceled
+                run.completed_at = now
+                run.updated_at = now
+                run.queue_position = None
+                run.error = "Canceled while the backend was restarting."
+                await self._persist_run(run)
+                continue
+
+            if run.status in {RunStatus.running, RunStatus.applying, RunStatus.destroying}:
+                run.status = RunStatus.failed
+                run.completed_at = now
+                run.updated_at = now
+                run.queue_position = None
+                run.error = "Run did not finish because the backend restarted or the worker stopped unexpectedly."
+                await self._persist_run(run)
 
     async def _refresh_queue_positions(self) -> None:
         for position, run_id in enumerate(self._queue_order, start=1):
@@ -673,6 +705,15 @@ def build_command_error_message(command: list[str], exit_code: int, recent_lines
             "Refresh the AWS credentials used by the backend process, then retry. "
             "If you use AWS SSO, run `aws sso login --profile <your-profile>` and start the backend with "
             "`AWS_PROFILE=<your-profile>`.\n\n"
+            f"Recent Terraform output:\n{recent_output}"
+        )
+
+    if "ResourceAlreadyExistsException" in recent_output and "CloudWatch Logs Log Group" in recent_output:
+        return (
+            "Terraform found an AWS CloudWatch log group that already exists from an earlier partial apply, "
+            "but that resource is not in Terraform state. "
+            "For this EKS cluster, the usual fix is to either import `/aws/eks/<cluster-name>/cluster` into the "
+            "current Terraform state or delete the orphaned log group in AWS and rerun the apply.\n\n"
             f"Recent Terraform output:\n{recent_output}"
         )
 
