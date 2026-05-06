@@ -210,3 +210,11 @@ locals {
     if length(app.network_policy.egress) > 0
   }
 }
+
+locals {
+  ingress_class_names = toset([
+    for app in values(local.applications_with_ingress) : app.ingress.class_name
+  ])
+
+  requires_ingress_nginx = contains(local.ingress_class_names, "nginx")
+}

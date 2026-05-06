@@ -3,6 +3,7 @@
   "environment": "lab",
   "cluster_name": "forensic-lab",
   "kubernetes_version": "1.35",
+  "cluster_log_retention_in_days": 90,
   "cluster_admin_principal_arns": [],
   "analysis_subjects": {
     "ward-template-app": {
@@ -31,10 +32,7 @@
         "expose_class": "web"
       },
       "service": {
-        "port": 8080,
-        "annotations": {
-          "service.beta.kubernetes.io/aws-load-balancer-scheme": "internet-facing"
-        }
+        "port": 8080
       },
       "network_policy": {
         "ingress": [
@@ -105,10 +103,10 @@
         {
           "name": "template-app",
           "image": "nginxinc/nginx-unprivileged:1.27-alpine",
-        "env": {
-          "APP_PROFILE": "template",
-          "APP_MODE": "frontend-managed"
-        },
+          "env": {
+            "APP_PROFILE": "template",
+            "APP_MODE": "frontend-managed"
+          },
           "probes": {
             "readiness": {
               "enabled": true

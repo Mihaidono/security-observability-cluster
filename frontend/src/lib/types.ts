@@ -123,6 +123,7 @@ export interface TerraformConfig {
   environment: string;
   cluster_name: string;
   kubernetes_version: string;
+  cluster_log_retention_in_days: number;
   cluster_admin_principal_arns: string[];
   analysis_subjects: Record<string, AnalysisSubject>;
   ward_applications: WardApplication[];

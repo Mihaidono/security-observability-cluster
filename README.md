@@ -1,325 +1,146 @@
-# 🛡️ Isolens: eBPF-Powered Forensic & Observability Lab
+# Isolens
 
-**An Infrastructure-as-Code (IaC) Framework for Behavioral Analysis, Workload Isolation, and Runtime Forensics.**
+Isolens is a Terraform-driven EKS lab with a small control plane:
 
----
+- `backend/` runs a FastAPI service that stores editable config, queues Terraform runs, and streams run events.
+- `frontend/` is a Vite + React operator UI for editing ward/application config and driving staged Terraform actions.
+- `infrastructure/core/` creates the AWS and in-cluster foundation.
+- `infrastructure/policies/` applies the Kyverno and Tetragon manifest layer after core is live.
 
-## 📖 Project Overview
-**Isolens** is a high-fidelity Security Observability Lab provisioned on AWS EKS. Unlike standard clusters, this environment is designed specifically for **DevSecOps Research** and **Behavioral Baselining**.
+This document reflects the code that exists in the repository today, not the long-term intent.
 
-By leveraging **Terraform** as the sole orchestrator (no GitOps controller overhead), the lab maintains a strictly deterministic state. It uses kernel-level **eBPF** probes to analyze applications within hardened "Wards" (Namespaces), providing deep visibility into process execution, file access, and network flows without sidecars or code modifications.
+## Current State
 
-### 🧪 The "Ward" Philosophy
-In this lab, applications are "subjects." Each subject is deployed into a **Ward**:
-* **Locked Down:** Default-deny network policies (L3/L4/L7).
-* **Enforced:** Pod Security Admission (PSA) set to `restricted` by default.
-* **Observed:** Hooked into **Cilium Hubble** and **Tetragon** for real-time forensic recording.
+The current implementation provisions or manages:
 
----
+- AWS VPC and EKS through the `terraform-aws-modules/vpc/aws` and `terraform-aws-modules/eks/aws` modules
+- EKS access entries for configured admin IAM principals
+- Cilium with Hubble enabled
+- Tetragon
+- Kyverno
+- conditional `ingress-nginx` when any ward application declares `ingress.class_name = "nginx"`
+- a Helm release named `lgtm` that currently installs the `grafana-agent` chart
+- ward namespaces, quotas, baseline network policies, workloads, and outputs
 
-## 🚀 Tech Stack (2026 Edition)
-* **Orchestration:** [Terraform 1.7+](https://www.terraform.io/)
-* **Cloud:** AWS EKS (v1.35 - Latest Stable)
-* **Networking & Visibility:** [Cilium 1.19](https://cilium.io/) + Hubble (eBPF Service Map)
-* **Runtime Forensics:** [Tetragon 0.12+](https://tetragon.io/) (Kernel-level process tracking)
-* **Observability:** Grafana LGTM Stack (Loki, Grafana, Tempo, Mimir)
-* **Security:** Kubernetes Native Pod Security Admissions (PSA)
+Two important reality checks:
 
----
+- The repo currently uses standard Kubernetes `NetworkPolicy` resources for workload isolation. It does not define Cilium L7 policy resources.
+- The monitoring release is explicitly pinned and still installs `grafana-agent`; it is not a full maintained LGTM stack.
 
-## 📂 Project Structure
-```text
-.
-├── backend/             # FastAPI service for auth, config management, and Terraform execution
-├── frontend/            # Vite + React + Tailwind operator UI with form-based editors
-├── infrastructure/
-│   ├── terraform.tfvars                 # Shared lab configuration template
-│   ├── frontend-managed.auto.tfvars.json
-│   ├── core/                            # VPC, EKS, add-ons, wards, workloads, and outputs
-│   ├── policies/                        # Kyverno ClusterPolicies and Tetragon tracing manifests
-│   └── bootstrap/                       # One-time remote-state bucket stack aligned with core/policies backends
-├── TESTING_AND_USAGE.md # Practical guide for testing the backend, frontend, and Terraform flow
-└── .gitignore           # Root-level ignore rules only
-```
+## Repository Map
 
----
+- [backend/README.md](backend/README.md): API, auth, run lifecycle, persistence, environment variables
+- [frontend/README.md](frontend/README.md): UI structure, runtime behavior, local development
+- [infrastructure/core/README.md](infrastructure/core/README.md): core-stage resources, inputs, outputs, caveats
+- [infrastructure/policies/README.md](infrastructure/policies/README.md): policy-stage resources, prerequisites, inputs, outputs
+- [TESTING_AND_USAGE.md](TESTING_AND_USAGE.md): local bring-up, smoke tests, and operator workflow
 
-## 🛠️ Getting Started
+## Terraform Stages
 
-### 1. Prerequisites
-* AWS CLI configured with Administrative permissions.
-* Terraform 1.7+ installed.
-* `kubectl` and `helm` installed for cluster interaction.
+The Terraform is intentionally split:
 
-### 2. Configure your "Analysis Subjects"
-Modify `infrastructure/terraform.tfvars` to define both the ward namespaces and the applications you want to run inside them. The repository now ships with a single, feature-rich reference app so you can use it as the canonical template for a future frontend/backend control plane.
+1. `bootstrap`
+   Creates the S3 bucket used by the remote state backends.
 
-```hcl
-analysis_subjects = {
-  "ward-template-app" = {
-    tier        = "template"
-    description = "Reference ward used as a full-feature application template."
-  }
-}
+2. `core`
+   Owns AWS infrastructure, the EKS cluster, Helm add-ons, ward namespaces, workloads, and operator-facing outputs.
 
-ward_applications = [
-  {
-    name      = "template-app"
-    namespace = "ward-template-app"
-    replicas  = 2
-    service = {
-      port = 8080
-    }
-    containers = [
-      {
-        image = "nginxinc/nginx-unprivileged:1.27-alpine"
-      }
-    ]
-    ingress = {
-      enabled    = true
-      class_name = "nginx"
-      host       = "template-app.lab.internal"
-    }
-  }
-]
-```
+3. `policies`
+   Owns the manifest layer that depends on the cluster and CRDs already existing.
 
-Each ward now supports:
-* Namespace labels and annotations for ownership and classification.
-* Resource quotas and default container requests/limits.
-* A built-in `ward-metadata` ConfigMap to document why the namespace exists.
-* Default-deny networking with explicit DNS egress so workloads can still resolve names.
+The backend and UI understand only two runnable stages: `core` and `policies`.
 
-Applications are now driven from `ward_applications`, which lets you control from tfvars:
-* Which ward namespace the app is deployed into.
-* Deployment name and replica count.
-* Pod labels and annotations.
-* Single-container or multi-container pod definitions.
-* Container image, command, args, env, secret-based env, port, probes, and resources.
-* Extra volumes from ConfigMaps, Secrets, or `emptyDir`.
-* Container volume mounts.
-* Optional Service creation and service type/port settings.
-* Optional ConfigMap content generated by Terraform and mounted into the pod.
-* Optional Ingress resources with host/path/class/tls settings.
-* Whether same-namespace ingress should be allowed for that app.
-* Explicit ingress and egress network policy allowlists using pod selectors, namespace selectors, IP blocks, and ports.
+## Quick Start
 
-The default `infrastructure/terraform.tfvars` intentionally contains only one application template that exercises the cluster features in one place:
-* Multi-container pod layout
-* Service and ingress exposure
-* Generated ConfigMap mount
-* Secret-backed env and volume references
-* Readiness/liveness probes
-* `emptyDir` and Secret volumes
-* App-specific ingress and egress network policies
+### 1. Bootstrap remote state
 
-This makes it easier to build a frontend that edits a single application schema, clones it, or appends another app object to `ward_applications`.
-
-### 3. Deployment
 ```bash
-# Optional but recommended: bootstrap remote state first
 cd infrastructure/bootstrap
 terraform init
 terraform apply
-
-# Initialize and apply the core stage.
-cd ../core
-terraform init -backend-config=backend.hcl
-terraform plan -var-file=../terraform.tfvars
-terraform apply -var-file=../terraform.tfvars
-
-# Initialize and apply the policies stage after core is live.
-cd ../policies
-terraform init -backend-config=backend.hcl
-terraform plan -var-file=../terraform.tfvars
-terraform apply -var-file=../terraform.tfvars
 ```
 
-The split is intentional:
-* `core/` owns AWS, EKS, Helm add-ons, wards, workloads, and operator outputs.
-* `policies/` owns the CRD-backed Kyverno and Tetragon manifest layer that should only run after the cluster is reachable.
-* Each stage already has its own committed [backend.hcl](/home/mihandrei/work/security-observability-cluster/infrastructure/core/backend.hcl) or [backend.hcl](/home/mihandrei/work/security-observability-cluster/infrastructure/policies/backend.hcl), so you can initialize them directly.
-* `bootstrap/` defaults to the `isolens-lab` state bucket and emits staged backend snippets for `dev/core/terraform.tfstate` and `dev/policies/terraform.tfstate`.
+The committed backend configs currently point at:
 
-### 4. Cluster Access
-After apply, Terraform now exposes ready-to-run outputs for operator workflow:
+- `s3://isolens-lab/dev/core/terraform.tfstate`
+- `s3://isolens-lab/dev/policies/terraform.tfstate`
+
+### 2. Configure backend credentials
+
+Copy `backend/.env.example` to `backend/.env` and point it at AWS credentials the backend process can actually use.
+
+If you use AWS SSO, a common pattern is:
 
 ```bash
-terraform output update_kubeconfig_command
-terraform output ward_kubectl_commands
-terraform output ward_service_endpoints
-terraform output ward_ingress_hosts
-```
-
-If you provide IAM principal ARNs in `cluster_admin_principal_arns`, the stack will also create EKS access entries granting cluster-admin permissions.
-
-### 5. Frontend/Backend Template Flow
-The repository now ships with a developer-focused control plane:
-* Frontend edits subjects and applications through forms, not raw JSON.
-* Backend writes the live config to `infrastructure/frontend-managed.auto.tfvars.json`.
-* Backend queues `terraform plan` and `terraform apply` runs one at a time.
-* Backend targets either `infrastructure/core` or `infrastructure/policies` per run.
-* Backend stores run metadata and logs in SQLite under `backend/state/`.
-* Frontend receives live run updates over WebSockets and reads machine-friendly outputs from `terraform output -json`.
-
-Useful outputs for automation are:
-* `terraform output -json ward_kubectl_commands`
-* `terraform output -json ward_service_endpoints`
-* `terraform output -json ward_ingress_hosts`
-* `terraform output -json update_kubeconfig_command`
-
-The backend writes the frontend-managed configuration to `infrastructure/frontend-managed.auto.tfvars.json`, which both Terraform stages load with `-var-file`.
-
-### 6. Control Plane Development
-The control plane is intentionally small and operator-oriented:
-* `backend/` runs a FastAPI API with bearer-token auth, SQLite-backed run history, queued Terraform execution, cancel support, and WebSocket event streaming.
-* `frontend/` runs a Vite + React UI with Tailwind styling and lightweight shadcn-style components.
-* The UI is organized as a tabbed operator shell with `Overview`, `Assets`, `Activity`, and `Settings`.
-* `Assets` is subject-first: pick a ward, see the applications assigned to it, then open the selected subject or app in a modal editor.
-* Ward subjects, services, ingress, containers, probes, volumes, and network policy rules are edited through form-based modals.
-* The control plane exposes staged Terraform actions for `core` and `policies`, including stage-specific destroy actions.
-* At least one IAM principal ARN must be present in `Settings -> Admin Access` before the backend will allow `plan`, `apply`, or `destroy` runs.
-
-Backend auth defaults to:
-
-```text
-ISOLENS_API_TOKEN=dev-token
-```
-
-Frontend can use the same token through:
-
-```text
-VITE_API_TOKEN=dev-token
-```
-
-Backend endpoints:
-* `GET /api/health`
-* `GET /api/config`
-* `PUT /api/config`
-* `POST /api/config/reset`
-* `POST /api/runs/plan/{stage}`
-* `POST /api/runs/{id}/apply`
-* `POST /api/runs/{id}/cancel`
-* `GET /api/runs`
-* `GET /api/runs/{id}`
-* `GET /api/runs/{id}/logs`
-* `GET /api/outputs`
-* `GET /api/observability/links`
-* `GET /api/observability/hubble-ui?token=...`
-* `WS /api/runs/{id}/events?token=...`
-
-Run the backend:
-
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-cp .env.example .env
-# edit .env with your AWS profile and token values
 aws sso login --profile <your-profile>
-uvicorn app.main:app --port 8000
 ```
 
-`uvicorn[standard]` is installed through the backend package, so websocket support for `/api/runs/{id}/events` is included after `pip install -e .`.
-The backend loads [backend/.env](/home/mihandrei/work/security-observability-cluster/backend/.env.example) on startup, and Terraform inherits AWS credentials from that backend environment.
-Use `--reload` only if you specifically want hot reload during backend development. Running without it shuts down more cleanly.
-If you want the frontend to launch the real Hubble UI, set `ISOLENS_HUBBLE_UI_URL` in `backend/.env`. A common local choice is `http://127.0.0.1:12000` after port-forwarding `svc/hubble-ui`.
+and then set `AWS_PROFILE=<your-profile>` in the environment where the backend runs.
 
-Run the frontend:
+### 3. Run the control plane
 
-```bash
-cd frontend
-npm install
-VITE_API_TOKEN=dev-token npm run dev
-```
-
-In local dev, the frontend talks directly to `http://127.0.0.1:8000` for both HTTP and websocket traffic. You can override that with `VITE_API_BASE_URL` if needed.
-
-## Docker Compose
-
-You can run the full app with Docker Compose:
+With Docker Compose:
 
 ```bash
-cp backend/.env.example backend/.env
-# edit backend/.env
-aws sso login --profile <your-profile>
 docker compose up --build
 ```
 
-This starts:
-* the backend on `http://localhost:8000`
-* the frontend on `http://localhost:5173`
+This exposes:
 
-The backend container runs without `--reload` on purpose, because the Uvicorn reloader is much more likely to hang on shutdown or get killed inside Docker development setups.
+- frontend: `http://127.0.0.1:5173`
+- backend: `http://127.0.0.1:8000`
 
-The compose stack mounts:
-* [backend/.env.example](/home/mihandrei/work/security-observability-cluster/backend/.env.example) as your local backend configuration source
-* `${HOME}/.aws` into the backend container so Terraform can use your local AWS profile and SSO cache
+### 4. Operate in stage order
 
-For SSO-backed profiles, make sure `backend/.env` points at the exact profile name you logged into:
+The backend and UI enforce the intended order:
 
-```text
-AWS_PROFILE=your-real-sso-profile
-AWS_SDK_LOAD_CONFIG=true
-AWS_CONFIG_FILE=/root/.aws/config
-AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials
-```
+1. save config
+2. plan `core`
+3. apply the saved `core` plan
+4. plan `policies`
+5. apply the saved `policies` plan
 
-Then refresh the SSO session on the host before starting Compose:
+Destroy order goes the other direction:
 
-```bash
-aws sso login --profile your-real-sso-profile
-docker compose up --build
-```
+1. destroy `policies`
+2. destroy `core`
 
-If Terraform fails with `InvalidGrantException`, the profile name is usually correct but the cached SSO token is expired, so run `aws sso login` again on the host and restart the backend container.
+## Backend Guardrails
 
-If you use static AWS credentials instead of `AWS_PROFILE`, place `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optionally `AWS_SESSION_TOKEN` in `backend/.env`.
+The current backend behavior is intentionally conservative:
 
-For a practical walkthrough on testing the control plane and playing with the template app, see [TESTING_AND_USAGE.md](/home/mihandrei/work/security-observability-cluster/TESTING_AND_USAGE.md).
+- plan/apply/destroy require at least one non-empty `cluster_admin_principal_arns` value
+- only one run executes at a time
+- apply can only use a completed saved plan
+- a saved plan is single-use once an apply attempt has been created from it
+- policy-stage planning is blocked until a successful core apply exists
+- core destroy is blocked while the latest policy-stage apply is still active
+- startup reconciliation marks stale queued/running runs as canceled or failed instead of leaving them stuck forever
 
----
+Cancellation is supported, but canceling `apply` or `destroy` can still leave partial remote changes. The backend explicitly warns about that in run error messages.
 
-## 🔍 The Analysis Workflow
+## Managed Configuration Flow
 
-### A. Network Service Mapping (Hubble)
-Visualize how your apps are communicating through the "Default-Deny" policies:
-```bash
-# View real-time flows in a specific ward
-kubectl hubble observe --namespace ward-template-app
-```
+The operator UI edits the JSON-backed config model, not raw `.tfvars` text.
 
-### B. Forensic Process Tracking (Tetragon)
-Tetragon records every system call and process executed. If a pod in your "Monitoring Zone" suddenly runs `curl` or tries to read sensitive files, it is logged at the kernel level.
-```bash
-# Watch process execution events across the cluster
-kubectl logs -n kube-system -l app.kubernetes.io/name=tetragon -c export-stdout -f
-```
+- source template: `backend/app/default_managed_config.json`
+- persisted managed config: `infrastructure/frontend-managed.auto.tfvars.json`
+- Terraform runs use `-var-file infrastructure/frontend-managed.auto.tfvars.json`
 
-Each ward now receives a namespaced `TracingPolicyNamespaced` that watches for suspicious executions such as `curl`, `wget`, `nc`, `sh`, and `bash`.
+The shared handwritten example file at `infrastructure/terraform.tfvars` remains useful for direct Terraform usage and reference data, but the backend itself operates on the managed JSON file.
 
-### C. Behavioral Dashboard
-Access the Grafana instance in the `monitoring-zone` namespace to view aggregated logs and security alerts.
+That managed JSON file now explicitly carries `cluster_log_retention_in_days`, so the backend/frontend/Terraform path preserves the EKS control-plane log-retention setting instead of depending on an implicit default.
 
----
+## Current Caveats
 
-## 🛡️ Security Posture
-* **Zero Trust Networking:** Every namespace starts with a `kubernetes_network_policy` that denies all traffic unless explicitly whitelisted.
-* **Restricted Profile:** The PSA `restricted` profile ensures pods cannot run as root, gain privilege escalation, or access host namespaces.
-* **Policy-as-Code:** Kyverno is installed and enforces ward workload labeling plus blocks `:latest` image tags in ward namespaces.
-* **EKS Control Plane Logging:** Enabled by default via Terraform for audit trails.
-* **eBPF Observability:** Detects "living-off-the-land" attacks (e.g., using `tar` or `netcat` inside a pod) that traditional logs miss.
+- `core` mixes AWS infrastructure and in-cluster Kubernetes/Helm resources in one state, so manual cluster deletion can make cleanup harder.
+- the monitoring release is still `grafana-agent`, even though the repo language historically referred to it as an LGTM stack.
+- ingress resources only get a controller automatically for the `nginx` ingress class. Other classes are still treated as bring-your-own controller.
 
----
+## Next Reads
 
-## 🚧 Roadmap
-- [x] **Kyverno Integration:** Add Policy-as-Code to block non-compliant deployments.
-- [ ] **Automated Attack Simulation:** Terraform-driven `null_resource` to trigger benign "malicious" behavior for testing.
-- [ ] **Forensic Export:** Automate the export of Tetragon logs to S3 for long-term storage.
+For the actual day-to-day workflow, start with:
 
----
-
-> **Disclaimer:** This project is for educational and research purposes. Ensure compliance with your local security policies when deploying to public cloud environments.
-
-This README was all generated with AI so I can have some kind of starting documentation to guide the project. This is the idea of it atleast.
+- [backend/README.md](backend/README.md)
+- [frontend/README.md](frontend/README.md)
+- [TESTING_AND_USAGE.md](TESTING_AND_USAGE.md)

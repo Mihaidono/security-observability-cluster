@@ -12,12 +12,15 @@ resource "kubernetes_namespace" "kyverno" {
 }
 
 resource "helm_release" "kyverno" {
-  name       = "kyverno"
-  repository = "https://kyverno.github.io/kyverno/"
-  chart      = "kyverno"
-  namespace  = kubernetes_namespace.kyverno.metadata[0].name
-  wait       = true
-  timeout    = 900
+  name            = "kyverno"
+  repository      = "https://kyverno.github.io/kyverno/"
+  chart           = "kyverno"
+  version         = "3.8.0"
+  namespace       = kubernetes_namespace.kyverno.metadata[0].name
+  wait            = true
+  timeout         = 900
+  atomic          = true
+  cleanup_on_fail = true
 
   depends_on = [kubernetes_namespace.kyverno]
 }

@@ -1,11 +1,13 @@
 resource "helm_release" "cilium" {
-  name       = "cilium"
-  repository = "https://helm.cilium.io/"
-  chart      = "cilium"
-  namespace  = "kube-system"
-  version    = "1.19.2"
-  wait       = true
-  timeout    = 900
+  name            = "cilium"
+  repository      = "https://helm.cilium.io/"
+  chart           = "cilium"
+  namespace       = "kube-system"
+  version         = "1.19.2"
+  wait            = true
+  timeout         = 900
+  atomic          = true
+  cleanup_on_fail = true
 
   set {
     name  = "eni.enabled"
@@ -46,13 +48,15 @@ resource "helm_release" "cilium" {
 }
 
 resource "helm_release" "tetragon" {
-  name       = "tetragon"
-  repository = "https://helm.cilium.io/"
-  chart      = "tetragon"
-  namespace  = "kube-system"
-  version    = "1.6.1"
-  wait       = true
-  timeout    = 900
+  name            = "tetragon"
+  repository      = "https://helm.cilium.io/"
+  chart           = "tetragon"
+  namespace       = "kube-system"
+  version         = "1.6.1"
+  wait            = true
+  timeout         = 900
+  atomic          = true
+  cleanup_on_fail = true
 
   depends_on = [helm_release.cilium]
 }
@@ -70,13 +74,21 @@ resource "kubernetes_namespace" "monitoring" {
   depends_on = [aws_eks_access_policy_association.cluster_admins]
 }
 
-resource "helm_release" "lgtm_stack" {
-  name       = "lgtm"
-  repository = "https://grafana.github.io/helm-charts"
-  chart      = "grafana-agent"
-  namespace  = kubernetes_namespace.monitoring.metadata[0].name
-  wait       = true
-  timeout    = 900
+moved {
+  from = helm_release.lgtm_stack
+  to   = helm_release.monitoring_agent
+}
+
+resource "helm_release" "monitoring_agent" {
+  name            = "lgtm"
+  repository      = "https://grafana.github.io/helm-charts"
+  chart           = "grafana-agent"
+  version         = "0.44.2"
+  namespace       = kubernetes_namespace.monitoring.metadata[0].name
+  wait            = true
+  timeout         = 900
+  atomic          = true
+  cleanup_on_fail = true
 
   set {
     name  = "fullnameOverride"

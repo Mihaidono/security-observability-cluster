@@ -416,4 +416,6 @@ resource "kubernetes_ingress_v1" "ward_application" {
       }
     }
   }
+
+  depends_on = [helm_release.ingress_nginx]
 }

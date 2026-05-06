@@ -1,8 +1,9 @@
-project_name                 = "isolens"
-environment                  = "lab"
-cluster_name                 = "forensic-lab"
-kubernetes_version           = "1.35"
-cluster_admin_principal_arns = []
+project_name                  = "isolens"
+environment                   = "lab"
+cluster_name                  = "forensic-lab"
+kubernetes_version            = "1.35"
+cluster_log_retention_in_days = 90
+cluster_admin_principal_arns  = []
 analysis_subjects = {
   "ward-template-app" = {
     tier        = "template"
@@ -32,9 +33,6 @@ ward_applications = [
     }
     service = {
       port = 8080
-      annotations = {
-        "service.beta.kubernetes.io/aws-load-balancer-scheme" = "internet-facing"
-      }
     }
     network_policy = {
       ingress = [

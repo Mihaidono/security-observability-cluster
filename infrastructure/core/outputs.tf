@@ -13,6 +13,11 @@ output "cluster_security_group_id" {
   value       = module.eks.cluster_security_group_id
 }
 
+output "cluster_log_group_name" {
+  description = "CloudWatch log group receiving EKS control-plane logs."
+  value       = aws_cloudwatch_log_group.eks_cluster.name
+}
+
 output "ward_namespaces" {
   description = "Ward namespaces created for analysis subjects."
   value       = sort(keys(local.analysis_subjects))
@@ -21,6 +26,11 @@ output "ward_namespaces" {
 output "monitoring_namespace" {
   description = "Namespace containing the observability stack."
   value       = kubernetes_namespace.monitoring.metadata[0].name
+}
+
+output "monitoring_release_name" {
+  description = "Helm release name used for the monitoring agent stack."
+  value       = helm_release.monitoring_agent.name
 }
 
 output "kyverno_namespace" {
@@ -59,4 +69,9 @@ output "ward_ingress_hosts" {
     for name, app in local.applications_with_ingress :
     name => app.ingress.host
   }
+}
+
+output "ingress_controller_namespace" {
+  description = "Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled."
+  value       = local.requires_ingress_nginx ? kubernetes_namespace.ingress_nginx[0].metadata[0].name : null
 }

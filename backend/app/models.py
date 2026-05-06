@@ -12,6 +12,7 @@ class TerraformConfig(BaseModel):
     environment: str
     cluster_name: str
     kubernetes_version: str
+    cluster_log_retention_in_days: int = 90
     cluster_admin_principal_arns: list[str] = Field(default_factory=list)
     analysis_subjects: dict[str, dict[str, Any]] = Field(default_factory=dict)
     ward_applications: list[dict[str, Any]] = Field(default_factory=list)

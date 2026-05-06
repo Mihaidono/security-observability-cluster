@@ -169,6 +169,18 @@ function formatTerraformOutputValue(entry: unknown) {
   };
 }
 
+function normalizeTerraformOutputs(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function hasTerraformOutputs(value: Record<string, unknown> | null): boolean {
+  return Boolean(value && Object.keys(value).length > 0);
+}
+
 type ParsedLogLine = {
   kind: "plain" | "structured";
   message: string;
@@ -1074,9 +1086,7 @@ export default function App() {
         setRunInState(runResponse);
         setSelectedRun(runResponse);
         setSelectedRunLogs(logsResponse.logs);
-        if (runResponse.outputs) {
-          setOutputs(runResponse.outputs as Record<string, unknown>);
-        }
+        setOutputs(normalizeTerraformOutputs(runResponse.outputs));
       } catch {
         if (!isClosed) {
           setErrorMessage("Unable to refresh run details.");
@@ -1105,17 +1115,13 @@ export default function App() {
           setRunInState(payload.run);
           setSelectedRun(payload.run);
           setSelectedRunLogs(payload.logs);
-          if (payload.run.outputs) {
-            setOutputs(payload.run.outputs as Record<string, unknown>);
-          }
+          setOutputs(normalizeTerraformOutputs(payload.run.outputs));
         }
 
         if (payload.type === "run.updated") {
           setRunInState(payload.run);
           setSelectedRun(payload.run);
-          if (payload.run.outputs) {
-            setOutputs(payload.run.outputs as Record<string, unknown>);
-          }
+          setOutputs(normalizeTerraformOutputs(payload.run.outputs));
         }
 
         if (payload.type === "run.logs") {
@@ -1220,7 +1226,7 @@ export default function App() {
   async function refreshOutputs() {
     try {
       const response = await api.getOutputs();
-      setOutputs(response.outputs);
+      setOutputs(normalizeTerraformOutputs(response.outputs));
     } catch {
       setOutputs(null);
     }
@@ -2034,6 +2040,7 @@ export default function App() {
                             setSelectedRunId(run.id);
                             setSelectedRun(run);
                             setSelectedRunLogs([]);
+                            setOutputs(normalizeTerraformOutputs(run.outputs));
                           }}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -2249,9 +2256,9 @@ export default function App() {
                         <CardTitle>Terraform Outputs</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        {outputs ? (
+                        {hasTerraformOutputs(outputs) ? (
                           <div className="themed-scrollbar max-h-[32rem] space-y-3 overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4">
-                            {Object.entries(outputs).map(([key, entry]) => {
+                            {Object.entries(outputs ?? {}).map(([key, entry]) => {
                               const normalized = formatTerraformOutputValue(entry);
                               return (
                                 <div key={key} className="rounded-[1rem] border border-border/70 bg-background/45 p-3">
@@ -2306,6 +2313,10 @@ export default function App() {
                       <ReadOnlyField label="Environment" value={config.environment} />
                       <ReadOnlyField label="Cluster name" value={config.cluster_name} />
                       <ReadOnlyField label="Kubernetes version" value={config.kubernetes_version} />
+                      <ReadOnlyField
+                        label="Control plane log retention"
+                        value={`${config.cluster_log_retention_in_days} days`}
+                      />
                     </div>
                   </CardContent>
                 </Card>

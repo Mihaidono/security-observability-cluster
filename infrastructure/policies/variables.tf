@@ -11,19 +11,19 @@ variable "environment" {
 }
 
 variable "region" {
-  description = "AWS region where the lab will be deployed."
+  description = "AWS region of the existing EKS cluster and AWS lookups used by the policies stage."
   type        = string
   default     = "eu-north-1"
 }
 
 variable "cluster_name" {
-  description = "Name of the EKS cluster."
+  description = "Name of the existing EKS cluster targeted by the policies stage."
   type        = string
   default     = "forensic-lab"
 }
 
 variable "kubernetes_version" {
-  description = "EKS control plane version."
+  description = "Accepted for compatibility with the shared tfvars payload; the policies stage does not set cluster version directly."
   type        = string
   default     = "1.35"
 }
@@ -70,10 +70,15 @@ variable "cluster_admin_principal_arns" {
   description = "Accepted for compatibility with the shared tfvars payload."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = length(var.cluster_admin_principal_arns) == length(toset(var.cluster_admin_principal_arns))
+    error_message = "cluster_admin_principal_arns must not contain duplicate entries."
+  }
 }
 
 variable "analysis_subjects" {
-  description = "Namespaces to create as isolated wards for runtime analysis."
+  description = "Ward namespace definitions consumed by namespaced Tetragon tracing policies and policy-stage outputs. The namespaces themselves must already exist from the core stage."
   type = map(object({
     tier        = string
     description = string
@@ -87,10 +92,18 @@ variable "analysis_subjects" {
       limits_memory   = optional(string, "8Gi")
     }), {})
   }))
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.analysis_subjects) :
+      can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", name)) && length(name) <= 63
+    ])
+    error_message = "Each analysis_subjects key must be a valid Kubernetes namespace name."
+  }
 }
 
 variable "ward_applications" {
-  description = "Accepted for compatibility with the shared tfvars payload."
+  description = "Unused by this stage. Accepted so the shared tfvars payload can be passed unchanged to both Terraform stages."
   type        = list(any)
   default     = []
 }
