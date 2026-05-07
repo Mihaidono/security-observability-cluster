@@ -208,6 +208,19 @@ class TerraformRunner:
             await self._terminate_active_process()
             return run
 
+        if run.status in {RunStatus.running, RunStatus.applying, RunStatus.destroying}:
+            run.status = RunStatus.failed
+            run.completed_at = utc_now()
+            run.updated_at = utc_now()
+            run.queue_position = None
+            run.error = interrupted_run_message(run.kind)
+            await self._persist_run(run)
+            await self._append_internal_log(
+                run.id,
+                "Reconciled stale run state after cancellation was requested for a run that was no longer queued or active.",
+            )
+            return run
+
         raise HTTPException(status_code=409, detail="The run is not queued or active.")
 
     async def _enqueue_run(self, run: TerraformRun) -> None:
