@@ -54,6 +54,10 @@ class TerraformRunner:
     def queue_depth(self) -> int:
         return len(self._queue_order)
 
+    @property
+    def worker_running(self) -> bool:
+        return self._worker_task is not None and not self._worker_task.done()
+
     async def start(self) -> None:
         self._stopping = False
         await self._reconcile_incomplete_runs()
@@ -224,6 +228,8 @@ class TerraformRunner:
         raise HTTPException(status_code=409, detail="The run is not queued or active.")
 
     async def _enqueue_run(self, run: TerraformRun) -> None:
+        if self._worker_task is None or self._worker_task.done():
+            self._worker_task = asyncio.create_task(self._worker_loop())
         self.store.save_run(run)
         self._queue_order.append(run.id)
         await self._refresh_queue_positions()
@@ -285,12 +291,30 @@ class TerraformRunner:
                     continue
 
                 self._active_run_id = run_id
-                if run.kind == RunKind.plan:
-                    await self._execute_plan(run)
-                elif run.kind == RunKind.apply:
-                    await self._execute_apply(run)
-                else:
-                    await self._execute_destroy(run)
+                try:
+                    if run.kind == RunKind.plan:
+                        await self._execute_plan(run)
+                    elif run.kind == RunKind.apply:
+                        await self._execute_apply(run)
+                    else:
+                        await self._execute_destroy(run)
+                except Exception as exc:  # noqa: BLE001
+                    latest = self.store.load_run(run_id)
+                    if latest is not None and latest.status in {
+                        RunStatus.running,
+                        RunStatus.applying,
+                        RunStatus.destroying,
+                    }:
+                        latest.status = RunStatus.failed
+                        latest.completed_at = utc_now()
+                        latest.updated_at = utc_now()
+                        latest.queue_position = None
+                        latest.error = str(exc)
+                        await self._persist_run(latest)
+                    await self._append_internal_log(
+                        run_id,
+                        f"Runner recovered from an unhandled execution error: {exc}",
+                    )
             except asyncio.CancelledError:
                 break
             finally:
@@ -306,8 +330,6 @@ class TerraformRunner:
         run.updated_at = utc_now()
         run.queue_position = None
         await self._persist_run(run)
-
-        await self._ensure_stage_initialized(run.stage, run.id)
 
         plan_file = Path(run.plan_path or self.store.run_dir(run.id) / "planned.tfplan")
         command = [
@@ -325,6 +347,7 @@ class TerraformRunner:
         self._raise_if_canceled(run.id)
 
         try:
+            await self._ensure_stage_initialized(run.stage, run.id)
             await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
 
             run.status = RunStatus.planned
@@ -368,8 +391,6 @@ class TerraformRunner:
         run.queue_position = None
         await self._persist_run(run)
 
-        await self._ensure_stage_initialized(run.stage, run.id)
-
         command = [
             self.settings.terraform_bin,
             "apply",
@@ -382,6 +403,7 @@ class TerraformRunner:
         self._raise_if_canceled(run.id)
 
         try:
+            await self._ensure_stage_initialized(run.stage, run.id)
             await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
 
             run.status = RunStatus.applied
@@ -437,8 +459,6 @@ class TerraformRunner:
         run.queue_position = None
         await self._persist_run(run)
 
-        await self._ensure_stage_initialized(run.stage, run.id)
-
         command = [
             self.settings.terraform_bin,
             "destroy",
@@ -453,6 +473,7 @@ class TerraformRunner:
         self._raise_if_canceled(run.id)
 
         try:
+            await self._ensure_stage_initialized(run.stage, run.id)
             await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
 
             run.outputs = {} if run.stage == RunStage.core else None
@@ -513,11 +534,18 @@ class TerraformRunner:
         self._active_process = proc
         try:
             stdout, stderr = await proc.communicate()
+            stdout_lines = stdout.decode("utf-8", errors="replace").splitlines()
+            stderr_lines = stderr.decode("utf-8", errors="replace").splitlines()
+            if run_id is not None:
+                combined_lines = stdout_lines + stderr_lines
+                if combined_lines:
+                    self.store.append_logs(run_id, combined_lines)
+                    await self._publish_logs(run_id, combined_lines)
             if self._stopping or (run_id is not None and run_id in self._cancel_requested):
                 raise RunCanceledError("Run canceled by user.")
             if proc.returncode != 0:
-                stderr_text = stderr.decode("utf-8", errors="replace").strip()
-                stdout_text = stdout.decode("utf-8", errors="replace").strip()
+                stderr_text = "\n".join(stderr_lines).strip()
+                stdout_text = "\n".join(stdout_lines).strip()
                 message = stderr_text or stdout_text or "Terraform init failed."
                 raise RuntimeError(message)
         except asyncio.CancelledError:

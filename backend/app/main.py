@@ -52,9 +52,11 @@ app.add_middleware(
 
 @app.get("/api/health", response_model=HealthResponse, dependencies=[Depends(auth_dependency)])
 async def health() -> HealthResponse:
+    worker_running = runner.worker_running
     return HealthResponse(
-        status="ok",
+        status="ok" if worker_running else "degraded",
         active_run_id=runner.active_run_id,
+        worker_running=worker_running,
         managed_tfvars_present=settings.managed_tfvars_path.exists(),
         queue_depth=runner.queue_depth,
         auth_enabled=True,

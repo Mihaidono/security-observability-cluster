@@ -90,6 +90,7 @@ class ObservabilityLinksResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     active_run_id: str | None = None
+    worker_running: bool = True
     managed_tfvars_present: bool
     queue_depth: int = 0
     auth_enabled: bool = True

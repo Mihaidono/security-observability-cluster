@@ -173,6 +173,7 @@ export interface TerraformRun {
 export interface HealthResponse {
   status: string;
   active_run_id?: string | null;
+  worker_running: boolean;
   managed_tfvars_present: boolean;
   queue_depth: number;
   auth_enabled: boolean;

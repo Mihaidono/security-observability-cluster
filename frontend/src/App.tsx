@@ -1206,7 +1206,11 @@ export default function App() {
       setObservabilityLinks(links);
       setSelectedSubjectKey(Object.keys(loadedConfig.analysis_subjects)[0] ?? "");
       setSelectedAppIndex(0);
-      setStatusMessage(`Ready. Queue depth ${health.queue_depth}.`);
+      setStatusMessage(
+        health.worker_running
+          ? `Ready. Queue depth ${health.queue_depth}.`
+          : `Backend worker is down. Queue depth ${health.queue_depth}. Restart the backend before launching runs.`,
+      );
 
       if (runResponse.items[0]) {
         setSelectedRunId(runResponse.items[0].id);
@@ -1661,7 +1665,7 @@ export default function App() {
                   <Button
                     variant="danger"
                     onClick={() => void cancelSelectedRun()}
-                    disabled={isBusy || !selectedRun || ["running", "applying", "queued"].includes(selectedRun.status) === false}
+                    disabled={isBusy || !selectedRun || ["running", "applying", "destroying", "queued", "canceling"].includes(selectedRun.status) === false}
                   >
                     Cancel run
                   </Button>
