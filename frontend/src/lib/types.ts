@@ -180,6 +180,24 @@ export interface HealthResponse {
   stages: RunStage[];
 }
 
+export interface StateLockInfo {
+  id: string;
+  path?: string | null;
+  operation?: string | null;
+  who?: string | null;
+  version?: string | null;
+  created?: string | null;
+  info?: string | null;
+}
+
+export interface UnlockStateResponse {
+  stage: RunStage;
+  unlocked: boolean;
+  detail: string;
+  lock: StateLockInfo;
+  source_run_id?: string | null;
+}
+
 export interface ObservabilityLinksResponse {
   hubble_ui_url?: string | null;
   hubble_available: boolean;

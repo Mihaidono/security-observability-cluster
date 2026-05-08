@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
 from .models import PlanSummary, TerraformConfig, TerraformRun
+
+
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+
+def strip_ansi(value: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", value)
 
 
 class SqliteStore:
@@ -145,14 +153,15 @@ class SqliteStore:
     def append_logs(self, run_id: str, lines: list[str]) -> None:
         if not lines:
             return
+        cleaned_lines = [strip_ansi(line) for line in lines]
         log_path = self.run_dir(run_id) / "run.log"
         with log_path.open("a", encoding="utf-8") as handle:
-            for line in lines:
+            for line in cleaned_lines:
                 handle.write(f"{line}\n")
         with self._connection() as connection:
             connection.executemany(
                 "INSERT INTO run_logs (run_id, line) VALUES (?, ?)",
-                [(run_id, line) for line in lines],
+                [(run_id, line) for line in cleaned_lines],
             )
 
     def read_logs(self, run_id: str) -> list[str]:

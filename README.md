@@ -77,6 +77,10 @@ aws sso login --profile <your-profile>
 
 and then set `AWS_PROFILE=<your-profile>` in the environment where the backend runs.
 
+When running the backend in Docker Compose, run the container as your host UID/GID so it can use
+your real `~/.aws` directory directly without creating root-owned SSO cache files. If your user is
+not UID/GID `1000`, set `BACKEND_UID=$(id -u)` and `BACKEND_GID=$(id -g)` before `docker compose up`.
+
 ### 3. Run the control plane
 
 With Docker Compose:

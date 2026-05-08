@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import uuid
 from datetime import datetime, timezone
@@ -13,8 +14,8 @@ from fastapi import HTTPException
 
 from .config import Settings
 from .events import RunEventBroker
-from .models import PlanSummary, RunKind, RunStage, RunStatus, TerraformRun
-from .store import SqliteStore
+from .models import PlanSummary, RunKind, RunStage, RunStatus, StateLockInfo, TerraformRun, UnlockStateResponse
+from .store import SqliteStore, strip_ansi
 
 
 def utc_now() -> datetime:
@@ -29,7 +30,7 @@ class CommandFailedError(RuntimeError):
     def __init__(self, command: list[str], exit_code: int, recent_lines: list[str]) -> None:
         self.command = command
         self.exit_code = exit_code
-        self.recent_lines = recent_lines
+        self.recent_lines = [strip_ansi(line) for line in recent_lines]
         super().__init__(build_command_error_message(command, exit_code, recent_lines))
 
 
@@ -183,6 +184,54 @@ class TerraformRunner:
         await self._enqueue_run(run)
         return run
 
+    async def unlock_state(self, stage: RunStage) -> UnlockStateResponse:
+        if self._active_run_id is not None or self._queue_order:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot unlock state while another run is active or queued. Wait for the queue to drain first.",
+            )
+
+        lock_context = self._find_recent_lock_for_stage(stage)
+        if lock_context is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No stale lock details were found for the {stage.value} stage. "
+                    "Trigger a fresh run first, or unlock manually with Terraform if you already know the lock ID."
+                ),
+            )
+
+        source_run, lock_info = lock_context
+
+        await self._ensure_stage_initialized(stage)
+        command = [self.settings.terraform_bin, "force-unlock", "-force", lock_info.id]
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=str(self._terraform_root_for_stage(stage)),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
+        )
+        self._active_process = proc
+        try:
+            stdout, stderr = await proc.communicate()
+            stdout_text = strip_ansi(stdout.decode("utf-8", errors="replace").strip())
+            stderr_text = strip_ansi(stderr.decode("utf-8", errors="replace").strip())
+            if proc.returncode != 0:
+                message = stderr_text or stdout_text or "Terraform force-unlock failed."
+                raise HTTPException(status_code=409, detail=explain_terraform_output(message) or message)
+            detail = stdout_text or f"Unlocked stale state lock {lock_info.id} for the {stage.value} stage."
+            return UnlockStateResponse(
+                stage=stage,
+                unlocked=True,
+                detail=detail,
+                lock=lock_info,
+                source_run_id=source_run.id,
+            )
+        finally:
+            if self._active_process is proc:
+                self._active_process = None
+
     async def cancel_run(self, run_id: str) -> TerraformRun:
         run = self.store.load_run(run_id)
         if run is None:
@@ -309,11 +358,11 @@ class TerraformRunner:
                         latest.completed_at = utc_now()
                         latest.updated_at = utc_now()
                         latest.queue_position = None
-                        latest.error = str(exc)
+                        latest.error = strip_ansi(str(exc))
                         await self._persist_run(latest)
                     await self._append_internal_log(
                         run_id,
-                        f"Runner recovered from an unhandled execution error: {exc}",
+                        strip_ansi(f"Runner recovered from an unhandled execution error: {exc}"),
                     )
             except asyncio.CancelledError:
                 break
@@ -381,7 +430,7 @@ class TerraformRunner:
             run.status = RunStatus.failed
             run.completed_at = utc_now()
             run.updated_at = utc_now()
-            run.error = str(exc)
+            run.error = strip_ansi(str(exc))
             await self._persist_run(run)
 
     async def _execute_apply(self, run: TerraformRun) -> None:
@@ -437,7 +486,7 @@ class TerraformRunner:
             run.status = RunStatus.failed
             run.completed_at = utc_now()
             run.updated_at = utc_now()
-            run.error = str(exc)
+            run.error = strip_ansi(str(exc))
             await self._persist_run(run)
         except RunCanceledError as exc:
             run.status = RunStatus.canceled
@@ -449,7 +498,7 @@ class TerraformRunner:
             run.status = RunStatus.failed
             run.completed_at = utc_now()
             run.updated_at = utc_now()
-            run.error = str(exc)
+            run.error = strip_ansi(str(exc))
             await self._persist_run(run)
 
     async def _execute_destroy(self, run: TerraformRun) -> None:
@@ -492,7 +541,7 @@ class TerraformRunner:
             run.status = RunStatus.failed
             run.completed_at = utc_now()
             run.updated_at = utc_now()
-            run.error = str(exc)
+            run.error = strip_ansi(str(exc))
             await self._persist_run(run)
 
     async def _persist_run(self, run: TerraformRun) -> None:
@@ -547,7 +596,8 @@ class TerraformRunner:
                 stderr_text = "\n".join(stderr_lines).strip()
                 stdout_text = "\n".join(stdout_lines).strip()
                 message = stderr_text or stdout_text or "Terraform init failed."
-                raise RuntimeError(message)
+                cleaned_message = strip_ansi(message)
+                raise RuntimeError(explain_terraform_output(cleaned_message) or cleaned_message)
         except asyncio.CancelledError:
             await self._terminate_active_process()
             raise
@@ -608,7 +658,8 @@ class TerraformRunner:
             if self._stopping or (run_id is not None and run_id in self._cancel_requested):
                 raise RunCanceledError("Run canceled by user.")
             if proc.returncode != 0:
-                raise RuntimeError(stderr.decode("utf-8", errors="replace").strip() or "Terraform command failed.")
+                cleaned_message = strip_ansi(stderr.decode("utf-8", errors="replace").strip() or "Terraform command failed.")
+                raise RuntimeError(explain_terraform_output(cleaned_message) or cleaned_message)
             return json.loads(stdout.decode("utf-8"))
         except asyncio.CancelledError:
             await self._terminate_active_process()
@@ -650,6 +701,18 @@ class TerraformRunner:
         if stage == RunStage.core:
             return self.settings.terraform_core_root
         return self.settings.terraform_policies_root
+
+    def _find_recent_lock_for_stage(self, stage: RunStage) -> tuple[TerraformRun, StateLockInfo] | None:
+        for run in self.store.list_runs():
+            if run.stage != stage:
+                continue
+            for candidate in [run.error, "\n".join(self.store.read_logs(run.id))]:
+                if not candidate:
+                    continue
+                lock_info = extract_lock_info(candidate)
+                if lock_info is not None:
+                    return run, lock_info
+        return None
 
     def _has_successful_core_apply(self) -> bool:
         return any(
@@ -735,8 +798,13 @@ def summarize_plan(payload: dict[str, Any]) -> PlanSummary:
     )
 
 
-def build_command_error_message(command: list[str], exit_code: int, recent_lines: list[str]) -> str:
-    recent_output = "\n".join(line for line in recent_lines if line.strip())
+LOCK_INFO_FIELD_RE = re.compile(r"^\s*-?\s*(ID|Path|Operation|Who|Version|Created|Info):\s*(.*)$")
+
+
+def explain_terraform_output(output: str) -> str | None:
+    recent_output = strip_ansi(output).strip()
+    if not recent_output:
+        return None
 
     if "No valid credential sources found" in recent_output or "InvalidGrantException" in recent_output:
         return (
@@ -744,6 +812,60 @@ def build_command_error_message(command: list[str], exit_code: int, recent_lines
             "Refresh the AWS credentials used by the backend process, then retry. "
             "If you use AWS SSO, run `aws sso login --profile <your-profile>` and start the backend with "
             "`AWS_PROFILE=<your-profile>`.\n\n"
+            f"Recent Terraform output:\n{recent_output}"
+        )
+
+    if "Error acquiring the state lock" in recent_output:
+        lock_fields: dict[str, str] = {}
+        for line in recent_output.splitlines():
+            match = LOCK_INFO_FIELD_RE.match(line)
+            if match:
+                lock_fields[match.group(1)] = match.group(2).strip()
+
+        lock_id = lock_fields.get("ID")
+        lock_path = lock_fields.get("Path")
+        lock_who = lock_fields.get("Who")
+        lock_created = lock_fields.get("Created")
+
+        direct_delete_hint = None
+        if lock_path and "/" in lock_path:
+            bucket, key = lock_path.split("/", 1)
+            direct_delete_hint = f"aws s3 rm s3://{bucket}/{key}.tflock"
+
+        details = [f"- ID: {lock_id}" if lock_id else None, f"- Path: {lock_path}" if lock_path else None]
+        if lock_who:
+            details.append(f"- Who: {lock_who}")
+        if lock_created:
+            details.append(f"- Created: {lock_created}")
+
+        owner_hint = ""
+        if lock_who and lock_who.startswith("root@"):
+            owner_hint = (
+                "\n\nThis lock was created by the backend container, which usually means an earlier app run was "
+                "interrupted before Terraform could release the lock."
+            )
+
+        unlock_hint = "terraform force-unlock <lock-id>"
+        if lock_id:
+            unlock_hint = f"terraform force-unlock {lock_id}"
+
+        direct_delete_section = ""
+        if direct_delete_hint:
+            direct_delete_section = (
+                "\n\nIf `force-unlock` does not clear it, remove the native S3 lock object directly:\n"
+                f"`{direct_delete_hint}`"
+            )
+
+        detail_block = "\n".join(detail for detail in details if detail)
+
+        return (
+            "Terraform could not acquire the remote state lock. "
+            "This usually means an earlier plan/apply/destroy was interrupted and left a stale S3 `.tflock` object.\n\n"
+            "If you are sure no other run is still active, clear the stale lock from the same Terraform stage with:\n"
+            f"`{unlock_hint}`"
+            f"{direct_delete_section}"
+            f"{owner_hint}"
+            f"\n\nLock details:\n{detail_block}\n\n"
             f"Recent Terraform output:\n{recent_output}"
         )
 
@@ -771,6 +893,42 @@ def build_command_error_message(command: list[str], exit_code: int, recent_lines
             "current Terraform state or delete the orphaned log group in AWS and rerun the apply.\n\n"
             f"Recent Terraform output:\n{recent_output}"
         )
+
+    return None
+
+
+def extract_lock_info(output: str) -> StateLockInfo | None:
+    cleaned_output = strip_ansi(output).strip()
+    if "Error acquiring the state lock" not in cleaned_output:
+        return None
+
+    lock_fields: dict[str, str] = {}
+    for line in cleaned_output.splitlines():
+        match = LOCK_INFO_FIELD_RE.match(line)
+        if match:
+            lock_fields[match.group(1)] = match.group(2).strip()
+
+    lock_id = lock_fields.get("ID")
+    if not lock_id:
+        return None
+
+    return StateLockInfo(
+        id=lock_id,
+        path=lock_fields.get("Path"),
+        operation=lock_fields.get("Operation"),
+        who=lock_fields.get("Who"),
+        version=lock_fields.get("Version"),
+        created=lock_fields.get("Created"),
+        info=lock_fields.get("Info"),
+    )
+
+
+def build_command_error_message(command: list[str], exit_code: int, recent_lines: list[str]) -> str:
+    recent_output = "\n".join(strip_ansi(line) for line in recent_lines if line.strip())
+
+    explained = explain_terraform_output(recent_output)
+    if explained:
+        return explained
 
     if recent_output:
         return (

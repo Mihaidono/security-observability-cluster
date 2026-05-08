@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from .auth import require_api_token, require_websocket_token
 from .config import Settings, get_settings
 from .events import RunEventBroker
-from .models import HealthResponse, ObservabilityLinksResponse, OutputsResponse, RunListResponse, RunLogsResponse, RunStage, TerraformConfig, TerraformRun
+from .models import HealthResponse, ObservabilityLinksResponse, OutputsResponse, RunListResponse, RunLogsResponse, RunStage, TerraformConfig, TerraformRun, UnlockStateResponse
 from .store import SqliteStore
 from .terraform_runner import TerraformRunner
 
@@ -114,6 +114,11 @@ async def start_apply(run_id: str) -> TerraformRun:
 @app.post("/api/runs/destroy/{stage}", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
 async def start_destroy(stage: RunStage) -> TerraformRun:
     return await runner.start_destroy(stage)
+
+
+@app.post("/api/state/unlock/{stage}", response_model=UnlockStateResponse, dependencies=[Depends(auth_dependency)])
+async def unlock_state(stage: RunStage) -> UnlockStateResponse:
+    return await runner.unlock_state(stage)
 
 
 @app.post("/api/runs/{run_id}/cancel", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])

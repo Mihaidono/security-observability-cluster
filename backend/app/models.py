@@ -87,6 +87,24 @@ class ObservabilityLinksResponse(BaseModel):
     hubble_available: bool = False
 
 
+class StateLockInfo(BaseModel):
+    id: str
+    path: str | None = None
+    operation: str | None = None
+    who: str | None = None
+    version: str | None = None
+    created: str | None = None
+    info: str | None = None
+
+
+class UnlockStateResponse(BaseModel):
+    stage: RunStage
+    unlocked: bool = True
+    detail: str
+    lock: StateLockInfo
+    source_run_id: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str
     active_run_id: str | None = None

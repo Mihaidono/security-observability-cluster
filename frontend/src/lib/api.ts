@@ -1,4 +1,4 @@
-import type { HealthResponse, ObservabilityLinksResponse, RunStage, TerraformConfig, TerraformRun } from "./types";
+import type { HealthResponse, ObservabilityLinksResponse, RunStage, TerraformConfig, TerraformRun, UnlockStateResponse } from "./types";
 
 const tokenStorageKey = "isolens-api-token";
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/$/, "");
@@ -91,6 +91,7 @@ export const api = {
   startPlan: (stage: RunStage) => request<TerraformRun>(`/api/runs/plan/${stage}`, { method: "POST" }),
   startApply: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/apply`, { method: "POST" }),
   startDestroy: (stage: RunStage) => request<TerraformRun>(`/api/runs/destroy/${stage}`, { method: "POST" }),
+  unlockState: (stage: RunStage) => request<UnlockStateResponse>(`/api/state/unlock/${stage}`, { method: "POST" }),
   cancelRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/cancel`, { method: "POST" }),
   getOutputs: () => request<{ outputs: Record<string, unknown> }>("/api/outputs"),
   getHealth: () => request<HealthResponse>("/api/health"),

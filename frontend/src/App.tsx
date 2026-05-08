@@ -1525,6 +1525,27 @@ export default function App() {
     }
   }
 
+  async function unlockState(stage: RunStage) {
+    setIsBusy(true);
+    try {
+      const response = await api.unlockState(stage);
+      setStatusMessage(`${stageLabel(stage)} state lock cleared.`);
+      setErrorMessage("");
+
+      if (response.source_run_id) {
+        const sourceRun = runs.find((run) => run.id === response.source_run_id);
+        if (sourceRun) {
+          setSelectedRun(sourceRun);
+          setSelectedRunId(sourceRun.id);
+        }
+      }
+    } catch (error) {
+      setErrorMessage((error as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function copySelectedRunLogs() {
     if (selectedRunLogs.length === 0) {
       setErrorMessage("No logs available to copy.");
@@ -1776,6 +1797,9 @@ export default function App() {
                               </Button>
                             </StageAction>
                           </div>
+                          <Button variant="ghost" onClick={() => void unlockState("core")} disabled={isBusy}>
+                            Unlock state
+                          </Button>
                         </div>
                       </div>
 
@@ -1821,6 +1845,9 @@ export default function App() {
                               </Button>
                             </StageAction>
                           </div>
+                          <Button variant="ghost" onClick={() => void unlockState("policies")} disabled={isBusy}>
+                            Unlock state
+                          </Button>
                         </div>
                       </div>
                     </CardContent>
