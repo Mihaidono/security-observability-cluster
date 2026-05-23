@@ -29,7 +29,7 @@ variable "kubernetes_version" {
 }
 
 variable "analysis_subjects" {
-  description = "Ward namespace definitions consumed by namespaced Tetragon tracing policies and policy-stage outputs. The namespaces themselves must already exist from the core stage."
+  description = "Ward namespace definitions consumed by namespaced Tetragon tracing policies and policy-stage outputs. The namespaces themselves must already exist from the platform stage."
   type = map(object({
     tier        = string
     description = string

@@ -129,7 +129,7 @@ export interface TerraformConfig {
   ward_applications: WardApplication[];
 }
 
-export type RunStage = "core" | "policies";
+export type RunStage = "core" | "platform" | "policies";
 
 export interface PlanSummary {
   create: number;

@@ -1,6 +1,6 @@
 # Policies Terraform Stage
 
-The `policies` stage owns the manifest layer that depends on the cluster created by `core`.
+The `policies` stage owns the manifest layer that depends on the in-cluster platform created by `platform`.
 
 It does not create the cluster, namespaces, or Helm add-ons. It assumes those already exist.
 
@@ -31,13 +31,13 @@ The current selectors watch for execution of:
 
 This stage expects:
 
-- the `core` stage to have been applied successfully
+- the `platform` stage to have been applied successfully
 - the EKS cluster to be reachable
 - the target ward namespaces to already exist
 - Kyverno CRDs to already exist
 - Tetragon CRDs to already exist
 
-The backend enforces the main stage-ordering rule by blocking policy-stage planning until a successful core apply exists.
+The backend enforces the main stage-ordering rule by blocking policy-stage planning until a successful platform apply exists.
 
 ## Inputs
 
@@ -85,17 +85,14 @@ use_lockfile = true
 
 ## Provider Behavior
 
-The stage resolves cluster access through:
-
-- `data.aws_eks_cluster.this`
-- `data.aws_eks_cluster_auth.this`
-
-and configures the Kubernetes provider against the existing cluster endpoint and CA bundle.
+- AWS lookups are still done through the AWS provider.
+- The Kubernetes provider targets the existing cluster endpoint and CA bundle from `data.aws_eks_cluster.this`.
+- Authentication is refreshed through `aws eks get-token` via provider `exec` auth instead of relying on a single static token for the whole run.
 
 ## Current Caveats
 
-- This stage depends on CRDs installed by the core stage, but Terraform itself is not splitting those CRDs into a separate bootstrap layer. Operationally, that means the stage order matters.
-- The Kyverno policies target namespaces by the `analysis-tier` label, which the core stage adds to ward namespaces.
+- This stage depends on CRDs installed by the platform stage, so the stage order matters.
+- The Kyverno policies target namespaces by the `analysis-tier` label, which the platform stage adds to ward namespaces.
 - If the cluster is manually deleted or cluster access is broken, this stage cannot clean itself up independently.
 
 ## Direct Terraform Usage

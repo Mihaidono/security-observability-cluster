@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
-from .models import PlanSummary, TerraformConfig, TerraformRun
+from .models import PlanSummary, RunKind, RunStage, RunStatus, TerraformConfig, TerraformRun
 
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
@@ -178,30 +178,22 @@ class SqliteStore:
         return path
 
     def latest_outputs(self) -> dict[str, Any] | None:
-        with self._connection() as connection:
-            row = connection.execute(
-                """
-                SELECT outputs_json FROM runs
-                WHERE outputs_json IS NOT NULL
-                  AND stage = 'core'
-                  AND status = 'applied'
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """
-            ).fetchone()
-            if row is None:
-                row = connection.execute(
-                    """
-                    SELECT outputs_json FROM runs
-                    WHERE outputs_json IS NOT NULL
-                      AND status = 'applied'
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                    """
-                ).fetchone()
-        if row is None or row["outputs_json"] is None:
-            return None
-        return json.loads(str(row["outputs_json"]))
+        combined: dict[str, Any] = {}
+        for stage in [RunStage.core, RunStage.platform, RunStage.policies]:
+            run = self._latest_effective_apply(stage)
+            if run and run.outputs:
+                combined.update(run.outputs)
+        return combined or None
+
+    def _latest_effective_apply(self, stage: RunStage) -> TerraformRun | None:
+        for run in self.list_runs():
+            if run.stage != stage or run.kind not in {RunKind.apply, RunKind.destroy}:
+                continue
+            if run.kind == RunKind.destroy and run.status == RunStatus.destroyed:
+                return None
+            if run.kind == RunKind.apply and run.status == RunStatus.applied and run.outputs is not None:
+                return run
+        return None
 
     def _row_to_run(self, row: sqlite3.Row) -> TerraformRun:
         plan_summary = None

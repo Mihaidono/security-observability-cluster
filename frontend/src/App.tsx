@@ -872,7 +872,9 @@ function statusTone(status?: TerraformRun["status"]): "primary" | "secondary" | 
 }
 
 function stageLabel(stage: RunStage): string {
-  return stage === "core" ? "Core" : "Policies";
+  if (stage === "core") return "Core";
+  if (stage === "platform") return "Platform";
+  return "Policies";
 }
 
 function isTerminalRunStatus(status?: TerraformRun["status"]): boolean {
@@ -980,7 +982,6 @@ export default function App() {
     if (!config || !selectedSubjectKey) return null;
     return config.analysis_subjects[selectedSubjectKey] ?? null;
   }, [config, selectedSubjectKey]);
-  const selectedApp = useMemo(() => config?.ward_applications[selectedAppIndex] ?? null, [config, selectedAppIndex]);
   const appsForSelectedSubject = useMemo(
     () =>
       (config?.ward_applications ?? [])
@@ -988,10 +989,25 @@ export default function App() {
         .filter(({ application }) => application.namespace === selectedSubjectKey),
     [config?.ward_applications, selectedSubjectKey],
   );
+  const selectedApp = useMemo(() => {
+    if (!config) return null;
+
+    const current = config.ward_applications[selectedAppIndex] ?? null;
+    if (current && current.namespace === selectedSubjectKey) {
+      return current;
+    }
+
+    return appsForSelectedSubject[0]?.application ?? null;
+  }, [appsForSelectedSubject, config, selectedAppIndex, selectedSubjectKey]);
   const latestCoreRun = useMemo(() => runs.find((run) => run.stage === "core") ?? null, [runs]);
+  const latestPlatformRun = useMemo(() => runs.find((run) => run.stage === "platform") ?? null, [runs]);
   const latestPoliciesRun = useMemo(() => runs.find((run) => run.stage === "policies") ?? null, [runs]);
   const hasAppliedCoreRun = useMemo(
     () => runs.some((run) => run.stage === "core" && run.kind === "apply" && run.status === "applied"),
+    [runs],
+  );
+  const hasAppliedPlatformRun = useMemo(
+    () => runs.some((run) => run.stage === "platform" && run.kind === "apply" && run.status === "applied"),
     [runs],
   );
   const hasAdminAccess = useMemo(
@@ -1026,9 +1042,18 @@ export default function App() {
     () => config?.ward_applications.reduce((count, application) => count + (application.containers?.length ?? 0), 0) ?? 0,
     [config?.ward_applications],
   );
+  const configuredAdminArnsCount = useMemo(
+    () => config?.cluster_admin_principal_arns.filter((arn) => arn.trim() !== "").length ?? 0,
+    [config?.cluster_admin_principal_arns],
+  );
   const adminAccessDisabledReason = !hasAdminAccess
     ? "Add at least one IAM principal ARN in Settings -> Admin Access before running this action."
     : undefined;
+  const platformLockedReason = !hasAppliedCoreRun ? "Apply core first to unlock the platform stage." : undefined;
+  const policiesLockedReason = !hasAppliedPlatformRun ? "Apply platform first to unlock the policies stage." : undefined;
+  const coreActionDisabledReason = adminAccessDisabledReason;
+  const platformActionDisabledReason = adminAccessDisabledReason ?? platformLockedReason;
+  const policiesActionDisabledReason = adminAccessDisabledReason ?? policiesLockedReason;
 
   useEffect(() => {
     selectedRunStatusRef.current = selectedRun?.status;
@@ -1183,7 +1208,7 @@ export default function App() {
   }, [isSubjectModalOpen, isAppModalOpen]);
 
   useEffect(() => {
-    workspaceScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    workspaceScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [activeTab]);
 
   useEffect(() => {
@@ -1192,6 +1217,20 @@ export default function App() {
     if (!viewport) return;
     viewport.scrollTop = viewport.scrollHeight;
   }, [selectedRunLogs, autoScrollLogs]);
+
+  useEffect(() => {
+    if (!config || !selectedSubjectKey) return;
+
+    const current = config.ward_applications[selectedAppIndex] ?? null;
+    if (current && current.namespace === selectedSubjectKey) {
+      return;
+    }
+
+    const firstMatchingAppIndex = config.ward_applications.findIndex((application) => application.namespace === selectedSubjectKey);
+    if (firstMatchingAppIndex >= 0 && firstMatchingAppIndex !== selectedAppIndex) {
+      setSelectedAppIndex(firstMatchingAppIndex);
+    }
+  }, [config, selectedAppIndex, selectedSubjectKey]);
 
   async function loadInitial() {
     try {
@@ -1204,8 +1243,10 @@ export default function App() {
       setConfig(loadedConfig);
       setRuns(sortRuns(runResponse.items));
       setObservabilityLinks(links);
-      setSelectedSubjectKey(Object.keys(loadedConfig.analysis_subjects)[0] ?? "");
-      setSelectedAppIndex(0);
+      const firstSubjectKey = Object.keys(loadedConfig.analysis_subjects)[0] ?? "";
+      const firstAppIndex = loadedConfig.ward_applications.findIndex((application) => application.namespace === firstSubjectKey);
+      setSelectedSubjectKey(firstSubjectKey);
+      setSelectedAppIndex(firstAppIndex >= 0 ? firstAppIndex : 0);
       setStatusMessage(
         health.worker_running
           ? `Ready. Queue depth ${health.queue_depth}.`
@@ -1432,8 +1473,10 @@ export default function App() {
     try {
       const reset = await api.resetConfig();
       setConfig(reset);
-      setSelectedSubjectKey(Object.keys(reset.analysis_subjects)[0] ?? "");
-      setSelectedAppIndex(0);
+      const firstSubjectKey = Object.keys(reset.analysis_subjects)[0] ?? "";
+      const firstAppIndex = reset.ward_applications.findIndex((application) => application.namespace === firstSubjectKey);
+      setSelectedSubjectKey(firstSubjectKey);
+      setSelectedAppIndex(firstAppIndex >= 0 ? firstAppIndex : 0);
       setStatusMessage("Managed config reset.");
       setErrorMessage("");
     } catch (error) {
@@ -1731,15 +1774,17 @@ export default function App() {
         <div className="grid h-full gap-6">
             {activeTab === "overview" ? (
               <>
-                <Card className="overflow-hidden">
-                  <CardContent className="grid gap-8 px-6 py-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-                    <div className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Overview Snapshot</CardTitle>
+                  </CardHeader>
+                  <CardContent className="grid gap-6 px-6 py-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+                    <div className="space-y-5">
                       <div className="space-y-3">
                         <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">Overview</p>
-                        <h2 className="text-4xl font-semibold tracking-tight">Operate the cluster in the order it actually wants to be used.</h2>
+                        <h2 className="text-3xl font-semibold tracking-tight">Operate the cluster in the order it actually wants to be used.</h2>
                         <p className="max-w-3xl text-sm leading-7 text-neutral-400">
-                          Start with core, layer policies second, and keep observability one click away. This tab should answer what to do next before
-                          you drill into assets or logs.
+                          Start with core, move into platform once the cluster is real, then layer policies on top. This area should make the next step obvious before you drill into assets or logs.
                         </p>
                       </div>
 
@@ -1778,27 +1823,27 @@ export default function App() {
                           <div>
                             <p className="text-lg font-semibold">Core</p>
                             <p className="mt-2 text-sm leading-6 text-neutral-400">
-                              VPC, EKS, add-ons, ward namespaces, workloads, and the main operator outputs.
+                              VPC, EKS, node access, and the cluster foundation that everything else depends on.
                             </p>
                           </div>
                           <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
                         </div>
                         <div className="mt-4 grid gap-3 md:grid-cols-3">
-                          <MetricTile label="Subjects" value={subjectKeys.length} />
-                          <MetricTile label="Apps" value={config.ward_applications.length} />
-                          <MetricTile label="Services" value={totalAppsWithService} />
+                          <MetricTile label="Admin ARNs" value={configuredAdminArnsCount} />
+                          <MetricTile label="Subjects Planned" value={subjectKeys.length} />
+                          <MetricTile label="Apps Planned" value={config.ward_applications.length} />
                         </div>
                         <div className="mt-5 flex flex-wrap gap-2">
-                          <StageAction disabledReason={adminAccessDisabledReason}>
+                          <StageAction disabledReason={coreActionDisabledReason}>
                             <Button onClick={() => void startPlan("core")} disabled={isBusy || !hasAdminAccess}>Plan core</Button>
                           </StageAction>
-                          <StageAction disabledReason={adminAccessDisabledReason}>
+                          <StageAction disabledReason={coreActionDisabledReason}>
                             <Button variant="secondary" onClick={() => void startApply("core")} disabled={isBusy || !hasAdminAccess || !canQueueApplyFromPlan("core")}>
                               Apply core
                             </Button>
                           </StageAction>
                           <div data-destroy-arm>
-                            <StageAction disabledReason={adminAccessDisabledReason}>
+                            <StageAction disabledReason={coreActionDisabledReason}>
                               <Button
                                 variant={armedDestroyStage === "core" ? "danger" : "ghost"}
                                 className={armedDestroyStage === "core" ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]" : ""}
@@ -1818,40 +1863,89 @@ export default function App() {
                       <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
+                            <p className="text-lg font-semibold">Platform</p>
+                            <p className="mt-2 text-sm leading-6 text-neutral-400">
+                              Namespaces, Helm add-ons, workloads, ingress, and the operator-facing outputs for the live lab.
+                            </p>
+                          </div>
+                          <Badge>{latestPlatformRun ? latestPlatformRun.status : "idle"}</Badge>
+                        </div>
+                        <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
+                          {hasAppliedCoreRun ? "Core applied, platform stage unlocked" : "Apply core first to unlock this stage"}
+                        </p>
+                        <div className="mt-4 grid gap-3 md:grid-cols-3">
+                          <MetricTile label="Subjects" value={subjectKeys.length} />
+                          <MetricTile label="Apps" value={config.ward_applications.length} />
+                          <MetricTile label="Services" value={totalAppsWithService} />
+                        </div>
+                        <div className="mt-5 flex flex-wrap gap-2">
+                          <StageAction disabledReason={platformActionDisabledReason}>
+                            <Button onClick={() => void startPlan("platform")} disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun}>Plan platform</Button>
+                          </StageAction>
+                          <StageAction disabledReason={platformActionDisabledReason}>
+                            <Button
+                              variant="secondary"
+                              onClick={() => void startApply("platform")}
+                              disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun || !canQueueApplyFromPlan("platform")}
+                            >
+                              Apply platform
+                            </Button>
+                          </StageAction>
+                          <div data-destroy-arm>
+                            <StageAction disabledReason={platformActionDisabledReason}>
+                              <Button
+                                variant={armedDestroyStage === "platform" ? "danger" : "ghost"}
+                                className={armedDestroyStage === "platform" ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]" : ""}
+                                onClick={() => void startDestroy("platform")}
+                                disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun}
+                              >
+                                Destroy platform
+                              </Button>
+                            </StageAction>
+                          </div>
+                          <Button variant="ghost" onClick={() => void unlockState("platform")} disabled={isBusy}>
+                            Unlock state
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
                             <p className="text-lg font-semibold">Policies</p>
                             <p className="mt-2 text-sm leading-6 text-neutral-400">
-                              Kyverno and Tetragon custom resources applied only after the core platform is ready.
+                              Kyverno and Tetragon custom resources applied only after the platform layer is healthy.
                             </p>
                           </div>
                           <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
                         </div>
                         <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
-                          {hasAppliedCoreRun ? "Core applied, policy stage unlocked" : "Apply core first to unlock this stage"}
+                          {hasAppliedPlatformRun ? "Platform applied, policy stage unlocked" : "Apply platform first to unlock this stage"}
                         </p>
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
                           <MetricTile label="Selected Run" value={selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "None"} />
                           <MetricTile label="Queue Depth" value={selectedRun?.queue_position ?? 0} />
                         </div>
                         <div className="mt-5 flex flex-wrap gap-2">
-                          <StageAction disabledReason={adminAccessDisabledReason}>
-                            <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun}>Plan policies</Button>
+                          <StageAction disabledReason={policiesActionDisabledReason}>
+                            <Button onClick={() => void startPlan("policies")} disabled={isBusy || !hasAdminAccess || !hasAppliedPlatformRun}>Plan policies</Button>
                           </StageAction>
-                          <StageAction disabledReason={adminAccessDisabledReason}>
+                          <StageAction disabledReason={policiesActionDisabledReason}>
                             <Button
                               variant="secondary"
                               onClick={() => void startApply("policies")}
-                              disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun || !canQueueApplyFromPlan("policies")}
+                              disabled={isBusy || !hasAdminAccess || !hasAppliedPlatformRun || !canQueueApplyFromPlan("policies")}
                             >
                               Apply policies
                             </Button>
                           </StageAction>
                           <div data-destroy-arm>
-                            <StageAction disabledReason={adminAccessDisabledReason}>
+                            <StageAction disabledReason={policiesActionDisabledReason}>
                               <Button
                                 variant={armedDestroyStage === "policies" ? "danger" : "ghost"}
                                 className={armedDestroyStage === "policies" ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]" : ""}
                                 onClick={() => void startDestroy("policies")}
-                                disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun}
+                                disabled={isBusy || !hasAdminAccess || !hasAppliedPlatformRun}
                               >
                                 Destroy policies
                               </Button>

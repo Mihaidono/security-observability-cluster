@@ -4,8 +4,9 @@ Isolens is a Terraform-driven EKS lab with a small control plane:
 
 - `backend/` runs a FastAPI service that stores editable config, queues Terraform runs, and streams run events.
 - `frontend/` is a Vite + React operator UI for editing ward/application config and driving staged Terraform actions.
-- `infrastructure/core/` creates the AWS and in-cluster foundation.
-- `infrastructure/policies/` applies the Kyverno and Tetragon manifest layer after core is live.
+- `infrastructure/core/` creates the AWS and EKS foundation.
+- `infrastructure/platform/` creates the in-cluster add-ons, namespaces, and workloads after core is live.
+- `infrastructure/policies/` applies the Kyverno and Tetragon manifest layer after platform is live.
 
 This document reflects the code that exists in the repository today, not the long-term intent.
 
@@ -32,6 +33,7 @@ Two important reality checks:
 - [backend/README.md](backend/README.md): API, auth, run lifecycle, persistence, environment variables
 - [frontend/README.md](frontend/README.md): UI structure, runtime behavior, local development
 - [infrastructure/core/README.md](infrastructure/core/README.md): core-stage resources, inputs, outputs, caveats
+- [infrastructure/platform/README.md](infrastructure/platform/README.md): platform-stage resources, inputs, outputs, and provider behavior
 - [infrastructure/policies/README.md](infrastructure/policies/README.md): policy-stage resources, prerequisites, inputs, outputs
 - [TESTING_AND_USAGE.md](TESTING_AND_USAGE.md): local bring-up, smoke tests, and operator workflow
 
@@ -43,12 +45,13 @@ The Terraform is intentionally split:
    Creates the S3 bucket used by the remote state backends.
 
 2. `core`
-   Owns AWS infrastructure, the EKS cluster, Helm add-ons, ward namespaces, workloads, and operator-facing outputs.
+   Owns AWS infrastructure, the EKS cluster, and cluster-admin access bootstrap.
 
-3. `policies`
-   Owns the manifest layer that depends on the cluster and CRDs already existing.
+3. `platform`
+   Owns Helm add-ons, ward namespaces, workloads, ingress, and most operator-facing outputs.
 
-The backend and UI understand only two runnable stages: `core` and `policies`.
+4. `policies`
+   Owns the manifest layer that depends on the cluster, namespaces, and CRDs already existing.
 
 ## Quick Start
 
@@ -63,6 +66,7 @@ terraform apply
 The committed backend configs currently point at:
 
 - `s3://isolens-lab/dev/core/terraform.tfstate`
+- `s3://isolens-lab/dev/platform/terraform.tfstate`
 - `s3://isolens-lab/dev/policies/terraform.tfstate`
 
 ### 2. Configure backend credentials
@@ -101,13 +105,16 @@ The backend and UI enforce the intended order:
 1. save config
 2. plan `core`
 3. apply the saved `core` plan
-4. plan `policies`
-5. apply the saved `policies` plan
+4. plan `platform`
+5. apply the saved `platform` plan
+6. plan `policies`
+7. apply the saved `policies` plan
 
 Destroy order goes the other direction:
 
 1. destroy `policies`
-2. destroy `core`
+2. destroy `platform`
+3. destroy `core`
 
 ## Backend Guardrails
 
@@ -115,10 +122,12 @@ The current backend behavior is intentionally conservative:
 
 - plan/apply/destroy require at least one non-empty `cluster_admin_principal_arns` value
 - only one run executes at a time
-- apply can only use a completed saved plan
+- apply always uses a saved plan and can be queued from the latest plan while that plan is `queued`, `running`, or `planned`
 - a saved plan is single-use once an apply attempt has been created from it
-- policy-stage planning is blocked until a successful core apply exists
-- core destroy is blocked while the latest policy-stage apply is still active
+- platform-stage planning is blocked until a successful core apply exists
+- policy-stage planning is blocked until a successful platform apply exists
+- platform destroy is blocked while the latest policy-stage apply is still active
+- core destroy is blocked while the latest platform-stage apply is still active
 - startup reconciliation marks stale queued/running runs as canceled or failed instead of leaving them stuck forever
 
 Cancellation is supported, but canceling `apply` or `destroy` can still leave partial remote changes. The backend explicitly warns about that in run error messages.
@@ -137,9 +146,9 @@ That managed JSON file now explicitly carries `cluster_log_retention_in_days`, s
 
 ## Current Caveats
 
-- `core` mixes AWS infrastructure and in-cluster Kubernetes/Helm resources in one state, so manual cluster deletion can make cleanup harder.
 - the monitoring release is still `grafana-agent`, even though the repo language historically referred to it as an LGTM stack.
 - ingress resources only get a controller automatically for the `nginx` ingress class. Other classes are still treated as bring-your-own controller.
+- `platform` and `policies` still depend on a live reachable cluster, so breaking cluster access outside Terraform can still complicate cleanup.
 
 ## Next Reads
 

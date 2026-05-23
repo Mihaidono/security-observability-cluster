@@ -60,7 +60,7 @@ async def health() -> HealthResponse:
         managed_tfvars_present=settings.managed_tfvars_path.exists(),
         queue_depth=runner.queue_depth,
         auth_enabled=True,
-        stages=[RunStage.core, RunStage.policies],
+        stages=[RunStage.core, RunStage.platform, RunStage.policies],
     )
 
 

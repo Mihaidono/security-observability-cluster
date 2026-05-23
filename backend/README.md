@@ -16,6 +16,7 @@ At startup the backend resolves paths relative to the repo root:
 - managed config file: `infrastructure/frontend-managed.auto.tfvars.json`
 - Terraform roots:
   - `infrastructure/core`
+  - `infrastructure/platform`
   - `infrastructure/policies`
 - SQLite database: `backend/state/isolens.db`
 - per-run artifacts and logs: `backend/state/runs/<run_id>/`
@@ -66,6 +67,7 @@ Supported run kinds:
 Supported stages:
 
 - `core`
+- `platform`
 - `policies`
 
 Run statuses:
@@ -84,10 +86,12 @@ Run statuses:
 Important guardrails implemented in `app/terraform_runner.py`:
 
 - at least one non-empty cluster admin ARN is required before plan/apply/destroy
-- `policies` plan/apply is blocked until there is a successful `core` apply
-- `apply` can only be created from a completed saved plan
+- `platform` plan/apply is blocked until there is a successful `core` apply
+- `policies` plan/apply is blocked until there is a successful `platform` apply
+- `apply` can be created from the latest plan while that source plan is `queued`, `running`, or `planned`, but it only executes if the plan finishes successfully as `planned`
 - each saved plan is single-use once an apply attempt exists
-- `core` destroy is blocked while the latest policy-stage apply is still active
+- `platform` destroy is blocked while the latest policy-stage apply is still active
+- `core` destroy is blocked while the latest platform-stage apply is still active
 - stale queued/running runs are reconciled on backend startup
 
 ## Cancellation Semantics
@@ -119,7 +123,7 @@ terraform output -json
 
 and stores the output payload on that run.
 
-`GET /api/outputs` returns the latest successful `core` apply outputs, falling back to any successful apply with outputs if needed.
+`GET /api/outputs` combines the latest effective applied outputs from `core`, `platform`, and `policies`, while ignoring stages that have already been destroyed.
 
 ## HTTP API
 
@@ -176,5 +180,5 @@ Or use the repo-level Docker Compose setup from the root README.
 ## Current Limitations
 
 - The backend is intentionally single-worker and only executes one Terraform run at a time.
-- `core` still mixes AWS and in-cluster resources in one state, so some failure and destroy scenarios remain operationally messy even with the runner guardrails.
 - Successful apply output collection is best-effort. If `terraform output -json` fails after the apply itself succeeded, the run still remains `applied`.
+- `platform` and `policies` depend on a live cluster connection, so out-of-band cluster access issues can still interrupt destroy flows.

@@ -82,11 +82,9 @@ class TerraformRunner:
     async def start_plan(self, stage: RunStage) -> TerraformRun:
         self._require_cluster_admin_access()
 
-        if stage == RunStage.policies and not self._has_successful_core_apply():
-            raise HTTPException(
-                status_code=409,
-                detail="Apply the core stage first. The policies stage expects a reachable cluster and installed CRDs.",
-            )
+        dependency = self._plan_dependency_for_stage(stage)
+        if dependency is not None and not self._stage_is_applied(dependency):
+            raise HTTPException(status_code=409, detail=self._missing_apply_message(stage, dependency))
 
         run_id = uuid.uuid4().hex[:12]
         run_dir = self.store.run_dir(run_id)
@@ -160,11 +158,9 @@ class TerraformRunner:
     async def start_destroy(self, stage: RunStage) -> TerraformRun:
         self._require_cluster_admin_access()
 
-        if stage == RunStage.core and self._has_active_policies_stage():
-            raise HTTPException(
-                status_code=409,
-                detail="Destroy the policies stage first. The core stage owns the cluster the policies stage depends on.",
-            )
+        for blocking_stage in self._destroy_blockers_for_stage(stage):
+            if self._stage_is_applied(blocking_stage):
+                raise HTTPException(status_code=409, detail=self._destroy_blocker_message(stage, blocking_stage))
 
         destroy_run_id = uuid.uuid4().hex[:12]
         command = [
@@ -501,10 +497,10 @@ class TerraformRunner:
                 await self._persist_run(run)
                 self.store.save_json_artifact(run.id, "outputs.json", outputs_payload)
         except CommandFailedError as exc:
-            if self._is_core_bootstrap_auth_delay(run, exc):
+            if self._is_platform_bootstrap_auth_delay(run, exc):
                 await self._append_internal_log(
                     run.id,
-                    "Detected initial EKS bootstrap authorization delay. The run is stopping here to preserve the reviewed plan. Wait for access propagation, then create a fresh plan and apply again.",
+                    "Detected initial platform bootstrap authorization delay. The run is stopping here to preserve the reviewed plan. Wait for access propagation, then create a fresh plan and apply again.",
                 )
 
             run.status = RunStatus.failed
@@ -549,7 +545,7 @@ class TerraformRunner:
             await self._ensure_stage_initialized(run.stage, run.id)
             await self._stream_command(run.id, command, cwd=self._terraform_root_for_stage(run.stage))
 
-            run.outputs = {} if run.stage == RunStage.core else None
+            run.outputs = None
             run.status = RunStatus.destroyed
             run.completed_at = utc_now()
             run.updated_at = utc_now()
@@ -727,6 +723,8 @@ class TerraformRunner:
     def _terraform_root_for_stage(self, stage: RunStage) -> Path:
         if stage == RunStage.core:
             return self.settings.terraform_core_root
+        if stage == RunStage.platform:
+            return self.settings.terraform_platform_root
         return self.settings.terraform_policies_root
 
     def _find_recent_lock_for_stage(self, stage: RunStage) -> tuple[TerraformRun, StateLockInfo] | None:
@@ -741,12 +739,6 @@ class TerraformRunner:
                     return run, lock_info
         return None
 
-    def _has_successful_core_apply(self) -> bool:
-        return any(
-            run.stage == RunStage.core and run.kind == RunKind.apply and run.status == RunStatus.applied
-            for run in self.store.list_runs()
-        )
-
     def _has_apply_attempt_for_plan(self, plan_run_id: str) -> bool:
         return any(run.kind == RunKind.apply and run.source_run_id == plan_run_id for run in self.store.list_runs())
 
@@ -754,17 +746,41 @@ class TerraformRunner:
         if self._stopping or run_id in self._cancel_requested:
             raise RunCanceledError("Run canceled by user.")
 
-    def _has_active_policies_stage(self) -> bool:
-        stage_runs = [
-            run
-            for run in self.store.list_runs()
-            if run.stage == RunStage.policies and run.kind in {RunKind.apply, RunKind.destroy}
-        ]
-        if not stage_runs:
-            return False
+    def _plan_dependency_for_stage(self, stage: RunStage) -> RunStage | None:
+        if stage == RunStage.platform:
+            return RunStage.core
+        if stage == RunStage.policies:
+            return RunStage.platform
+        return None
 
-        latest = max(stage_runs, key=lambda run: run.created_at)
-        return latest.kind == RunKind.apply and latest.status == RunStatus.applied
+    def _destroy_blockers_for_stage(self, stage: RunStage) -> list[RunStage]:
+        if stage == RunStage.core:
+            return [RunStage.policies, RunStage.platform]
+        if stage == RunStage.platform:
+            return [RunStage.policies]
+        return []
+
+    def _stage_is_applied(self, stage: RunStage) -> bool:
+        for run in self.store.list_runs():
+            if run.stage != stage or run.kind not in {RunKind.apply, RunKind.destroy}:
+                continue
+            if run.kind == RunKind.destroy and run.status == RunStatus.destroyed:
+                return False
+            if run.kind == RunKind.apply and run.status == RunStatus.applied:
+                return True
+        return False
+
+    def _missing_apply_message(self, stage: RunStage, dependency: RunStage) -> str:
+        return (
+            f"Apply the {dependency.value} stage first. "
+            f"The {stage.value} stage depends on the outputs and live resources owned by {dependency.value}."
+        )
+
+    def _destroy_blocker_message(self, stage: RunStage, blocking_stage: RunStage) -> str:
+        return (
+            f"Destroy the {blocking_stage.value} stage first. "
+            f"The {blocking_stage.value} stage still owns resources that depend on {stage.value}."
+        )
 
     def _terraform_env(self) -> dict[str, str]:
         helm_root = self.settings.state_dir / "helm"
@@ -805,13 +821,13 @@ class TerraformRunner:
             status_code=409,
             detail=(
                 "Add at least one cluster admin IAM principal ARN in Settings -> Admin Access before planning or "
-                "applying. Without an admin ARN, Terraform can create AWS infrastructure but may not be able to "
-                "manage or destroy the in-cluster Kubernetes and Helm resources safely."
+                "applying. Without an admin ARN, core can create the cluster, but the later platform and policies "
+                "stages may not be able to manage or destroy in-cluster Kubernetes and Helm resources safely."
             ),
         )
 
-    def _is_core_bootstrap_auth_delay(self, run: TerraformRun, exc: CommandFailedError) -> bool:
-        if run.stage != RunStage.core or run.kind != RunKind.apply:
+    def _is_platform_bootstrap_auth_delay(self, run: TerraformRun, exc: CommandFailedError) -> bool:
+        if run.stage != RunStage.platform or run.kind != RunKind.apply:
             return False
 
         haystack = "\n".join(exc.recent_lines)
@@ -965,8 +981,8 @@ def explain_terraform_output(output: str) -> str | None:
     ):
         return (
             "Terraform authenticated to the EKS cluster, but cluster-admin authorization for the current IAM role had "
-            "not propagated yet. This commonly happens on the first core apply right after creating access entries and "
-            "policy associations. Wait briefly, create a fresh plan, and apply again.\n\n"
+            "not propagated yet. This commonly happens on the first platform apply right after core creates or updates "
+            "EKS access entries and policy associations. Wait briefly, create a fresh plan, and apply again.\n\n"
             f"Recent Terraform output:\n{recent_output}"
         )
 

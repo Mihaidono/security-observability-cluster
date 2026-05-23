@@ -12,6 +12,7 @@ class Settings:
     project_root: Path
     infrastructure_root: Path
     terraform_core_root: Path
+    terraform_platform_root: Path
     terraform_policies_root: Path
     state_dir: Path
     runs_dir: Path
@@ -30,6 +31,7 @@ def get_settings() -> Settings:
     load_dotenv(backend_root / ".env")
     infrastructure_root = project_root / "infrastructure"
     terraform_core_root = infrastructure_root / "core"
+    terraform_platform_root = infrastructure_root / "platform"
     terraform_policies_root = infrastructure_root / "policies"
     state_dir = backend_root / "state"
     runs_dir = state_dir / "runs"
@@ -48,6 +50,7 @@ def get_settings() -> Settings:
         project_root=project_root,
         infrastructure_root=infrastructure_root,
         terraform_core_root=terraform_core_root,
+        terraform_platform_root=terraform_platform_root,
         terraform_policies_root=terraform_policies_root,
         state_dir=state_dir,
         runs_dir=runs_dir,
