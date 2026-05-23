@@ -12,8 +12,6 @@ resource "kubernetes_namespace" "wards" {
       "isolens.io/description" = each.value.description
     }, each.value.annotations)
   }
-
-  depends_on = [aws_eks_access_policy_association.cluster_admins]
 }
 
 resource "kubernetes_config_map" "ward_metadata" {
@@ -83,7 +81,7 @@ resource "kubernetes_network_policy" "default_deny" {
   }
 
   spec {
-    pod_selector {} # Matches all pods in the namespace
+    pod_selector {}
     policy_types = ["Ingress", "Egress"]
   }
 }

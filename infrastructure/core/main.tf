@@ -7,11 +7,6 @@ resource "aws_cloudwatch_log_group" "eks_cluster" {
   }
 }
 
-moved {
-  from = module.eks.aws_cloudwatch_log_group.this[0]
-  to   = aws_cloudwatch_log_group.eks_cluster
-}
-
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.21.0"
@@ -66,4 +61,71 @@ module "eks" {
   }
 
   depends_on = [aws_cloudwatch_log_group.eks_cluster]
+}
+
+resource "aws_eks_access_entry" "cluster_admins" {
+  for_each = toset(var.cluster_admin_principal_arns)
+
+  cluster_name  = module.eks.cluster_name
+  principal_arn = each.value
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "cluster_admins" {
+  for_each = toset(var.cluster_admin_principal_arns)
+
+  cluster_name  = module.eks.cluster_name
+  principal_arn = each.value
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.cluster_admins]
+}
+
+resource "time_sleep" "cluster_access_ready" {
+  create_duration = "45s"
+
+  triggers = {
+    cluster_name             = module.eks.cluster_name
+    cluster_endpoint         = module.eks.cluster_endpoint
+    cluster_admin_principals = join(",", sort(var.cluster_admin_principal_arns))
+  }
+
+  depends_on = [
+    module.eks,
+    aws_eks_access_policy_association.cluster_admins,
+  ]
+}
+
+module "addons" {
+  source = "../modules/core-addons"
+
+  kubernetes_version = var.kubernetes_version
+  ward_applications  = var.ward_applications
+
+  depends_on = [time_sleep.cluster_access_ready]
+}
+
+module "subjects" {
+  source = "../modules/ward-subjects"
+
+  analysis_subjects  = var.analysis_subjects
+  kubernetes_version = var.kubernetes_version
+
+  depends_on = [time_sleep.cluster_access_ready]
+}
+
+module "workloads" {
+  source = "../modules/ward-workloads"
+
+  analysis_subject_names = toset(keys(var.analysis_subjects))
+  ward_applications      = var.ward_applications
+
+  depends_on = [
+    module.addons,
+    module.subjects,
+  ]
 }

@@ -120,8 +120,13 @@ class TerraformRunner:
         source_run = self.store.load_run(run_id)
         if source_run is None:
             raise HTTPException(status_code=404, detail="Run not found.")
-        if source_run.kind != RunKind.plan or source_run.status != RunStatus.planned:
-            raise HTTPException(status_code=409, detail="Only a completed plan run can be applied.")
+        if source_run.kind != RunKind.plan:
+            raise HTTPException(status_code=409, detail="Only a plan run can be used as the source for apply.")
+        if source_run.status not in {RunStatus.queued, RunStatus.running, RunStatus.planned}:
+            raise HTTPException(
+                status_code=409,
+                detail="Apply can only be queued from a plan run that is queued, running, or planned.",
+            )
         if not source_run.plan_path:
             raise HTTPException(status_code=409, detail="The selected run does not have a saved plan file.")
         if self._has_apply_attempt_for_plan(source_run.id):
@@ -211,6 +216,7 @@ class TerraformRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            env=self._terraform_env(),
         )
         self._active_process = proc
         try:
@@ -440,12 +446,30 @@ class TerraformRunner:
         run.queue_position = None
         await self._persist_run(run)
 
+        if not run.source_run_id:
+            raise RuntimeError("This apply run is not linked to a source plan.")
+
+        source_run = self.store.load_run(run.source_run_id)
+        if source_run is None:
+            raise RuntimeError("The source plan for this apply no longer exists.")
+        if source_run.kind != RunKind.plan:
+            raise RuntimeError("The source run for this apply is not a Terraform plan.")
+        if source_run.status != RunStatus.planned:
+            raise RuntimeError(
+                f"Apply did not start because source plan {source_run.id} finished with status "
+                f"'{source_run.status.value}'. Queue a fresh successful plan before applying."
+            )
+        if not source_run.plan_path:
+            raise RuntimeError("The source plan for this apply did not produce a saved plan file.")
+
+        run.plan_path = source_run.plan_path
+
         command = [
             self.settings.terraform_bin,
             "apply",
             "-input=false",
             "-json",
-            str(Path(run.plan_path or "")),
+            source_run.plan_path,
         ]
         run.command = command
         await self._persist_run(run)
@@ -579,6 +603,7 @@ class TerraformRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            env=self._terraform_env(),
         )
         self._active_process = proc
         try:
@@ -613,6 +638,7 @@ class TerraformRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
+            env=self._terraform_env(),
         )
         self._active_process = proc
         recent_lines: list[str] = []
@@ -651,6 +677,7 @@ class TerraformRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
+            env=self._terraform_env(),
         )
         self._active_process = proc
         try:
@@ -739,6 +766,35 @@ class TerraformRunner:
         latest = max(stage_runs, key=lambda run: run.created_at)
         return latest.kind == RunKind.apply and latest.status == RunStatus.applied
 
+    def _terraform_env(self) -> dict[str, str]:
+        helm_root = self.settings.state_dir / "helm"
+        helm_cache = helm_root / "cache"
+        helm_config = helm_root / "config"
+        helm_data = helm_root / "data"
+        helm_repository_cache = helm_cache / "repository"
+        helm_repository_config = helm_config / "repositories.yaml"
+
+        for path in [helm_repository_cache, helm_config, helm_data]:
+            path.mkdir(parents=True, exist_ok=True)
+
+        if not helm_repository_config.exists():
+            helm_repository_config.write_text("repositories: []\n")
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "HELM_CACHE_HOME": str(helm_cache),
+                "HELM_CONFIG_HOME": str(helm_config),
+                "HELM_DATA_HOME": str(helm_data),
+                "HELM_REPOSITORY_CACHE": str(helm_repository_cache),
+                "HELM_REPOSITORY_CONFIG": str(helm_repository_config),
+                "XDG_CACHE_HOME": str(helm_cache),
+                "XDG_CONFIG_HOME": str(helm_config),
+                "XDG_DATA_HOME": str(helm_data),
+            }
+        )
+        return env
+
     def _require_cluster_admin_access(self) -> None:
         config = self.store.load_config()
         admin_arns = [arn.strip() for arn in config.cluster_admin_principal_arns if arn.strip()]
@@ -762,12 +818,21 @@ class TerraformRunner:
         auth_markers = [
             "Kubernetes cluster unreachable: the server has asked for the client to provide credentials",
             "Unauthorized",
+            "namespaces is forbidden",
+            "cannot create resource \"namespaces\" in API group \"\" at the cluster scope",
         ]
         access_entry_markers = [
             "aws_eks_access_entry.cluster_admins",
             "aws_eks_access_policy_association.cluster_admins",
         ]
-        return any(marker in haystack for marker in auth_markers) and any(marker in haystack for marker in access_entry_markers)
+        bootstrap_resource_markers = [
+            "module.addons.kubernetes_namespace",
+            "module.subjects.kubernetes_namespace",
+        ]
+        return any(marker in haystack for marker in auth_markers) and (
+            any(marker in haystack for marker in access_entry_markers)
+            or any(marker in haystack for marker in bootstrap_resource_markers)
+        )
 
 
 def summarize_plan(payload: dict[str, Any]) -> PlanSummary:
@@ -812,6 +877,17 @@ def explain_terraform_output(output: str) -> str | None:
             "Refresh the AWS credentials used by the backend process, then retry. "
             "If you use AWS SSO, run `aws sso login --profile <your-profile>` and start the backend with "
             "`AWS_PROFILE=<your-profile>`.\n\n"
+            f"Recent Terraform output:\n{recent_output}"
+        )
+
+    if (
+        "is not a valid chart repository or cannot be reached" in recent_output
+        and "-index.yaml: no such file or directory" in recent_output
+    ):
+        return (
+            "Terraform's Helm provider could not prepare its local repository cache inside the backend runtime. "
+            "This is a backend environment problem rather than a chart problem. "
+            "Retry with the updated backend so Terraform runs with explicit writable Helm cache and config directories.\n\n"
             f"Recent Terraform output:\n{recent_output}"
         )
 
@@ -872,16 +948,25 @@ def explain_terraform_output(output: str) -> str | None:
     auth_markers = [
         "Kubernetes cluster unreachable: the server has asked for the client to provide credentials",
         "Unauthorized",
+        "namespaces is forbidden",
+        "cannot create resource \"namespaces\" in API group \"\" at the cluster scope",
     ]
     access_entry_markers = [
         "aws_eks_access_entry.cluster_admins",
         "aws_eks_access_policy_association.cluster_admins",
     ]
-    if any(marker in recent_output for marker in auth_markers) and any(marker in recent_output for marker in access_entry_markers):
+    bootstrap_resource_markers = [
+        "module.addons.kubernetes_namespace",
+        "module.subjects.kubernetes_namespace",
+    ]
+    if any(marker in recent_output for marker in auth_markers) and (
+        any(marker in recent_output for marker in access_entry_markers)
+        or any(marker in recent_output for marker in bootstrap_resource_markers)
+    ):
         return (
-            "Terraform reached the point where cluster admin access had been created, but Kubernetes and Helm access "
-            "had not propagated yet. The apply stopped here to preserve the reviewed plan. Wait briefly for access "
-            "propagation, then create a fresh plan and apply again.\n\n"
+            "Terraform authenticated to the EKS cluster, but cluster-admin authorization for the current IAM role had "
+            "not propagated yet. This commonly happens on the first core apply right after creating access entries and "
+            "policy associations. Wait briefly, create a fresh plan, and apply again.\n\n"
             f"Recent Terraform output:\n{recent_output}"
         )
 

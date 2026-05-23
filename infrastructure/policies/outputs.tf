@@ -1,12 +1,9 @@
 output "kyverno_cluster_policies" {
   description = "Kyverno ClusterPolicy objects managed by the policies stage."
-  value = [
-    kubernetes_manifest.kyverno_require_subject_label.manifest.metadata.name,
-    kubernetes_manifest.kyverno_disallow_latest_tag.manifest.metadata.name,
-  ]
+  value       = module.policy_manifests.kyverno_cluster_policies
 }
 
 output "tetragon_policy_namespaces" {
   description = "Namespaces that receive Tetragon tracing policies."
-  value       = sort(keys(local.analysis_subjects))
+  value       = module.policy_manifests.tetragon_policy_namespaces
 }

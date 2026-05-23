@@ -1443,8 +1443,14 @@ export default function App() {
     }
   }
 
-  function latestPlannedRun(stage: RunStage): TerraformRun | null {
-    return runs.find((run) => run.stage === stage && run.kind === "plan" && run.status === "planned") ?? null;
+  function latestPlanRun(stage: RunStage): TerraformRun | null {
+    return runs.find((run) => run.stage === stage && run.kind === "plan") ?? null;
+  }
+
+  function canQueueApplyFromPlan(stage: RunStage): boolean {
+    const planRun = latestPlanRun(stage);
+    if (!planRun) return false;
+    return planRun.status === "queued" || planRun.status === "running" || planRun.status === "planned";
   }
 
   async function startPlan(stage: RunStage) {
@@ -1468,20 +1474,26 @@ export default function App() {
   }
 
   async function startApply(stage: RunStage) {
-    const plannedRun = latestPlannedRun(stage);
-    if (!plannedRun) {
-      setErrorMessage(`Queue or select a completed ${stageLabel(stage).toLowerCase()} plan before apply.`);
+    const planRun = latestPlanRun(stage);
+    if (!planRun || !canQueueApplyFromPlan(stage)) {
+      setErrorMessage(
+        `Queue a ${stageLabel(stage).toLowerCase()} plan first. Apply can only be queued from the most recent plan when it is queued, running, or planned.`,
+      );
       return;
     }
 
     setIsBusy(true);
     try {
-      const run = await api.startApply(plannedRun.id);
+      const run = await api.startApply(planRun.id);
       setRunInState(run);
       setSelectedRun(run);
       setSelectedRunId(run.id);
       setSelectedRunLogs([]);
-      setStatusMessage(`${stageLabel(stage)} apply queued.`);
+      setStatusMessage(
+        planRun.status === "planned"
+          ? `${stageLabel(stage)} apply queued from the latest saved plan.`
+          : `${stageLabel(stage)} apply queued behind the latest plan and will only run if that plan succeeds.`,
+      );
       setErrorMessage("");
     } catch (error) {
       setErrorMessage((error as Error).message);
@@ -1781,7 +1793,7 @@ export default function App() {
                             <Button onClick={() => void startPlan("core")} disabled={isBusy || !hasAdminAccess}>Plan core</Button>
                           </StageAction>
                           <StageAction disabledReason={adminAccessDisabledReason}>
-                            <Button variant="secondary" onClick={() => void startApply("core")} disabled={isBusy || !hasAdminAccess || !latestPlannedRun("core")}>
+                            <Button variant="secondary" onClick={() => void startApply("core")} disabled={isBusy || !hasAdminAccess || !canQueueApplyFromPlan("core")}>
                               Apply core
                             </Button>
                           </StageAction>
@@ -1828,7 +1840,7 @@ export default function App() {
                             <Button
                               variant="secondary"
                               onClick={() => void startApply("policies")}
-                              disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun || !latestPlannedRun("policies")}
+                              disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun || !canQueueApplyFromPlan("policies")}
                             >
                               Apply policies
                             </Button>

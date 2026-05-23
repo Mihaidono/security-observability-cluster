@@ -1,22 +1,4 @@
 locals {
-  kubernetes_psa_version = var.kubernetes_version == "latest" ? "latest" : (
-    startswith(var.kubernetes_version, "v") ? var.kubernetes_version : "v${var.kubernetes_version}"
-  )
-
-  analysis_subjects = {
-    for name, subject in var.analysis_subjects : name => merge(subject, {
-      labels      = try(subject.labels, {})
-      annotations = try(subject.annotations, {})
-      resource_quota = merge({
-        pods            = "10"
-        requests_cpu    = "2"
-        requests_memory = "4Gi"
-        limits_cpu      = "4"
-        limits_memory   = "8Gi"
-      }, try(subject.resource_quota, {}))
-    })
-  }
-
   ward_applications = {
     for app in var.ward_applications : app.name => {
       name      = app.name
@@ -120,7 +102,7 @@ locals {
           secret_name     = null
           empty_dir       = false
       }] : [])
-      legacy_config_map = {
+      config_map = {
         enabled    = try(app.config_map.enabled, false)
         name       = coalesce(try(app.config_map.name, null), "${app.name}-config")
         mount_path = coalesce(try(app.config_map.mount_path, null), "/usr/share/app/config")
@@ -182,7 +164,7 @@ locals {
 
   applications_with_config_map = {
     for name, app in local.ward_applications : name => app
-    if app.legacy_config_map.enabled
+    if app.config_map.enabled
   }
 
   applications_with_service = {
@@ -209,12 +191,4 @@ locals {
     for name, app in local.ward_applications : name => app
     if length(app.network_policy.egress) > 0
   }
-}
-
-locals {
-  ingress_class_names = toset([
-    for app in values(local.applications_with_ingress) : app.ingress.class_name
-  ])
-
-  requires_ingress_nginx = contains(local.ingress_class_names, "nginx")
 }

@@ -2,12 +2,12 @@ resource "kubernetes_config_map" "application_config" {
   for_each = local.applications_with_config_map
 
   metadata {
-    name      = each.value.legacy_config_map.name
-    namespace = kubernetes_namespace.wards[each.value.namespace].metadata[0].name
+    name      = each.value.config_map.name
+    namespace = each.value.namespace
     labels    = each.value.pod_labels
   }
 
-  data = each.value.legacy_config_map.data
+  data = each.value.config_map.data
 }
 
 resource "kubernetes_deployment" "ward_application" {
@@ -15,7 +15,7 @@ resource "kubernetes_deployment" "ward_application" {
 
   metadata {
     name      = each.value.name
-    namespace = kubernetes_namespace.wards[each.value.namespace].metadata[0].name
+    namespace = each.value.namespace
     labels    = each.value.pod_labels
   }
 
@@ -150,9 +150,9 @@ resource "kubernetes_deployment" "ward_application" {
             dynamic "volume_mount" {
               for_each = concat(
                 container.value.volume_mounts,
-                tonumber(container.key) == 0 && each.value.legacy_config_map.enabled ? [{
+                tonumber(container.key) == 0 && each.value.config_map.enabled ? [{
                   name       = "app-config"
-                  mount_path = each.value.legacy_config_map.mount_path
+                  mount_path = each.value.config_map.mount_path
                   sub_path   = null
                   read_only  = true
                 }] : []
@@ -198,7 +198,7 @@ resource "kubernetes_deployment" "ward_application" {
 
   lifecycle {
     precondition {
-      condition     = contains(keys(local.analysis_subjects), each.value.namespace)
+      condition     = contains(var.analysis_subject_names, each.value.namespace)
       error_message = "Application ${each.value.name} targets namespace ${each.value.namespace}, but that ward is not defined in analysis_subjects."
     }
 
@@ -214,7 +214,7 @@ resource "kubernetes_service" "ward_application" {
 
   metadata {
     name        = each.value.service.name
-    namespace   = kubernetes_namespace.wards[each.value.namespace].metadata[0].name
+    namespace   = each.value.namespace
     labels      = each.value.pod_labels
     annotations = each.value.service.annotations
   }
@@ -237,7 +237,7 @@ resource "kubernetes_network_policy" "allow_same_namespace_ingress" {
 
   metadata {
     name      = "allow-${each.value.name}-from-same-namespace"
-    namespace = kubernetes_namespace.wards[each.value.namespace].metadata[0].name
+    namespace = each.value.namespace
   }
 
   spec {
@@ -265,7 +265,7 @@ resource "kubernetes_network_policy" "application_ingress_allowlist" {
 
   metadata {
     name      = "allow-${each.value.name}-ingress-allowlist"
-    namespace = kubernetes_namespace.wards[each.value.namespace].metadata[0].name
+    namespace = each.value.namespace
   }
 
   spec {
@@ -322,7 +322,7 @@ resource "kubernetes_network_policy" "application_egress_allowlist" {
 
   metadata {
     name      = "allow-${each.value.name}-egress-allowlist"
-    namespace = kubernetes_namespace.wards[each.value.namespace].metadata[0].name
+    namespace = each.value.namespace
   }
 
   spec {
@@ -379,7 +379,7 @@ resource "kubernetes_ingress_v1" "ward_application" {
 
   metadata {
     name        = "${each.value.name}-ingress"
-    namespace   = kubernetes_namespace.wards[each.value.namespace].metadata[0].name
+    namespace   = each.value.namespace
     labels      = each.value.pod_labels
     annotations = each.value.ingress.annotations
   }
@@ -416,6 +416,4 @@ resource "kubernetes_ingress_v1" "ward_application" {
       }
     }
   }
-
-  depends_on = [helm_release.ingress_nginx]
 }

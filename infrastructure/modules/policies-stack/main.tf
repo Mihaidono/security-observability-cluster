@@ -100,7 +100,7 @@ resource "kubernetes_manifest" "kyverno_disallow_latest_tag" {
 }
 
 resource "kubernetes_manifest" "tetragon_suspicious_exec" {
-  for_each = local.analysis_subjects
+  for_each = var.analysis_subjects
 
   manifest = {
     apiVersion = "cilium.io/v1alpha1"
@@ -119,14 +119,7 @@ resource "kubernetes_manifest" "tetragon_suspicious_exec" {
               matchBinaries = [
                 {
                   operator = "In"
-                  values = [
-                    "/usr/bin/curl",
-                    "/bin/curl",
-                    "/usr/bin/wget",
-                    "/bin/wget",
-                    "/usr/bin/nc",
-                    "/bin/nc",
-                  ]
+                  values   = local.suspicious_network_binaries
                 }
               ]
               matchActions = [
@@ -139,12 +132,7 @@ resource "kubernetes_manifest" "tetragon_suspicious_exec" {
               matchBinaries = [
                 {
                   operator = "In"
-                  values = [
-                    "/usr/bin/bash",
-                    "/bin/bash",
-                    "/usr/bin/sh",
-                    "/bin/sh",
-                  ]
+                  values   = local.suspicious_shell_binaries
                 }
               ]
               matchActions = [

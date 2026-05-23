@@ -10,11 +10,10 @@ provider "aws" {
   }
 }
 
-# Authenticate to the EKS API after the control plane is created.
 data "aws_eks_cluster_auth" "this" {
   name = module.eks.cluster_name
 
-  depends_on = [aws_eks_access_policy_association.cluster_admins]
+  depends_on = [time_sleep.cluster_access_ready]
 }
 
 provider "kubernetes" {
