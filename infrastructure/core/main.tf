@@ -47,12 +47,6 @@ module "eks" {
       min_size       = var.node_group_scaling.min_size
       max_size       = var.node_group_scaling.max_size
       desired_size   = var.node_group_scaling.desired_size
-
-      taints = [{
-        key    = "node.cilium.io/agent-not-ready"
-        value  = "true"
-        effect = "NO_EXECUTE"
-      }]
     }
   }
 

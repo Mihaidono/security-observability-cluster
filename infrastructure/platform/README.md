@@ -6,7 +6,7 @@ The `platform` stage owns everything that runs inside the already-created EKS cl
 
 ### Platform add-ons
 
-- Cilium with Hubble enabled
+- Cilium with Hubble enabled, chained on top of the AWS VPC CNI plugin
 - Tetragon Helm release
 - Kyverno namespace and Helm release
 - `monitoring-zone` namespace
@@ -42,6 +42,12 @@ This stage expects:
 - the `core` stage to have been applied successfully
 - the EKS cluster to be reachable
 - at least one configured cluster-admin IAM principal to already have access through the core stage
+
+## Cilium Bootstrap Notes
+
+- The current platform design uses the Cilium-supported AWS VPC CNI chaining mode on EKS rather than Cilium ENI IPAM mode.
+- This keeps the EKS `aws-node` daemonset responsible for pod IP allocation and baseline node networking while still letting Cilium provide policy enforcement, Hubble, and the foundation for Tetragon.
+- Workload creation still waits for the add-on layer, so operator-managed apps are created only after the platform stack succeeds.
 
 ## Inputs
 

@@ -10,18 +10,23 @@ resource "helm_release" "cilium" {
   cleanup_on_fail = true
 
   set {
-    name  = "eni.enabled"
-    value = "true"
+    name  = "cni.chainingMode"
+    value = "aws-cni"
   }
 
   set {
-    name  = "ipam.mode"
-    value = "eni"
+    name  = "cni.exclusive"
+    value = "false"
   }
 
   set {
-    name  = "egressGateway.enabled"
-    value = "true"
+    name  = "enableIPv4Masquerade"
+    value = "false"
+  }
+
+  set {
+    name  = "routingMode"
+    value = "native"
   }
 
   set {
@@ -81,7 +86,10 @@ resource "helm_release" "kyverno" {
   atomic          = true
   cleanup_on_fail = true
 
-  depends_on = [kubernetes_namespace.kyverno]
+  depends_on = [
+    helm_release.cilium,
+    kubernetes_namespace.kyverno,
+  ]
 }
 
 resource "kubernetes_namespace" "monitoring" {

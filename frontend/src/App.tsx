@@ -191,6 +191,20 @@ type ParsedLogLine = {
   address?: string;
 };
 
+type GroupedRunLogEntry =
+  | {
+      kind: "plain";
+      startLineNumber: number;
+      endLineNumber: number;
+      message: string;
+    }
+  | {
+      kind: "structured";
+      startLineNumber: number;
+      endLineNumber: number;
+      entry: ParsedLogLine;
+    };
+
 function parseLogLine(line: string): ParsedLogLine {
   try {
     const parsed = JSON.parse(line) as Record<string, unknown>;
@@ -265,6 +279,82 @@ function parseRunErrorText(errorText: string): ParsedLogLine[] {
       return true;
     })
     .map((line) => parseLogLine(line));
+}
+
+function normalizeRunLogLines(lines: string[]): string[] {
+  const normalized: string[] = [];
+  let previousBlank = false;
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trimEnd();
+    const isBlank = line.trim() === "";
+    if (isBlank) {
+      if (!previousBlank) {
+        previousBlank = true;
+      }
+      return;
+    }
+    previousBlank = false;
+    normalized.push(line);
+  });
+
+  return normalized;
+}
+
+function isPlainLogContinuationLine(line: string): boolean {
+  return /^\s/.test(line) || /^[│╵╷]/.test(line);
+}
+
+function groupRunLogLines(lines: string[]): GroupedRunLogEntry[] {
+  const grouped: GroupedRunLogEntry[] = [];
+  let currentPlainLines: string[] = [];
+  let currentPlainStartIndex = 0;
+
+  function flushPlainGroup() {
+    if (currentPlainLines.length === 0) {
+      return;
+    }
+
+    grouped.push({
+      kind: "plain",
+      startLineNumber: currentPlainStartIndex + 1,
+      endLineNumber: currentPlainStartIndex + currentPlainLines.length,
+      message: currentPlainLines.join("\n"),
+    });
+    currentPlainLines = [];
+  }
+
+  lines.forEach((line, index) => {
+    const parsed = parseLogLine(line);
+    if (parsed.kind === "structured") {
+      flushPlainGroup();
+      grouped.push({
+        kind: "structured",
+        startLineNumber: index + 1,
+        endLineNumber: index + 1,
+        entry: parsed,
+      });
+      return;
+    }
+
+    if (currentPlainLines.length === 0) {
+      currentPlainStartIndex = index;
+      currentPlainLines = [line];
+      return;
+    }
+
+    if (isPlainLogContinuationLine(line)) {
+      currentPlainLines.push(line);
+      return;
+    }
+
+    flushPlainGroup();
+    currentPlainStartIndex = index;
+    currentPlainLines = [line];
+  });
+
+  flushPlainGroup();
+  return grouped;
 }
 
 function formatRunErrorText(errorText: string): string {
@@ -1042,6 +1132,7 @@ export default function App() {
     () => config?.ward_applications.reduce((count, application) => count + (application.containers?.length ?? 0), 0) ?? 0,
     [config?.ward_applications],
   );
+  const groupedSelectedRunLogs = useMemo(() => groupRunLogLines(selectedRunLogs), [selectedRunLogs]);
   const configuredAdminArnsCount = useMemo(
     () => config?.cluster_admin_principal_arns.filter((arn) => arn.trim() !== "").length ?? 0,
     [config?.cluster_admin_principal_arns],
@@ -1110,7 +1201,7 @@ export default function App() {
         if (isClosed) return;
         setRunInState(runResponse);
         setSelectedRun(runResponse);
-        setSelectedRunLogs(logsResponse.logs);
+        setSelectedRunLogs(normalizeRunLogLines(logsResponse.logs));
         setOutputs(normalizeTerraformOutputs(runResponse.outputs));
       } catch {
         if (!isClosed) {
@@ -1139,7 +1230,7 @@ export default function App() {
         if (payload.type === "run.snapshot") {
           setRunInState(payload.run);
           setSelectedRun(payload.run);
-          setSelectedRunLogs(payload.logs);
+          setSelectedRunLogs(normalizeRunLogLines(payload.logs));
           setOutputs(normalizeTerraformOutputs(payload.run.outputs));
         }
 
@@ -1150,7 +1241,7 @@ export default function App() {
         }
 
         if (payload.type === "run.logs") {
-          setSelectedRunLogs((current) => [...current, ...payload.lines]);
+          setSelectedRunLogs((current) => normalizeRunLogLines([...current, ...payload.lines]));
         }
       };
 
@@ -2346,31 +2437,34 @@ export default function App() {
                         <div className="overflow-hidden rounded-[1.2rem] border border-[#ab9f9d]/45 bg-[#f5f1fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
                           <div className="flex items-center justify-between gap-3 border-b border-[#ab9f9d]/35 bg-[#dddbf1]/72 px-4 py-3 text-[11px] uppercase tracking-[0.24em] text-[#383f51]/78">
                             <span>{selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "No run selected"}</span>
-                            <span>{selectedRunLogs.length} lines</span>
+                            <span>{selectedRunLogs.length} lines • {groupedSelectedRunLogs.length} entries</span>
                           </div>
                           <div ref={logsViewportRef} className="themed-scrollbar max-h-[32rem] overflow-auto p-4 font-mono text-xs text-[#383f51]">
-                            {selectedRunLogs.length > 0 ? (
+                            {groupedSelectedRunLogs.length > 0 ? (
                               <div className="space-y-2.5">
-                                {selectedRunLogs.map((line, index) => (
+                                {groupedSelectedRunLogs.map((group, index) => (
                                   (() => {
-                                    const entry = parseLogLine(line);
+                                    const entry = group.kind === "structured" ? group.entry : null;
+                                    const message = group.kind === "structured" ? group.entry.message : group.message;
                                     return (
-                                      <div key={`${index}-${line}`} className="rounded-[1rem] border border-[#ab9f9d]/32 bg-white/78 px-3 py-2.5 shadow-[0_10px_24px_rgba(56,63,81,0.06)]">
+                                      <div key={`${index}-${group.startLineNumber}-${group.endLineNumber}`} className="rounded-[1rem] border border-[#ab9f9d]/32 bg-white/78 px-3 py-2.5 shadow-[0_10px_24px_rgba(56,63,81,0.06)]">
                                           <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.2em]">
                                             <span className="rounded-full border border-[#3c4f76]/18 bg-[#3c4f76]/10 px-2 py-1 text-[#3c4f76]">
-                                              {index + 1}
+                                              {group.startLineNumber === group.endLineNumber
+                                                ? group.startLineNumber
+                                                : `${group.startLineNumber}-${group.endLineNumber}`}
                                             </span>
-                                            {entry.level ? (
+                                            {entry?.level ? (
                                               <span className={`rounded-full border px-2 py-1 ${logLevelTone(entry.level)}`}>{entry.level}</span>
                                             ) : null}
-                                            {entry.source ? <span className="text-[#3c4f76]/82">{entry.source}</span> : null}
-                                            {entry.address ? <span className="break-all text-[#383f51]/62">{entry.address}</span> : null}
-                                            {entry.timestamp ? <span className="text-[#383f51]/58">{formatRunTimestamp(entry.timestamp)}</span> : null}
+                                            {entry?.source ? <span className="text-[#3c4f76]/82">{entry.source}</span> : null}
+                                            {entry?.address ? <span className="break-all text-[#383f51]/62">{entry.address}</span> : null}
+                                            {entry?.timestamp ? <span className="text-[#383f51]/58">{formatRunTimestamp(entry.timestamp)}</span> : null}
                                           </div>
                                           <p className="mt-2 break-words whitespace-pre-wrap font-sans text-sm leading-6 text-[#383f51]">
-                                            {entry.message}
+                                            {message}
                                           </p>
-                                          {entry.detail ? (
+                                          {entry?.detail ? (
                                             <p className="mt-2 break-words whitespace-pre-wrap font-sans text-xs leading-5 text-[#3c4f76]/82">
                                               {entry.detail}
                                             </p>

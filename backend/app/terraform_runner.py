@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from .config import Settings
 from .events import RunEventBroker
 from .models import PlanSummary, RunKind, RunStage, RunStatus, StateLockInfo, TerraformRun, UnlockStateResponse
-from .store import SqliteStore, strip_ansi
+from .store import SqliteStore, normalize_log_lines, strip_ansi
 
 
 def utc_now() -> datetime:
@@ -577,23 +577,21 @@ class TerraformRunner:
     async def _publish_logs(self, run_id: str, lines: list[str]) -> None:
         if not lines:
             return
-        cleaned_lines = [strip_ansi(line) for line in lines]
+        cleaned_lines = normalize_log_lines(lines)
+        if not cleaned_lines:
+            return
         await self.broker.publish(run_id, {"type": "run.logs", "lines": cleaned_lines})
 
     async def _append_internal_log(self, run_id: str, line: str) -> None:
         self.store.append_logs(run_id, [line])
         await self._publish_logs(run_id, [line])
 
-    async def _ensure_stage_initialized(self, stage: RunStage, run_id: str | None = None) -> None:
-        if run_id is not None:
-            self._raise_if_canceled(run_id)
-        cwd = self._terraform_root_for_stage(stage)
-        backend_config = cwd / "backend.hcl"
-
-        command = [self.settings.terraform_bin, "init", "-reconfigure"]
-        if backend_config.exists():
-            command.extend(["-backend-config", str(backend_config)])
-
+    async def _run_init_command(
+        self,
+        command: list[str],
+        cwd: Path,
+        run_id: str | None = None,
+    ) -> tuple[int, list[str], list[str]]:
         proc = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(cwd),
@@ -614,7 +612,40 @@ class TerraformRunner:
                     await self._publish_logs(run_id, combined_lines)
             if self._stopping or (run_id is not None and run_id in self._cancel_requested):
                 raise RunCanceledError("Run canceled by user.")
-            if proc.returncode != 0:
+            return proc.returncode or 0, stdout_lines, stderr_lines
+        except asyncio.CancelledError:
+            await self._terminate_active_process()
+            raise
+        finally:
+            if self._active_process is proc:
+                self._active_process = None
+
+    @staticmethod
+    def _requires_init_upgrade(stdout_lines: list[str], stderr_lines: list[str]) -> bool:
+        combined_output = strip_ansi("\n".join(stdout_lines + stderr_lines))
+        return "must use terraform init -upgrade to allow selection of new versions" in combined_output
+
+    async def _ensure_stage_initialized(self, stage: RunStage, run_id: str | None = None) -> None:
+        if run_id is not None:
+            self._raise_if_canceled(run_id)
+        cwd = self._terraform_root_for_stage(stage)
+        backend_config = cwd / "backend.hcl"
+
+        command = [self.settings.terraform_bin, "init", "-reconfigure"]
+        if backend_config.exists():
+            command.extend(["-backend-config", str(backend_config)])
+
+        try:
+            exit_code, stdout_lines, stderr_lines = await self._run_init_command(command, cwd, run_id)
+            if exit_code != 0 and self._requires_init_upgrade(stdout_lines, stderr_lines):
+                if run_id is not None:
+                    await self._append_internal_log(
+                        run_id,
+                        "Provider lock mismatch detected. Retrying Terraform init with -upgrade.",
+                    )
+                upgrade_command = [*command, "-upgrade"]
+                exit_code, stdout_lines, stderr_lines = await self._run_init_command(upgrade_command, cwd, run_id)
+            if exit_code != 0:
                 stderr_text = "\n".join(stderr_lines).strip()
                 stdout_text = "\n".join(stdout_lines).strip()
                 message = stderr_text or stdout_text or "Terraform init failed."
@@ -623,9 +654,6 @@ class TerraformRunner:
         except asyncio.CancelledError:
             await self._terminate_active_process()
             raise
-        finally:
-            if self._active_process is proc:
-                self._active_process = None
 
     async def _stream_command(self, run_id: str, command: list[str], cwd: Path) -> None:
         self._raise_if_canceled(run_id)

@@ -17,6 +17,24 @@ def strip_ansi(value: str) -> str:
     return ANSI_ESCAPE_RE.sub("", value)
 
 
+def normalize_log_lines(lines: list[str]) -> list[str]:
+    normalized: list[str] = []
+    previous_blank = False
+
+    for raw_line in lines:
+        line = strip_ansi(raw_line).rstrip()
+        is_blank = line.strip() == ""
+        if is_blank:
+            if previous_blank:
+                continue
+            previous_blank = True
+            continue
+        previous_blank = False
+        normalized.append(line)
+
+    return normalized
+
+
 class SqliteStore:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -153,7 +171,9 @@ class SqliteStore:
     def append_logs(self, run_id: str, lines: list[str]) -> None:
         if not lines:
             return
-        cleaned_lines = [strip_ansi(line) for line in lines]
+        cleaned_lines = normalize_log_lines(lines)
+        if not cleaned_lines:
+            return
         log_path = self.run_dir(run_id) / "run.log"
         with log_path.open("a", encoding="utf-8") as handle:
             for line in cleaned_lines:

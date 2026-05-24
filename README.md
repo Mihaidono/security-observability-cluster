@@ -16,7 +16,7 @@ The current implementation provisions or manages:
 
 - AWS VPC and EKS through the `terraform-aws-modules/vpc/aws` and `terraform-aws-modules/eks/aws` modules
 - EKS access entries for configured admin IAM principals
-- Cilium with Hubble enabled
+- Cilium with Hubble enabled, chained on top of the AWS VPC CNI plugin
 - Tetragon
 - Kyverno
 - conditional `ingress-nginx` when any ward application declares `ingress.class_name = "nginx"`
