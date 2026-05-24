@@ -577,7 +577,8 @@ class TerraformRunner:
     async def _publish_logs(self, run_id: str, lines: list[str]) -> None:
         if not lines:
             return
-        await self.broker.publish(run_id, {"type": "run.logs", "lines": lines})
+        cleaned_lines = [strip_ansi(line) for line in lines]
+        await self.broker.publish(run_id, {"type": "run.logs", "lines": cleaned_lines})
 
     async def _append_internal_log(self, run_id: str, line: str) -> None:
         self.store.append_logs(run_id, [line])
@@ -904,6 +905,13 @@ def explain_terraform_output(output: str) -> str | None:
             "Terraform's Helm provider could not prepare its local repository cache inside the backend runtime. "
             "This is a backend environment problem rather than a chart problem. "
             "Retry with the updated backend so Terraform runs with explicit writable Helm cache and config directories.\n\n"
+            f"Recent Terraform output:\n{recent_output}"
+        )
+
+    if "git must be available and on the PATH" in recent_output:
+        return (
+            "Terraform could not download one of the remote modules because the backend runtime does not have `git` installed. "
+            "Rebuild and restart the backend container so Terraform can fetch registry modules that resolve through Git.\n\n"
             f"Recent Terraform output:\n{recent_output}"
         )
 
