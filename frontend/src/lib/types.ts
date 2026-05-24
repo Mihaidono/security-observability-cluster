@@ -28,6 +28,8 @@ export interface IngressConfig {
   class_name?: string;
   host?: string;
   path?: string;
+  path_type?: string;
+  tls_secret_name?: string;
   annotations?: Record<string, string>;
 }
 
@@ -48,6 +50,8 @@ export interface ProbeConfig {
 export interface VolumeMountConfig {
   name: string;
   mount_path: string;
+  sub_path?: string;
+  read_only?: boolean;
 }
 
 export interface ResourcesConfig {
@@ -57,9 +61,16 @@ export interface ResourcesConfig {
   limits_memory?: string;
 }
 
+export interface ContainerSecurityContext {
+  run_as_user?: number;
+  run_as_group?: number;
+  read_only_root_filesystem?: boolean;
+}
+
 export interface ContainerConfig {
   name: string;
   image: string;
+  image_pull_policy?: string;
   port?: number;
   command?: string[];
   args?: string[];
@@ -72,6 +83,7 @@ export interface ContainerConfig {
   };
   resources?: ResourcesConfig;
   volume_mounts?: VolumeMountConfig[];
+  security_context?: ContainerSecurityContext;
 }
 
 export interface VolumeConfig {
@@ -91,6 +103,7 @@ export interface NetworkPolicyPeer {
   namespace_selector?: Record<string, string>;
   ip_block?: {
     cidr?: string;
+    except?: string[];
   };
 }
 
@@ -110,6 +123,9 @@ export interface WardApplication {
   namespace: string;
   replicas?: number;
   pod_labels?: Record<string, string>;
+  pod_annotations?: Record<string, string>;
+  automount_service_account_token?: boolean;
+  allow_same_namespace_ingress?: boolean;
   service?: ServiceConfig;
   ingress?: IngressConfig;
   config_map?: ConfigMapConfig;

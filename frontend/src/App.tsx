@@ -3,6 +3,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
+import { Textarea } from "./components/ui/textarea";
 import { api, buildObservabilityLaunchUrl, buildRunEventsUrl, getApiToken } from "./lib/api";
 import type {
   AnalysisSubject,
@@ -23,6 +24,402 @@ import type {
 
 type Direction = "ingress" | "egress";
 type AppTab = "overview" | "assets" | "activity" | "settings";
+type DemoScenarioId = "public-python-api" | "internal-python-api" | "static-site";
+
+type AppReview = {
+  errors: string[];
+  warnings: string[];
+  hints: string[];
+  resources: string[];
+  secretDependencies: string[];
+};
+
+function kubeSafeName(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/--+/g, "-");
+
+  return normalized.slice(0, 63) || "app";
+}
+
+function defaultProbeSet(port: number, path: string) {
+  return {
+    readiness: {
+      ...emptyProbe(),
+      enabled: true,
+      path,
+      port,
+      initial_delay_seconds: 5,
+      period_seconds: 10,
+    },
+    liveness: {
+      ...emptyProbe(),
+      enabled: true,
+      path,
+      port,
+      initial_delay_seconds: 15,
+      period_seconds: 20,
+    },
+    startup: {
+      ...emptyProbe(),
+      enabled: false,
+      path,
+      port,
+      initial_delay_seconds: 5,
+      period_seconds: 10,
+    },
+  };
+}
+
+function pythonApiSource(mode: "public" | "internal"): string {
+  return [
+    "from fastapi import FastAPI, Request",
+    "from fastapi.responses import JSONResponse",
+    "",
+    "import os",
+    "import socket",
+    "import urllib.error",
+    "import urllib.request",
+    "",
+    'app = FastAPI(title=os.getenv("APP_DISPLAY_NAME", "Isolens Demo API"))',
+    "",
+    "",
+    '@app.get("/health")',
+    "def health():",
+    "    return {",
+    '        "status": "ok",',
+    '        "scenario": os.getenv("SCENARIO_NAME", "demo"),',
+    '        "hostname": socket.gethostname(),',
+    "    }",
+    "",
+    "",
+    '@app.get("/")',
+    "def root():",
+    "    return {",
+    '        "message": "Isolens demo workload is live",',
+    '        "scenario": os.getenv("SCENARIO_NAME", "demo"),',
+    '        "profile": os.getenv("SCENARIO_PROFILE", "baseline"),',
+    "    }",
+    "",
+    "",
+    '@app.get("/headers")',
+    "def headers(request: Request):",
+    "    selected_headers = {}",
+    '    for key, value in request.headers.items():',
+    '        if key.lower() in {"host", "user-agent", "x-forwarded-for", "x-forwarded-proto"}:',
+    "            selected_headers[key] = value",
+    "    return {",
+    '        "scenario": os.getenv("SCENARIO_NAME", "demo"),',
+    '        "headers": selected_headers,',
+    "    }",
+    "",
+    "",
+    '@app.get("/egress-check")',
+    'def egress_check(url: str = os.getenv("DEMO_EGRESS_URL", "https://example.com")):',
+    "    try:",
+    "        with urllib.request.urlopen(url, timeout=5) as response:",
+    "            return {",
+    '                "ok": True,',
+    '                "target": url,',
+    '                "status": response.status,',
+    '                "scenario": os.getenv("SCENARIO_NAME", "demo"),',
+    "            }",
+    "    except (urllib.error.URLError, TimeoutError, ValueError) as exc:",
+    "        return JSONResponse(",
+    "            status_code=502,",
+    "            content={",
+    '                "ok": False,',
+    '                "target": url,',
+    '                "scenario": os.getenv("SCENARIO_NAME", "demo"),',
+    '                "error": str(exc),',
+    "            },",
+    "        )",
+    "",
+    "",
+    `# Scenario mode: ${mode}`,
+  ].join("\n");
+}
+
+function staticSiteHtml(appName: string): string {
+  return [
+    "<!DOCTYPE html>",
+    '<html lang="en">',
+    "  <head>",
+    '    <meta charset="utf-8" />',
+    `    <title>${appName}</title>`,
+    '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
+    "    <style>",
+    "      body { font-family: 'Space Grotesk', system-ui, sans-serif; padding: 3rem; background: #f3f0f8; color: #383f51; }",
+    "      .shell { max-width: 720px; margin: 0 auto; padding: 2rem; border-radius: 28px; background: rgba(255,255,255,0.82); box-shadow: 0 24px 80px rgba(56, 63, 81, 0.14); }",
+    "      code { font-family: 'IBM Plex Mono', monospace; }",
+    "    </style>",
+    "  </head>",
+    "  <body>",
+    '    <div class="shell">',
+    `      <h1>${appName}</h1>`,
+    "      <p>This app is managed through the Isolens interface and is designed to be safe to deploy as a first cluster workload.</p>",
+    "      <p>Use it when you want a quick ingress and service sanity check before moving to a more dynamic workload.</p>",
+    "      <p><code>/</code> should return this page through the service and ingress path.</p>",
+    "    </div>",
+    "  </body>",
+    "</html>",
+  ].join("\n");
+}
+
+function makePublicPythonApiApp(namespace: string): WardApplication {
+  return {
+    name: "public-python-api",
+    namespace,
+    replicas: 2,
+    pod_labels: {
+      app_role: "api",
+      scenario: "public",
+      expose_class: "web",
+    },
+    service: {
+      enabled: true,
+      type: "ClusterIP",
+      port: 80,
+      target_port: 80,
+      annotations: {},
+    },
+    ingress: {
+      enabled: true,
+      class_name: "nginx",
+      host: "public-python-api.lab.internal",
+      path: "/",
+      path_type: "Prefix",
+      annotations: {
+        "nginx.ingress.kubernetes.io/ssl-redirect": "false",
+      },
+    },
+    config_map: {
+      enabled: true,
+      mount_path: "/app",
+      data: {
+        "main.py": pythonApiSource("public"),
+      },
+    },
+    containers: [
+      {
+        name: "api",
+        image: "tiangolo/uvicorn-gunicorn-fastapi:python3.11-slim",
+        image_pull_policy: "IfNotPresent",
+        port: 80,
+        env: {
+          APP_DISPLAY_NAME: "Public Python API",
+          SCENARIO_NAME: "public-python-api",
+          SCENARIO_PROFILE: "internet-egress",
+          DEMO_EGRESS_URL: "https://example.com",
+        },
+        env_from_secret_names: [],
+        probes: defaultProbeSet(80, "/health"),
+        resources: {
+          requests_cpu: "150m",
+          requests_memory: "192Mi",
+          limits_cpu: "500m",
+          limits_memory: "256Mi",
+        },
+        volume_mounts: [],
+        security_context: {
+          run_as_user: 101,
+          run_as_group: 101,
+          read_only_root_filesystem: false,
+        },
+      },
+    ],
+    volumes: [],
+    network_policy: {
+      ingress: [
+        {
+          ports: [{ port: 80, protocol: "TCP" }],
+          from: [
+            {
+              namespace_selector: {
+                "kubernetes.io/metadata.name": "ingress-nginx",
+              },
+            },
+            {
+              namespace_selector: {
+                "kubernetes.io/metadata.name": "monitoring-zone",
+              },
+            },
+          ],
+        },
+      ],
+      egress: [
+        {
+          ports: [{ port: 443, protocol: "TCP" }],
+          to: [{ ip_block: { cidr: "0.0.0.0/0" } }],
+        },
+      ],
+    },
+  };
+}
+
+function makeInternalPythonApiApp(namespace: string): WardApplication {
+  return {
+    name: "internal-python-api",
+    namespace,
+    replicas: 1,
+    pod_labels: {
+      app_role: "api",
+      scenario: "internal",
+      expose_class: "cluster",
+    },
+    service: {
+      enabled: true,
+      type: "ClusterIP",
+      port: 80,
+      target_port: 80,
+      annotations: {},
+    },
+    ingress: {
+      enabled: false,
+      class_name: "nginx",
+      host: "",
+      path: "/",
+      path_type: "Prefix",
+      annotations: {},
+    },
+    config_map: {
+      enabled: true,
+      mount_path: "/app",
+      data: {
+        "main.py": pythonApiSource("internal"),
+      },
+    },
+    containers: [
+      {
+        name: "api",
+        image: "tiangolo/uvicorn-gunicorn-fastapi:python3.11-slim",
+        image_pull_policy: "IfNotPresent",
+        port: 80,
+        env: {
+          APP_DISPLAY_NAME: "Internal Python API",
+          SCENARIO_NAME: "internal-python-api",
+          SCENARIO_PROFILE: "restricted",
+          DEMO_EGRESS_URL: "https://example.com",
+        },
+        env_from_secret_names: [],
+        probes: defaultProbeSet(80, "/health"),
+        resources: {
+          requests_cpu: "100m",
+          requests_memory: "160Mi",
+          limits_cpu: "400m",
+          limits_memory: "256Mi",
+        },
+        volume_mounts: [],
+        security_context: {
+          run_as_user: 101,
+          run_as_group: 101,
+          read_only_root_filesystem: false,
+        },
+      },
+    ],
+    volumes: [],
+    network_policy: {
+      ingress: [
+        {
+          ports: [{ port: 80, protocol: "TCP" }],
+          from: [
+            {
+              namespace_selector: {
+                "kubernetes.io/metadata.name": "monitoring-zone",
+              },
+            },
+          ],
+        },
+      ],
+      egress: [],
+    },
+  };
+}
+
+function makeStaticSiteApp(namespace: string): WardApplication {
+  return {
+    name: "static-site-probe",
+    namespace,
+    replicas: 1,
+    pod_labels: {
+      app_role: "web",
+      scenario: "static",
+      expose_class: "web",
+    },
+    service: {
+      enabled: true,
+      type: "ClusterIP",
+      port: 8080,
+      target_port: 8080,
+      annotations: {},
+    },
+    ingress: {
+      enabled: true,
+      class_name: "nginx",
+      host: "static-site-probe.lab.internal",
+      path: "/",
+      path_type: "Prefix",
+      annotations: {
+        "nginx.ingress.kubernetes.io/ssl-redirect": "false",
+      },
+    },
+    config_map: {
+      enabled: true,
+      mount_path: "/usr/share/nginx/html",
+      data: {
+        "index.html": staticSiteHtml("static-site-probe"),
+      },
+    },
+    containers: [
+      {
+        name: "web",
+        image: "nginxinc/nginx-unprivileged:1.27-alpine",
+        image_pull_policy: "IfNotPresent",
+        port: 8080,
+        env: {
+          APP_DISPLAY_NAME: "Static Site Probe",
+        },
+        env_from_secret_names: [],
+        probes: defaultProbeSet(8080, "/"),
+        resources: {
+          requests_cpu: "100m",
+          requests_memory: "128Mi",
+          limits_cpu: "300m",
+          limits_memory: "192Mi",
+        },
+        volume_mounts: [],
+        security_context: {
+          run_as_user: 101,
+          run_as_group: 101,
+          read_only_root_filesystem: false,
+        },
+      },
+    ],
+    volumes: [],
+    network_policy: {
+      ingress: [
+        {
+          ports: [{ port: 8080, protocol: "TCP" }],
+          from: [
+            {
+              namespace_selector: {
+                "kubernetes.io/metadata.name": "ingress-nginx",
+              },
+            },
+            {
+              namespace_selector: {
+                "kubernetes.io/metadata.name": "monitoring-zone",
+              },
+            },
+          ],
+        },
+      ],
+      egress: [],
+    },
+  };
+}
 
 function emptySubject(): AnalysisSubject {
   return {
@@ -53,6 +450,7 @@ function emptyContainer(): ContainerConfig {
   return {
     name: "app",
     image: "nginxinc/nginx-unprivileged:1.27-alpine",
+    image_pull_policy: "IfNotPresent",
     port: 8080,
     command: [],
     args: [],
@@ -70,6 +468,11 @@ function emptyContainer(): ContainerConfig {
       limits_memory: "256Mi",
     },
     volume_mounts: [],
+    security_context: {
+      run_as_user: 101,
+      run_as_group: 101,
+      read_only_root_filesystem: false,
+    },
   };
 }
 
@@ -109,6 +512,9 @@ function emptyAppTemplate(namespace: string): WardApplication {
     pod_labels: {
       app_role: "api",
     },
+    pod_annotations: {},
+    automount_service_account_token: false,
+    allow_same_namespace_ingress: true,
     service: {
       enabled: true,
       type: "ClusterIP",
@@ -121,6 +527,7 @@ function emptyAppTemplate(namespace: string): WardApplication {
       class_name: "nginx",
       host: "",
       path: "/",
+      path_type: "Prefix",
       annotations: {},
     },
     config_map: {
@@ -392,6 +799,182 @@ function compactRecord(value?: Record<string, string>): Record<string, string> {
   );
 }
 
+function primaryContainer(app: WardApplication | null | undefined): ContainerConfig | null {
+  return app?.containers?.[0] ?? null;
+}
+
+function appSecretDependencies(app: WardApplication | null | undefined): string[] {
+  if (!app) return [];
+
+  const secretRefs = new Set<string>();
+
+  for (const container of app.containers ?? []) {
+    for (const secretName of container.env_from_secret_names ?? []) {
+      if (secretName.trim()) {
+        secretRefs.add(secretName.trim());
+      }
+    }
+  }
+
+  for (const volume of app.volumes ?? []) {
+    if (volume.secret_name?.trim()) {
+      secretRefs.add(volume.secret_name.trim());
+    }
+  }
+
+  if (app.ingress?.tls_secret_name?.trim()) {
+    secretRefs.add(app.ingress.tls_secret_name.trim());
+  }
+
+  return [...secretRefs];
+}
+
+function hasIngressNamespaceAccess(app: WardApplication | null | undefined): boolean {
+  if (!app?.ingress?.enabled) return true;
+
+  return (app.network_policy?.ingress ?? []).some((rule) =>
+    (rule.from ?? []).some(
+      (peer) => peer.namespace_selector?.["kubernetes.io/metadata.name"] === "ingress-nginx",
+    ),
+  );
+}
+
+function buildAppReview(app: WardApplication | null | undefined, subjectNames: string[]): AppReview {
+  if (!app) {
+    return {
+      errors: [],
+      warnings: [],
+      hints: [],
+      resources: [],
+      secretDependencies: [],
+    };
+  }
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const hints: string[] = [];
+  const resources: string[] = [];
+  const secretDependencies = appSecretDependencies(app);
+
+  if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(app.name)) {
+    errors.push("Application name must be a valid Kubernetes name using lowercase letters, numbers, and hyphens.");
+  }
+
+  if (!subjectNames.includes(app.namespace)) {
+    errors.push("Application namespace must point to an existing ward.");
+  }
+
+  if ((app.containers ?? []).length === 0) {
+    errors.push("At least one container is required.");
+  }
+
+  const firstContainer = primaryContainer(app);
+  if (firstContainer) {
+    if (!firstContainer.image?.trim()) {
+      errors.push("Primary container image is required.");
+    }
+
+    if (!firstContainer.port) {
+      errors.push("Primary container port is required.");
+    }
+
+    if ((firstContainer.probes?.readiness?.enabled || firstContainer.probes?.liveness?.enabled) && !firstContainer.probes?.readiness?.path) {
+      warnings.push("Health probes are enabled, but the readiness path is empty.");
+    }
+
+    if ((firstContainer.env_from_secret_names ?? []).length > 0) {
+      warnings.push("Secret env sources are referenced here, but the interface does not create those secrets for you.");
+    }
+  }
+
+  if (app.service?.enabled !== false) {
+    resources.push("Service");
+    if (!app.service?.port || !app.service?.target_port) {
+      errors.push("Service-backed apps need both a service port and a target port.");
+    }
+  }
+
+  if (app.ingress?.enabled) {
+    resources.push("Ingress");
+    if (app.service?.enabled === false) {
+      errors.push("Ingress needs the service to stay enabled.");
+    }
+    if (!app.ingress.host?.trim()) {
+      errors.push("Ingress is enabled, but the host is empty.");
+    }
+    if (!app.ingress.class_name?.trim()) {
+      errors.push("Ingress is enabled, but the ingress class is empty.");
+    }
+    if (!hasIngressNamespaceAccess(app)) {
+      warnings.push("Ingress is enabled, but the app-level network policy does not appear to allow traffic from the ingress-nginx namespace.");
+    }
+  }
+
+  if (app.config_map?.enabled) {
+    resources.push("ConfigMap");
+    if (!app.config_map.mount_path?.trim()) {
+      errors.push("ConfigMap is enabled, but the mount path is empty.");
+    }
+    if (Object.keys(app.config_map.data ?? {}).length === 0) {
+      errors.push("ConfigMap is enabled, but no files are defined.");
+    }
+  }
+
+  if ((app.network_policy?.ingress ?? []).length > 0 || (app.network_policy?.egress ?? []).length > 0) {
+    resources.push("Network policies");
+  }
+
+  const volumeNames = new Set((app.volumes ?? []).map((volume) => volume.name));
+  for (const container of app.containers ?? []) {
+    for (const mount of container.volume_mounts ?? []) {
+      if (!volumeNames.has(mount.name)) {
+        errors.push(`Container "${container.name}" mounts volume "${mount.name}", but that volume is not defined.`);
+      }
+      if (!mount.mount_path?.trim()) {
+        errors.push(`Container "${container.name}" has a volume mount without a mount path.`);
+      }
+    }
+  }
+
+  if (secretDependencies.length > 0) {
+    warnings.push("This app depends on existing Kubernetes secrets. Make sure they already exist before you deploy.");
+  }
+
+  if ((app.containers ?? []).length > 1) {
+    hints.push("Only the first container automatically gets the generated ConfigMap mount from the simple builder path.");
+  }
+
+  if (app.service?.enabled !== false && app.allow_same_namespace_ingress === false) {
+    warnings.push("Same-namespace ingress is disabled, so service reachability will rely entirely on your explicit network policy rules.");
+  }
+
+  if (errors.length === 0 && warnings.length === 0) {
+    hints.push("This app looks deployable from the interface without extra manual cluster objects.");
+  }
+
+  return {
+    errors,
+    warnings,
+    hints,
+    resources,
+    secretDependencies,
+  };
+}
+
+function displayImageName(image?: string): string {
+  if (!image) return "Not configured";
+  const parts = image.split("/");
+  return parts[parts.length - 1] || image;
+}
+
+function displayExposureSummary(app: WardApplication | null | undefined): string {
+  if (!app) return "Not configured";
+  if (app.ingress?.enabled) {
+    return app.ingress.host?.trim() || "Ingress enabled";
+  }
+  return "Cluster-internal";
+}
+
 function KeyValueEditor({
   label,
   value,
@@ -585,16 +1168,31 @@ function VolumeMountEditor({
       {mounts.length === 0 ? <p className="text-sm text-neutral-500">No mounts.</p> : null}
       <div className="grid gap-2">
         {mounts.map((mount, index) => (
-          <div key={`${mount.name}-${index}`} className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <div key={`${mount.name}-${index}`} className="grid gap-2 rounded-2xl border border-border bg-muted/60 p-3">
+            <div className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_160px_auto]">
             <Input value={mount.name} onChange={(event) => updateMount(index, { ...mount, name: event.target.value })} placeholder="Volume name" />
             <Input
               value={mount.mount_path}
               onChange={(event) => updateMount(index, { ...mount, mount_path: event.target.value })}
               placeholder="/mount/path"
             />
+              <Input
+                value={mount.sub_path ?? ""}
+                onChange={(event) => updateMount(index, { ...mount, sub_path: event.target.value || undefined })}
+                placeholder="subPath (optional)"
+              />
+              <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 text-sm text-neutral-600">
+                <input
+                  type="checkbox"
+                  checked={mount.read_only ?? true}
+                  onChange={(event) => updateMount(index, { ...mount, read_only: event.target.checked })}
+                />
+                Read only
+              </label>
             <Button variant="danger" type="button" onClick={() => onChange(mounts.filter((_, mountIndex) => mountIndex !== index))}>
               Remove
             </Button>
+            </div>
           </div>
         ))}
       </div>
@@ -865,6 +1463,13 @@ function ContainerEditor({
 
         <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
           <label className="grid gap-1 text-sm">
+            <span>Image pull policy</span>
+            <Input
+              value={container.image_pull_policy ?? "IfNotPresent"}
+              onChange={(event) => onChange({ ...container, image_pull_policy: event.target.value })}
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
             <span>CPU request</span>
             <Input
               value={container.resources?.requests_cpu ?? ""}
@@ -911,6 +1516,57 @@ function ContainerEditor({
                 })
               }
             />
+          </label>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="grid gap-1 text-sm">
+            <span>Run as user</span>
+            <Input
+              type="number"
+              value={String(container.security_context?.run_as_user ?? 101)}
+              onChange={(event) =>
+                onChange({
+                  ...container,
+                  security_context: {
+                    ...container.security_context,
+                    run_as_user: Number(event.target.value),
+                  },
+                })
+              }
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>Run as group</span>
+            <Input
+              type="number"
+              value={String(container.security_context?.run_as_group ?? 101)}
+              onChange={(event) =>
+                onChange({
+                  ...container,
+                  security_context: {
+                    ...container.security_context,
+                    run_as_group: Number(event.target.value),
+                  },
+                })
+              }
+            />
+          </label>
+          <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-600">
+            <input
+              type="checkbox"
+              checked={container.security_context?.read_only_root_filesystem ?? false}
+              onChange={(event) =>
+                onChange({
+                  ...container,
+                  security_context: {
+                    ...container.security_context,
+                    read_only_root_filesystem: event.target.checked,
+                  },
+                })
+              }
+            />
+            Read-only root filesystem
           </label>
         </div>
 
@@ -985,6 +1641,103 @@ function MetricTile({
       <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">{label}</p>
       <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
       {hint ? <p className="mt-2 text-sm text-neutral-500">{hint}</p> : null}
+    </div>
+  );
+}
+
+function ReviewItems({
+  title,
+  tone,
+  items,
+}: {
+  title: string;
+  tone: "error" | "warning" | "hint";
+  items: string[];
+}) {
+  if (items.length === 0) return null;
+
+  const toneClass =
+    tone === "error"
+      ? "border-warning/35 bg-warning/10 text-warning"
+      : tone === "warning"
+        ? "border-[#ab9f9d]/55 bg-[#ab9f9d]/14 text-foreground"
+        : "border-accent/25 bg-accent/10 text-foreground";
+
+  return (
+    <div className={`rounded-[1.25rem] border px-4 py-3 ${toneClass}`}>
+      <p className="text-[11px] uppercase tracking-[0.22em]">{title}</p>
+      <div className="mt-3 space-y-2 text-sm leading-6">
+        {items.map((item, index) => (
+          <p key={`${tone}-${index}`}>{item}</p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ScenarioTile({
+  title,
+  description,
+  tag,
+  actionLabel = "Apply to selected application",
+  onApply,
+}: {
+  title: string;
+  description: string;
+  tag: string;
+  actionLabel?: string;
+  onApply: () => void;
+}) {
+  return (
+    <div className="flex min-h-[232px] min-w-[280px] max-w-[280px] shrink-0 snap-start flex-col justify-between rounded-[1.5rem] border border-border/80 bg-card/80 p-4">
+      <div className="flex-1">
+        <p className="font-semibold">{title}</p>
+        <p className="mt-2 inline-flex rounded-full border border-border/75 bg-muted/70 px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+          {tag}
+        </p>
+        <p className="mt-3 text-sm leading-6 text-neutral-500">{description}</p>
+      </div>
+      <Button className="mt-5 self-start" variant="secondary" type="button" onClick={onApply}>
+        {actionLabel}
+      </Button>
+    </div>
+  );
+}
+
+function EditorSection({
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  summary: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <div className="rounded-2xl border border-border p-4">
+      <button
+        type="button"
+        className="w-full rounded-[1.4rem] bg-muted/55 px-4 py-4 text-left transition hover:bg-muted/75"
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+          <div className="min-w-0">
+            <p className="font-semibold">{title}</p>
+            <p className="mt-2 text-sm leading-6 text-neutral-500">{summary}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 sm:justify-self-end">
+            <Badge>Advanced</Badge>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/80 bg-card/80 text-lg leading-none text-foreground/70">
+              {isOpen ? "−" : "+"}
+            </span>
+          </div>
+        </div>
+      </button>
+      {isOpen ? <div className="mt-5 grid gap-4">{children}</div> : null}
     </div>
   );
 }
@@ -1089,6 +1842,12 @@ export default function App() {
 
     return appsForSelectedSubject[0]?.application ?? null;
   }, [appsForSelectedSubject, config, selectedAppIndex, selectedSubjectKey]);
+  const selectedAppPrimaryContainer = useMemo(() => primaryContainer(selectedApp), [selectedApp]);
+  const selectedAppReview = useMemo(() => buildAppReview(selectedApp, subjectKeys), [selectedApp, subjectKeys]);
+  const selectedAppPrimaryConfigFile = useMemo<[string, string]>(() => {
+    const entries = Object.entries(selectedApp?.config_map?.data ?? {});
+    return entries[0] ?? ["main.py", ""];
+  }, [selectedApp?.config_map?.data]);
   const latestCoreRun = useMemo(() => runs.find((run) => run.stage === "core") ?? null, [runs]);
   const latestPlatformRun = useMemo(() => runs.find((run) => run.stage === "platform") ?? null, [runs]);
   const latestPoliciesRun = useMemo(() => runs.find((run) => run.stage === "policies") ?? null, [runs]);
@@ -1398,6 +2157,38 @@ export default function App() {
     });
   }
 
+  function updateSelectedPrimaryContainer(mutator: (current: ContainerConfig) => ContainerConfig) {
+    updateSelectedApp((current) => {
+      const containers = [...(current.containers ?? [emptyContainer()])];
+      containers[0] = mutator(containers[0] ?? emptyContainer());
+      return {
+        ...current,
+        containers,
+      };
+    });
+  }
+
+  function updateSelectedPrimaryConfigFile(nextName: string, nextContent: string) {
+    updateSelectedApp((current) => {
+      const entries = Object.entries(current.config_map?.data ?? {});
+      const [, existingContent] = entries[0] ?? ["main.py", ""];
+      const remainder = Object.fromEntries(entries.slice(1));
+      const primaryName = nextName.trim() || "main.py";
+
+      return {
+        ...current,
+        config_map: {
+          ...current.config_map,
+          enabled: true,
+          data: {
+            [primaryName]: nextContent ?? existingContent,
+            ...remainder,
+          },
+        },
+      };
+    });
+  }
+
   function renameSubject(currentKey: string, nextKey: string) {
     const trimmed = nextKey.trim();
     if (!config || trimmed === "" || trimmed === currentKey || config.analysis_subjects[trimmed]) {
@@ -1437,7 +2228,10 @@ export default function App() {
       delete next.analysis_subjects[selectedSubjectKey];
       next.ward_applications = next.ward_applications.filter((application) => application.namespace !== selectedSubjectKey);
       if (next.ward_applications.length === 0) {
-        next.ward_applications.push(emptyAppTemplate(Object.keys(next.analysis_subjects)[0] ?? "ward-template-app"));
+        const fallbackNamespace = Object.keys(next.analysis_subjects)[0] ?? "ward-template-app";
+        const fallbackApp = makeInternalPythonApiApp(fallbackNamespace);
+        fallbackApp.name = kubeSafeName(uniqueName(fallbackApp.name, next.ward_applications.map((application) => application.name)));
+        next.ward_applications.push(fallbackApp);
       }
       return next;
     });
@@ -1457,11 +2251,44 @@ export default function App() {
   function addApp() {
     if (!config) return;
     const namespace = selectedSubjectKey || subjectKeys[0] || "ward-template-app";
+    const template = makeInternalPythonApiApp(namespace);
+    template.name = kubeSafeName(uniqueName(template.name, config.ward_applications.map((application) => application.name)));
     updateConfig((current) => ({
       ...current,
-      ward_applications: [...current.ward_applications, emptyAppTemplate(namespace)],
+      ward_applications: [...current.ward_applications, template],
     }));
     setSelectedAppIndex(config.ward_applications.length);
+  }
+
+  function addDemoScenario(scenario: DemoScenarioId) {
+    if (!config) return;
+
+    const namespace = selectedSubjectKey || subjectKeys[0] || "ward-template-app";
+    const app =
+      scenario === "public-python-api"
+        ? makePublicPythonApiApp(namespace)
+        : scenario === "internal-python-api"
+          ? makeInternalPythonApiApp(namespace)
+          : makeStaticSiteApp(namespace);
+    app.name = kubeSafeName(uniqueName(app.name, config.ward_applications.map((existing) => existing.name)));
+    if (app.ingress?.enabled) {
+      app.ingress.host = `${app.name}.lab.internal`;
+    }
+
+    updateConfig((current) => ({
+      ...current,
+      ward_applications: [...current.ward_applications, app],
+    }));
+    setSelectedSubjectKey(namespace);
+    setSelectedAppIndex(config.ward_applications.length);
+    setStatusMessage(
+      scenario === "public-python-api"
+        ? `Added public API app to ${namespace}.`
+        : scenario === "internal-python-api"
+          ? `Added internal API app to ${namespace}.`
+          : `Added static site probe app to ${namespace}.`,
+    );
+    setErrorMessage("");
   }
 
   function removeSelectedApp() {
@@ -1786,8 +2613,8 @@ export default function App() {
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
               <div className="rounded-[1.6rem] border border-border/80 bg-muted/45 p-4">
                 <div className="grid gap-3 md:grid-cols-3">
-                  <ReadOnlyField label="Selected Subject" value={selectedSubjectKey || "None"} />
-                  <ReadOnlyField label="Selected App" value={selectedApp?.name ?? "None"} />
+                  <ReadOnlyField label="Selected Ward" value={selectedSubjectKey || "None"} />
+                  <ReadOnlyField label="Selected Application" value={selectedApp?.name ?? "None"} />
                   <ReadOnlyField label="API Token" value={apiTokenValue || "Not set"} />
                 </div>
               </div>
@@ -1819,8 +2646,8 @@ export default function App() {
                     <h1 className="mt-1 text-2xl font-bold tracking-tight">Isolens</h1>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Badge>{selectedSubjectKey || "No subject"}</Badge>
-                    <Badge>{selectedApp?.name ?? "No app"}</Badge>
+                    <Badge>{selectedSubjectKey || "No ward"}</Badge>
+                    <Badge>{selectedApp?.name ?? "No application"}</Badge>
                     <Badge>{selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.status}` : "No active run"}</Badge>
                   </div>
                 </div>
@@ -1880,7 +2707,7 @@ export default function App() {
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <MetricTile label="Subjects" value={subjectKeys.length} />
+                        <MetricTile label="Wards" value={subjectKeys.length} />
                         <MetricTile label="Applications" value={config.ward_applications.length} />
                         <MetricTile label="Service-backed" value={totalAppsWithService} />
                         <MetricTile label="Ingress-enabled" value={totalAppsWithIngress} />
@@ -1889,11 +2716,11 @@ export default function App() {
 
                     <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
                       <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">Current Focus</p>
-                      <p className="mt-4 text-xl font-semibold">{selectedApp?.name ?? "No selected app"}</p>
+                      <p className="mt-4 text-xl font-semibold">{selectedApp?.name ?? "No selected application"}</p>
                       <p className="mt-2 text-sm text-neutral-400">
                         {selectedApp
                           ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers • ${selectedApp.replicas ?? 1} replicas`
-                          : "Move to Assets to choose a subject and workload before editing."}
+                          : "Move to Assets to choose a ward and application before editing."}
                       </p>
                       <div className="mt-5 grid gap-3 sm:grid-cols-2">
                         <MetricTile label="Current Run" value={selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "Idle"} />
@@ -1921,7 +2748,7 @@ export default function App() {
                         </div>
                         <div className="mt-4 grid gap-3 md:grid-cols-3">
                           <MetricTile label="Admin ARNs" value={configuredAdminArnsCount} />
-                          <MetricTile label="Subjects Planned" value={subjectKeys.length} />
+                          <MetricTile label="Wards Planned" value={subjectKeys.length} />
                           <MetricTile label="Apps Planned" value={config.ward_applications.length} />
                         </div>
                         <div className="mt-5 flex flex-wrap gap-2">
@@ -1965,7 +2792,7 @@ export default function App() {
                           {hasAppliedCoreRun ? "Core applied, platform stage unlocked" : "Apply core first to unlock this stage"}
                         </p>
                         <div className="mt-4 grid gap-3 md:grid-cols-3">
-                          <MetricTile label="Subjects" value={subjectKeys.length} />
+                          <MetricTile label="Wards" value={subjectKeys.length} />
                           <MetricTile label="Apps" value={config.ward_applications.length} />
                           <MetricTile label="Services" value={totalAppsWithService} />
                         </div>
@@ -2089,161 +2916,267 @@ export default function App() {
             ) : null}
 
             {activeTab === "assets" ? (
-              <div className="grid gap-6 2xl:h-full 2xl:grid-cols-[320px_minmax(0,1fr)] 2xl:items-stretch">
-                <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
+              <div className="grid gap-6">
+                <Card className="overflow-hidden">
                   <CardHeader>
-                    <CardTitle>Subjects</CardTitle>
+                    <CardTitle>Ward Studio</CardTitle>
                   </CardHeader>
-                  <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-                    <div className="themed-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                      {subjectKeys.map((subjectKey) => (
-                        <button
-                          key={subjectKey}
-                          className={classNames(
-                            "w-full rounded-[1.4rem] border px-4 py-4 text-left transition",
-                            subjectKey === selectedSubjectKey
-                              ? "border-accent/70 bg-accent/10"
-                              : "border-border/80 bg-card/75 hover:bg-muted/70",
-                          )}
-                          onClick={() => selectSubject(subjectKey)}
-                        >
-                          <p className="font-medium">{subjectKey}</p>
-                          <p className="mt-2 text-xs uppercase tracking-[0.2em] text-neutral-500">
-                            {config.analysis_subjects[subjectKey]?.tier ?? "ward"}
+                  <CardContent className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_340px]">
+                    <div className="rounded-[2rem] border border-border/80 bg-muted/55 p-6">
+                      <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">Selected ward</p>
+                      <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
+                        <div className="space-y-3">
+                          <p className="text-3xl font-semibold tracking-tight">{selectedSubjectKey || "No ward selected"}</p>
+                          <p className="max-w-3xl text-sm leading-7 text-neutral-500">
+                            {selectedSubject?.description || "Choose a ward to inspect namespace settings and the applications inside it."}
                           </p>
-                        </button>
-                      ))}
+                        </div>
+                        {selectedSubject ? <Button onClick={() => setIsSubjectModalOpen(true)}>Edit ward</Button> : null}
+                      </div>
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        <Badge>{selectedSubject?.tier ?? "ward"}</Badge>
+                        <Badge>{appsForSelectedSubject.length} app{appsForSelectedSubject.length === 1 ? "" : "s"}</Badge>
+                        <Badge>{Object.keys(selectedSubject?.labels ?? {}).length} label{Object.keys(selectedSubject?.labels ?? {}).length === 1 ? "" : "s"}</Badge>
+                      </div>
+                      {Object.entries(selectedSubject?.labels ?? {}).length > 0 ? (
+                        <div className="mt-5 flex flex-wrap gap-2">
+                          {Object.entries(selectedSubject?.labels ?? {}).map(([labelKey, labelValue]) => (
+                            <span
+                              key={`${labelKey}-${labelValue}`}
+                              className="rounded-full border border-border/70 bg-card/75 px-3 py-1.5 text-xs text-foreground/75"
+                            >
+                              {labelKey}: {labelValue}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="grid gap-2 pt-1">
-                      <Button variant="secondary" onClick={addSubject}>Add subject</Button>
-                      <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>Remove subject</Button>
+
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                      <MetricTile label="Pods quota" value={selectedSubject?.resource_quota?.pods ?? "-"} />
+                      <MetricTile label="CPU request" value={selectedSubject?.resource_quota?.requests_cpu ?? "-"} />
+                      <MetricTile label="CPU limit" value={selectedSubject?.resource_quota?.limits_cpu ?? "-"} />
+                      <MetricTile label="Memory limit" value={selectedSubject?.resource_quota?.limits_memory ?? "-"} />
                     </div>
                   </CardContent>
                 </Card>
 
-                <div className="grid gap-6 2xl:min-h-0 2xl:grid-rows-[auto_minmax(0,1fr)]">
-                  <Card>
+                <div className="grid gap-6 2xl:grid-cols-[290px_minmax(0,1fr)_390px] 2xl:items-start">
+                  <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
                     <CardHeader>
-                      <CardTitle>Selected Subject</CardTitle>
+                      <CardTitle>Wards</CardTitle>
                     </CardHeader>
-                    <CardContent className="grid gap-4">
-                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px]">
-                        <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                          <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Namespace</p>
-                          <p className="mt-3 text-2xl font-semibold">{selectedSubjectKey || "None"}</p>
-                          <p className="mt-3 text-sm leading-6 text-neutral-400">
-                            {selectedSubject?.description || "Choose a subject to inspect quota, labels, and ward metadata."}
-                          </p>
-                          {selectedSubject ? <Button className="mt-5" onClick={() => setIsSubjectModalOpen(true)}>Edit subject</Button> : null}
-                        </div>
-                        <div className="grid gap-3">
-                          <MetricTile label="Tier" value={selectedSubject?.tier ?? "-"} />
-                          <MetricTile label="Labels" value={Object.keys(selectedSubject?.labels ?? {}).length} />
-                          <MetricTile label="Apps In Ward" value={appsForSelectedSubject.length} />
-                        </div>
+                    <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+                      <p className="text-sm leading-6 text-neutral-500">Pick the ward you want to work in. Each ward maps to one Kubernetes namespace.</p>
+                      <div className="themed-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                        {subjectKeys.map((subjectKey) => (
+                          <button
+                            key={subjectKey}
+                            className={classNames(
+                              "w-full rounded-[1.5rem] border px-4 py-4 text-left transition",
+                              subjectKey === selectedSubjectKey
+                                ? "border-accent/70 bg-accent/10"
+                                : "border-border/80 bg-card/72 hover:bg-muted/70",
+                            )}
+                            onClick={() => selectSubject(subjectKey)}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-medium">{subjectKey}</p>
+                                <p className="mt-2 text-xs uppercase tracking-[0.2em] text-neutral-500">
+                                  {config.analysis_subjects[subjectKey]?.tier ?? "ward"}
+                                </p>
+                              </div>
+                              <Badge>{config.ward_applications.filter((application) => application.namespace === subjectKey).length}</Badge>
+                            </div>
+                          </button>
+                        ))}
                       </div>
-                      <div className="grid gap-3 md:grid-cols-4">
-                        <MetricTile label="Pods quota" value={selectedSubject?.resource_quota?.pods ?? "-"} />
-                        <MetricTile label="CPU request" value={selectedSubject?.resource_quota?.requests_cpu ?? "-"} />
-                        <MetricTile label="CPU limit" value={selectedSubject?.resource_quota?.limits_cpu ?? "-"} />
-                        <MetricTile label="Memory limit" value={selectedSubject?.resource_quota?.limits_memory ?? "-"} />
+                      <div className="grid gap-2 pt-1">
+                        <Button variant="secondary" onClick={addSubject}>Add ward</Button>
+                        <Button variant="danger" onClick={removeSelectedSubject} disabled={subjectKeys.length <= 1}>Remove ward</Button>
                       </div>
                     </CardContent>
                   </Card>
 
-                  <div className="grid gap-6 2xl:min-h-0 2xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] 2xl:items-stretch">
-                    <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
-                      <CardHeader>
-                        <CardTitle>Applications In This Subject</CardTitle>
+                  <div className="grid gap-6 min-w-0">
+                    <Card className="overflow-hidden">
+                      <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <CardTitle>Applications In This Ward</CardTitle>
+                          <p className="mt-2 text-sm leading-6 text-neutral-500">Choose an application, then inspect and edit it on the right.</p>
+                        </div>
+                        <div className="flex w-full flex-col gap-2 sm:w-[14rem] xl:w-[14rem] xl:self-center">
+                          <Button className="w-full" variant="secondary" onClick={addApp}>Add application</Button>
+                          <Button className="w-full" variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>Remove selected app</Button>
+                        </div>
                       </CardHeader>
-                      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-                        <div className="themed-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                          {appsForSelectedSubject.length === 0 ? (
-                            <div className="rounded-[1.4rem] border border-border/80 bg-card/75 px-4 py-4 text-sm text-neutral-400">
-                              No applications are currently assigned to this subject.
-                            </div>
-                          ) : null}
-                          {appsForSelectedSubject.map(({ application, index }) => (
-                            <button
-                              key={`${application.name}-${index}`}
-                              className={classNames(
-                                "w-full rounded-[1.4rem] border px-4 py-4 text-left transition",
-                                index === selectedAppIndex
-                                  ? "border-accent/70 bg-accent/10"
-                                  : "border-border/80 bg-card/75 hover:bg-muted/70",
-                              )}
-                              onClick={() => setSelectedAppIndex(index)}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <p className="font-medium">{application.name}</p>
-                                  <p className="mt-2 text-xs uppercase tracking-[0.2em] text-neutral-500">
-                                    {application.containers?.length ?? 0} containers • {application.replicas ?? 1} replicas
+                      <CardContent className="grid gap-4">
+                        {appsForSelectedSubject.length === 0 ? (
+                          <div className="rounded-[1.6rem] border border-dashed border-border/80 bg-muted/45 px-5 py-6 text-sm text-neutral-500">
+                            No applications in this ward yet. Start with a scenario below or add one manually.
+                          </div>
+                        ) : null}
+                        <div className="themed-scrollbar flex gap-4 overflow-x-auto pb-2">
+                          {appsForSelectedSubject.map(({ application, index }) => {
+                            const applicationReview = buildAppReview(application, subjectKeys);
+                            const applicationPrimaryContainer = primaryContainer(application);
+
+                            return (
+                              <button
+                                key={`${application.name}-${index}`}
+                                className={classNames(
+                                  "min-w-[320px] max-w-[320px] shrink-0 rounded-[1.7rem] border p-5 text-left transition",
+                                  index === selectedAppIndex
+                                    ? "border-accent/70 bg-accent/10"
+                                    : "border-border/80 bg-card/80 hover:bg-muted/65",
+                                )}
+                                onClick={() => setSelectedAppIndex(index)}
+                              >
+                                <div className="flex min-w-0 items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-lg font-semibold tracking-tight">{application.name}</p>
+                                    <p className="mt-2 text-xs uppercase tracking-[0.22em] text-neutral-500">
+                                      {application.containers?.length ?? 0} containers • {application.replicas ?? 1} replicas
+                                    </p>
+                                  </div>
+                                  <Badge>{application.ingress?.enabled ? "Public" : "Internal"}</Badge>
+                                </div>
+                                <div className="mt-4 grid gap-2 text-sm text-foreground/80">
+                                  <p className="truncate" title={applicationPrimaryContainer?.image ?? "No image"}>
+                                    Image: {displayImageName(applicationPrimaryContainer?.image)}
+                                  </p>
+                                  <p className="truncate" title={displayExposureSummary(application)}>
+                                    Exposure: {displayExposureSummary(application)}
+                                  </p>
+                                  <p>
+                                    Status: {applicationReview.errors.length > 0
+                                      ? `${applicationReview.errors.length} issue${applicationReview.errors.length === 1 ? "" : "s"}`
+                                      : applicationReview.warnings.length > 0
+                                        ? `${applicationReview.warnings.length} warning${applicationReview.warnings.length === 1 ? "" : "s"}`
+                                        : "Ready"}
                                   </p>
                                 </div>
-                                <Badge>{application.ingress?.enabled ? "Ingress" : "Internal"}</Badge>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                        <div className="grid gap-2 pt-1 sm:grid-cols-2">
-                          <Button variant="secondary" onClick={addApp}>Add app</Button>
-                          <Button variant="danger" onClick={removeSelectedApp} disabled={config.ward_applications.length <= 1}>Remove app</Button>
+                              </button>
+                            );
+                          })}
                         </div>
                       </CardContent>
                     </Card>
 
-                    <Card className="h-full">
-                      <CardHeader>
-                        <CardTitle>Selected Application</CardTitle>
+                    <Card className="overflow-hidden">
+                      <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div>
+                          <CardTitle>Scenario Library</CardTitle>
+                          <p className="mt-2 text-sm leading-6 text-neutral-500">Create a new demo application in this ward from a safe, working starting point.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge>Demo-ready</Badge>
+                        </div>
                       </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                          <div className="flex flex-wrap items-start justify-between gap-4">
-                            <div>
-                              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Workload</p>
-                              <p className="mt-3 text-2xl font-semibold">{selectedApp?.name || "None"}</p>
-                              <p className="mt-3 text-sm leading-6 text-neutral-400">
-                                {selectedApp
-                                  ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers • ${selectedApp.replicas ?? 1} replicas`
-                                  : "Choose an application to inspect service, ingress, and runtime shape."}
-                              </p>
-                            </div>
-                            {selectedApp ? <Button onClick={() => setIsAppModalOpen(true)}>Edit app</Button> : null}
-                          </div>
-                        </div>
-
-                        <div className="grid gap-3 md:grid-cols-4">
-                          <MetricTile label="Replicas" value={selectedApp?.replicas ?? 0} />
-                          <MetricTile label="Service" value={selectedApp?.service?.enabled === false ? "Off" : "On"} />
-                          <MetricTile label="Ingress" value={selectedApp?.ingress?.enabled ? "On" : "Off"} />
-                          <MetricTile label="Volumes" value={selectedApp?.volumes?.length ?? 0} />
-                        </div>
-
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-                            <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Container Images</p>
-                            <div className="mt-3 space-y-2 text-sm text-foreground/80">
-                              {(selectedApp?.containers ?? []).length === 0 ? <p>No containers.</p> : null}
-                              {(selectedApp?.containers ?? []).map((container) => (
-                                <p key={container.name}>
-                                  {container.name}: {container.image}
-                                </p>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-                            <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Exposure</p>
-                            <div className="mt-3 space-y-2 text-sm text-foreground/80">
-                              <p>Service type: {selectedApp?.service?.type ?? "ClusterIP"}</p>
-                              <p>Port: {selectedApp?.service?.port ?? "-"}</p>
-                              <p>Ingress host: {selectedApp?.ingress?.host || "Not configured"}</p>
-                            </div>
-                          </div>
+                      <CardContent className="grid gap-4">
+                        <div className="themed-scrollbar flex gap-4 overflow-x-auto pb-2">
+                          <ScenarioTile
+                            title="Public Python API"
+                            description="Ingress-exposed FastAPI with a built-in egress check."
+                            tag="Public traffic"
+                            actionLabel="Add to this ward"
+                            onApply={() => addDemoScenario("public-python-api")}
+                          />
+                          <ScenarioTile
+                            title="Internal Python API"
+                            description="Cluster-only FastAPI for a quieter comparison case."
+                            tag="Internal traffic"
+                            actionLabel="Add to this ward"
+                            onApply={() => addDemoScenario("internal-python-api")}
+                          />
+                          <ScenarioTile
+                            title="Static Site Probe"
+                            description="Minimal web probe for service and ingress validation."
+                            tag="Smoke test"
+                            actionLabel="Add to this ward"
+                            onApply={() => addDemoScenario("static-site")}
+                          />
                         </div>
                       </CardContent>
                     </Card>
                   </div>
+
+                  <Card className="overflow-hidden">
+                    <CardHeader>
+                      <CardTitle>Application Inspector</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="rounded-[1.9rem] border border-border/80 bg-muted/55 p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">Selected application</p>
+                            <p className="mt-3 truncate text-2xl font-semibold tracking-tight" title={selectedApp?.name || "None"}>{selectedApp?.name || "None"}</p>
+                            <p className="mt-3 text-sm leading-6 text-neutral-500">
+                              {selectedApp
+                                ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers • ${selectedApp.replicas ?? 1} replicas`
+                                : "Choose an application to inspect runtime and rollout readiness."}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {selectedApp ? (
+                              <Badge className={selectedAppReview.errors.length > 0 ? "border-warning/35 bg-warning/10 text-warning" : ""}>
+                                {selectedAppReview.errors.length > 0
+                                  ? `${selectedAppReview.errors.length} blocking issue${selectedAppReview.errors.length === 1 ? "" : "s"}`
+                                  : selectedAppReview.warnings.length > 0
+                                    ? `${selectedAppReview.warnings.length} warning${selectedAppReview.warnings.length === 1 ? "" : "s"}`
+                                    : "Ready to deploy"}
+                              </Badge>
+                            ) : null}
+                            {selectedApp ? <Button onClick={() => setIsAppModalOpen(true)}>Open builder</Button> : null}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <MetricTile label="Replicas" value={selectedApp?.replicas ?? 0} />
+                        <MetricTile label="Containers" value={selectedApp?.containers?.length ?? 0} />
+                        <MetricTile label="Volumes" value={selectedApp?.volumes?.length ?? 0} />
+                        <MetricTile label="Secrets" value={selectedAppReview.secretDependencies.length} />
+                      </div>
+
+                      <div className="grid gap-3">
+                        <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Runtime</p>
+                          <div className="mt-3 space-y-2 text-sm text-foreground/80">
+                            <p className="truncate" title={selectedAppPrimaryContainer?.image ?? "Not configured"}>
+                              Image: {displayImageName(selectedAppPrimaryContainer?.image)}
+                            </p>
+                            <p>Port: {selectedAppPrimaryContainer?.port ?? "-"}</p>
+                            <p>Health path: {selectedAppPrimaryContainer?.probes?.readiness?.path ?? "/"}</p>
+                          </div>
+                        </div>
+                        <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Exposure</p>
+                          <div className="mt-3 space-y-2 text-sm text-foreground/80">
+                            <p>Service type: {selectedApp?.service?.type ?? "ClusterIP"}</p>
+                            <p>Port: {selectedApp?.service?.port ?? "-"}</p>
+                            <p className="break-all">Ingress host: {selectedApp?.ingress?.host || "Not configured"}</p>
+                          </div>
+                        </div>
+                        <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Terraform resources</p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="rounded-full border border-border/70 bg-muted/60 px-3 py-1 text-xs text-foreground/75">Deployment</span>
+                            {selectedAppReview.resources.map((resource) => (
+                              <span key={resource} className="rounded-full border border-border/70 bg-muted/60 px-3 py-1 text-xs text-foreground/75">
+                                {resource}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <ReviewItems title="Blocking issues" tone="error" items={selectedAppReview.errors} />
+                      <ReviewItems title="Warnings" tone="warning" items={selectedAppReview.warnings} />
+                      <ReviewItems title="Helpful notes" tone="hint" items={selectedAppReview.hints} />
+                    </CardContent>
+                  </Card>
                 </div>
               </div>
             ) : null}
@@ -2593,12 +3526,12 @@ export default function App() {
           </CardContent>
         </Card>
 
-        <Modal title="Edit Subject" open={isSubjectModalOpen && Boolean(selectedSubject)} onClose={() => setIsSubjectModalOpen(false)}>
+        <Modal title="Edit Ward" open={isSubjectModalOpen && Boolean(selectedSubject)} onClose={() => setIsSubjectModalOpen(false)}>
           {selectedSubject ? (
             <div className="grid gap-4">
               <div className="grid gap-3 xl:grid-cols-2">
                 <label className="grid gap-1 text-sm">
-                  <span>Namespace</span>
+                  <span>Ward namespace</span>
                   <Input value={selectedSubjectKey} onChange={(event) => renameSubject(selectedSubjectKey, event.target.value)} />
                 </label>
                 <label className="grid gap-1 text-sm">
@@ -2688,209 +3621,227 @@ export default function App() {
           ) : null}
         </Modal>
 
-        <Modal title="Edit App" open={isAppModalOpen && Boolean(selectedApp)} onClose={() => setIsAppModalOpen(false)}>
+        <Modal title="Edit Application" open={isAppModalOpen && Boolean(selectedApp)} onClose={() => setIsAppModalOpen(false)}>
           {selectedApp ? (
             <div className="grid gap-6">
-              <div className="grid gap-3 xl:grid-cols-3">
-                <label className="grid gap-1 text-sm">
-                  <span>Name</span>
-                  <Input value={selectedApp.name} onChange={(event) => updateSelectedApp((current) => ({ ...current, name: event.target.value }))} />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span>Namespace</span>
-                  <select
-                    className="w-full rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground"
-                    value={selectedApp.namespace}
-                    onChange={(event) => updateSelectedApp((current) => ({ ...current, namespace: event.target.value }))}
-                  >
-                    {subjectKeys.map((subjectKey) => (
-                      <option key={subjectKey} value={subjectKey}>
-                        {subjectKey}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span>Replicas</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={String(selectedApp.replicas ?? 1)}
-                    onChange={(event) => updateSelectedApp((current) => ({ ...current, replicas: Number(event.target.value) }))}
-                  />
-                </label>
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                <div className="rounded-2xl border border-border p-4">
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold">Quick setup</p>
+                      <p className="mt-2 text-sm leading-6 text-neutral-500">
+                        These are the fields that matter most when you want a working app quickly.
+                      </p>
+                    </div>
+                    <Badge>{selectedApp.namespace}</Badge>
+                  </div>
+                  <div className="grid gap-4">
+                    <div className="grid gap-3 xl:grid-cols-3">
+                      <label className="grid gap-1 text-sm">
+                        <span>Name</span>
+                        <Input value={selectedApp.name} onChange={(event) => updateSelectedApp((current) => ({ ...current, name: kubeSafeName(event.target.value) }))} />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Ward namespace</span>
+                        <select
+                          className="w-full rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground"
+                          value={selectedApp.namespace}
+                          onChange={(event) => updateSelectedApp((current) => ({ ...current, namespace: event.target.value }))}
+                        >
+                          {subjectKeys.map((subjectKey) => (
+                            <option key={subjectKey} value={subjectKey}>
+                              {subjectKey}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Replicas</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={String(selectedApp.replicas ?? 1)}
+                          onChange={(event) => updateSelectedApp((current) => ({ ...current, replicas: Number(event.target.value) }))}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="grid gap-3 xl:grid-cols-2">
+                      <label className="grid gap-1 text-sm">
+                        <span>Exposure</span>
+                        <select
+                          className="w-full rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground"
+                          value={selectedApp.ingress?.enabled ? "public" : "internal"}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              service: {
+                                ...current.service,
+                                enabled: true,
+                              },
+                              ingress: {
+                                ...current.ingress,
+                                enabled: event.target.value === "public",
+                                class_name: current.ingress?.class_name ?? "nginx",
+                                host:
+                                  event.target.value === "public"
+                                    ? current.ingress?.host?.trim() || `${current.name}.lab.internal`
+                                    : "",
+                              } as IngressConfig,
+                            }))
+                          }
+                        >
+                          <option value="internal">Internal service only</option>
+                          <option value="public">Ingress exposed</option>
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Health path</span>
+                        <Input
+                          value={selectedAppPrimaryContainer?.probes?.readiness?.path ?? "/"}
+                          onChange={(event) =>
+                            updateSelectedPrimaryContainer((current) => ({
+                              ...current,
+                              probes: {
+                                ...current.probes,
+                                readiness: { ...current.probes?.readiness, enabled: true, path: event.target.value, port: current.port ?? 8080 },
+                                liveness: { ...current.probes?.liveness, enabled: true, path: event.target.value, port: current.port ?? 8080 },
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    <div className="grid gap-3 xl:grid-cols-2">
+                      <label className="grid gap-1 text-sm">
+                        <span>Primary image</span>
+                        <Input
+                          value={selectedAppPrimaryContainer?.image ?? ""}
+                          onChange={(event) => updateSelectedPrimaryContainer((current) => ({ ...current, image: event.target.value }))}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Primary port</span>
+                        <Input
+                          type="number"
+                          value={String(selectedAppPrimaryContainer?.port ?? 8080)}
+                          onChange={(event) => {
+                            const nextPort = Number(event.target.value);
+                            updateSelectedPrimaryContainer((current) => ({
+                              ...current,
+                              port: nextPort,
+                              probes: {
+                                ...current.probes,
+                                readiness: { ...current.probes?.readiness, port: nextPort },
+                                liveness: { ...current.probes?.liveness, port: nextPort },
+                                startup: { ...current.probes?.startup, port: nextPort },
+                              },
+                            }));
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              service: {
+                                ...current.service,
+                                port: nextPort,
+                                target_port: nextPort,
+                              },
+                            }));
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="grid gap-3 xl:grid-cols-3">
+                      <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-600">
+                        <input
+                          type="checkbox"
+                          checked={selectedApp.service?.enabled ?? true}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              service: { ...current.service, enabled: event.target.checked },
+                            }))
+                          }
+                        />
+                        Keep service enabled
+                      </label>
+                      <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-600">
+                        <input
+                          type="checkbox"
+                          checked={selectedApp.config_map?.enabled ?? false}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              config_map: { ...current.config_map, enabled: event.target.checked },
+                            }))
+                          }
+                        />
+                        Mount app files from ConfigMap
+                      </label>
+                      <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-600">
+                        <input
+                          type="checkbox"
+                          checked={selectedApp.allow_same_namespace_ingress ?? true}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              allow_same_namespace_ingress: event.target.checked,
+                            }))
+                          }
+                        />
+                        Allow same-namespace ingress
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4">
+                  <div className="rounded-2xl border border-border p-4">
+                    <p className="font-semibold">Deployment review</p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-500">
+                      The interface should push you toward a successful deploy, so this review calls out what still needs attention.
+                    </p>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <MetricTile label="Blocking issues" value={selectedAppReview.errors.length} />
+                      <MetricTile label="Warnings" value={selectedAppReview.warnings.length} />
+                      <MetricTile label="Resources" value={selectedAppReview.resources.length || "Deployment"} />
+                      <MetricTile label="Secrets" value={selectedAppReview.secretDependencies.length} />
+                    </div>
+                    <div className="mt-4 grid gap-3">
+                      <ReviewItems title="Fix before deploy" tone="error" items={selectedAppReview.errors} />
+                      <ReviewItems title="Worth checking" tone="warning" items={selectedAppReview.warnings} />
+                      <ReviewItems title="Good to know" tone="hint" items={selectedAppReview.hints} />
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-border p-4">
+                    <p className="font-semibold">What this creates</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge>Deployment</Badge>
+                      {selectedAppReview.resources.map((resource) => (
+                        <Badge key={resource}>{resource}</Badge>
+                      ))}
+                    </div>
+                    <p className="mt-4 text-sm leading-6 text-neutral-500">
+                      Secret-backed values are intentionally not created automatically here because they would land in Terraform state.
+                    </p>
+                    {selectedAppReview.secretDependencies.length > 0 ? (
+                      <div className="mt-3 rounded-[1.2rem] border border-[#ab9f9d]/50 bg-[#ab9f9d]/14 px-4 py-3 text-sm text-foreground">
+                        {selectedAppReview.secretDependencies.join(", ")}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </div>
 
-              <KeyValueEditor
-                label="Pod labels"
-                value={selectedApp.pod_labels}
-                onChange={(pod_labels) => updateSelectedApp((current) => ({ ...current, pod_labels }))}
-                addLabel="Add label"
-              />
-
-              <div className="rounded-2xl border border-border p-4">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="font-semibold">Service</p>
-                  <label className="flex items-center gap-2 text-sm text-neutral-600">
-                    <input
-                      type="checkbox"
-                      checked={selectedApp.service?.enabled ?? true}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          service: { ...current.service, enabled: event.target.checked },
-                        }))
-                      }
-                    />
-                    Enabled
-                  </label>
-                </div>
-                <div className="grid gap-3 xl:grid-cols-3">
-                  <label className="grid gap-1 text-sm">
-                    <span>Type</span>
-                    <Input
-                      value={selectedApp.service?.type ?? "ClusterIP"}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          service: { ...current.service, type: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Port</span>
-                    <Input
-                      type="number"
-                      value={String(selectedApp.service?.port ?? 8080)}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          service: { ...current.service, port: Number(event.target.value) },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Target port</span>
-                    <Input
-                      type="number"
-                      value={String(selectedApp.service?.target_port ?? selectedApp.service?.port ?? 8080)}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          service: { ...current.service, target_port: Number(event.target.value) },
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-                <div className="mt-4">
-                  <KeyValueEditor
-                    label="Service annotations"
-                    value={selectedApp.service?.annotations}
-                    onChange={(annotations) =>
-                      updateSelectedApp((current) => ({
-                        ...current,
-                        service: { ...current.service, annotations },
-                      }))
-                    }
-                    addLabel="Add annotation"
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border p-4">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="font-semibold">Ingress</p>
-                  <label className="flex items-center gap-2 text-sm text-neutral-600">
-                    <input
-                      type="checkbox"
-                      checked={selectedApp.ingress?.enabled ?? false}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          ingress: { ...current.ingress, enabled: event.target.checked } as IngressConfig,
-                        }))
-                      }
-                    />
-                    Enabled
-                  </label>
-                </div>
-                <div className="grid gap-3 xl:grid-cols-3">
-                  <label className="grid gap-1 text-sm">
-                    <span>Class</span>
-                    <Input
-                      value={selectedApp.ingress?.class_name ?? "nginx"}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          ingress: { ...current.ingress, class_name: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Host</span>
-                    <Input
-                      value={selectedApp.ingress?.host ?? ""}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          ingress: { ...current.ingress, host: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Path</span>
-                    <Input
-                      value={selectedApp.ingress?.path ?? "/"}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          ingress: { ...current.ingress, path: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-                <div className="mt-4">
-                  <KeyValueEditor
-                    label="Ingress annotations"
-                    value={selectedApp.ingress?.annotations}
-                    onChange={(annotations) =>
-                      updateSelectedApp((current) => ({
-                        ...current,
-                        ingress: { ...current.ingress, annotations },
-                      }))
-                    }
-                    addLabel="Add annotation"
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border p-4">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="font-semibold">ConfigMap</p>
-                  <label className="flex items-center gap-2 text-sm text-neutral-600">
-                    <input
-                      type="checkbox"
-                      checked={selectedApp.config_map?.enabled ?? false}
-                      onChange={(event) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          config_map: { ...current.config_map, enabled: event.target.checked },
-                        }))
-                      }
-                    />
-                    Enabled
-                  </label>
-                </div>
+              <EditorSection
+                title="Application Files From ConfigMap"
+                summary="This mounts files from a Kubernetes ConfigMap into the container. Use it when you want the interface to provide source files like main.py or index.html without building a custom image."
+                defaultOpen
+              >
                 <label className="grid gap-1 text-sm">
                   <span>Mount path</span>
                   <Input
-                    value={selectedApp.config_map?.mount_path ?? "/usr/share/nginx/html"}
+                    value={selectedApp.config_map?.mount_path ?? "/app"}
                     onChange={(event) =>
                       updateSelectedApp((current) => ({
                         ...current,
@@ -2899,38 +3850,208 @@ export default function App() {
                     }
                   />
                 </label>
-                <div className="mt-4">
-                  <KeyValueEditor
-                    label="ConfigMap data"
-                    value={selectedApp.config_map?.data}
-                    onChange={(data) =>
-                      updateSelectedApp((current) => ({
-                        ...current,
-                        config_map: { ...current.config_map, data },
-                      }))
-                    }
-                    addLabel="Add file"
+                <label className="grid gap-1 text-sm">
+                  <span>Primary file name</span>
+                  <Input
+                    value={selectedAppPrimaryConfigFile[0]}
+                    onChange={(event) => updateSelectedPrimaryConfigFile(event.target.value, selectedAppPrimaryConfigFile[1])}
                   />
-                </div>
-              </div>
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Primary file content</span>
+                  <Textarea
+                    value={selectedAppPrimaryConfigFile[1]}
+                    onChange={(event) => updateSelectedPrimaryConfigFile(selectedAppPrimaryConfigFile[0], event.target.value)}
+                    className="min-h-[280px]"
+                  />
+                </label>
+                <KeyValueEditor
+                  label="Additional ConfigMap files"
+                  value={Object.fromEntries(Object.entries(selectedApp.config_map?.data ?? {}).slice(1))}
+                  onChange={(data) =>
+                    updateSelectedApp((current) => ({
+                      ...current,
+                      config_map: {
+                        ...current.config_map,
+                        data: {
+                          [selectedAppPrimaryConfigFile[0]]: selectedAppPrimaryConfigFile[1],
+                          ...data,
+                        },
+                      },
+                    }))
+                  }
+                  addLabel="Add file"
+                />
+              </EditorSection>
 
-              <div className="rounded-2xl border border-border p-4">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="font-semibold">Containers</p>
-                  <Button
-                    variant="ghost"
-                    type="button"
-                    onClick={() =>
-                      updateSelectedApp((current) => ({
-                        ...current,
-                        containers: [...(current.containers ?? []), emptyContainer()],
-                      }))
-                    }
-                  >
-                    Add container
-                  </Button>
+              <EditorSection
+                title="Service & Ingress"
+                summary="Tighten how the app is exposed once the quick setup looks right."
+              >
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <div className="grid gap-3">
+                    <label className="grid gap-1 text-sm">
+                      <span>Service type</span>
+                      <Input
+                        value={selectedApp.service?.type ?? "ClusterIP"}
+                        onChange={(event) =>
+                          updateSelectedApp((current) => ({
+                            ...current,
+                            service: { ...current.service, type: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm">
+                      <span>Service port</span>
+                      <Input
+                        type="number"
+                        value={String(selectedApp.service?.port ?? 8080)}
+                        onChange={(event) =>
+                          updateSelectedApp((current) => ({
+                            ...current,
+                            service: { ...current.service, port: Number(event.target.value) },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm">
+                      <span>Target port</span>
+                      <Input
+                        type="number"
+                        value={String(selectedApp.service?.target_port ?? selectedApp.service?.port ?? 8080)}
+                        onChange={(event) =>
+                          updateSelectedApp((current) => ({
+                            ...current,
+                            service: { ...current.service, target_port: Number(event.target.value) },
+                          }))
+                        }
+                      />
+                    </label>
+                    <KeyValueEditor
+                      label="Service annotations"
+                      value={selectedApp.service?.annotations}
+                      onChange={(annotations) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          service: { ...current.service, annotations },
+                        }))
+                      }
+                      addLabel="Add annotation"
+                    />
+                  </div>
+                  <div className="grid gap-3">
+                    <label className="grid gap-1 text-sm">
+                      <span>Ingress class</span>
+                      <Input
+                        value={selectedApp.ingress?.class_name ?? "nginx"}
+                        onChange={(event) =>
+                          updateSelectedApp((current) => ({
+                            ...current,
+                            ingress: { ...current.ingress, class_name: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm">
+                      <span>Host</span>
+                      <Input
+                        value={selectedApp.ingress?.host ?? ""}
+                        onChange={(event) =>
+                          updateSelectedApp((current) => ({
+                            ...current,
+                            ingress: { ...current.ingress, host: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <div className="grid gap-3 xl:grid-cols-2">
+                      <label className="grid gap-1 text-sm">
+                        <span>Path</span>
+                        <Input
+                          value={selectedApp.ingress?.path ?? "/"}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              ingress: { ...current.ingress, path: event.target.value },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span>Path type</span>
+                        <Input
+                          value={selectedApp.ingress?.path_type ?? "Prefix"}
+                          onChange={(event) =>
+                            updateSelectedApp((current) => ({
+                              ...current,
+                              ingress: { ...current.ingress, path_type: event.target.value },
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <KeyValueEditor
+                      label="Ingress annotations"
+                      value={selectedApp.ingress?.annotations}
+                      onChange={(annotations) =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          ingress: { ...current.ingress, annotations },
+                        }))
+                      }
+                      addLabel="Add annotation"
+                    />
+                  </div>
                 </div>
+              </EditorSection>
+
+              <EditorSection
+                title="Runtime & Containers"
+                summary="Use this when you need multiple containers, custom commands, or more precise runtime tuning."
+              >
                 <div className="grid gap-4">
+                  <div className="grid gap-3 xl:grid-cols-2">
+                    <KeyValueEditor
+                      label="Pod annotations"
+                      value={selectedApp.pod_annotations}
+                      onChange={(pod_annotations) => updateSelectedApp((current) => ({ ...current, pod_annotations }))}
+                      addLabel="Add annotation"
+                    />
+                    <KeyValueEditor
+                      label="Pod labels"
+                      value={selectedApp.pod_labels}
+                      onChange={(pod_labels) => updateSelectedApp((current) => ({ ...current, pod_labels }))}
+                      addLabel="Add label"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm text-neutral-600">
+                      <input
+                        type="checkbox"
+                        checked={selectedApp.automount_service_account_token ?? false}
+                        onChange={(event) =>
+                          updateSelectedApp((current) => ({
+                            ...current,
+                            automount_service_account_token: event.target.checked,
+                          }))
+                        }
+                      />
+                      Automount service account token
+                    </label>
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      onClick={() =>
+                        updateSelectedApp((current) => ({
+                          ...current,
+                          containers: [...(current.containers ?? []), emptyContainer()],
+                        }))
+                      }
+                    >
+                      Add container
+                    </Button>
+                  </div>
                   {(selectedApp.containers ?? []).map((container, index) => (
                     <ContainerEditor
                       key={`${container.name}-${index}`}
@@ -2951,10 +4072,13 @@ export default function App() {
                     />
                   ))}
                 </div>
-              </div>
+              </EditorSection>
 
-              <div className="rounded-2xl border border-border p-4">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <EditorSection
+                title="Volumes & Secrets"
+                summary="Reference existing secrets here, or add shared writable storage for sidecars and caches."
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="font-semibold">Volumes</p>
                   <Button
                     variant="ghost"
@@ -3046,13 +4170,12 @@ export default function App() {
                     );
                   })}
                 </div>
-              </div>
+              </EditorSection>
 
-              <div className="rounded-2xl border border-border p-4">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="font-semibold">Network policy</p>
-                  <Badge>{selectedApp.namespace}</Badge>
-                </div>
+              <EditorSection
+                title="Network Policy"
+                summary="Dial ingress and egress up or down depending on which demo behavior you want to highlight."
+              >
                 <div className="grid gap-6">
                   <NetworkRulesEditor
                     direction="ingress"
@@ -3075,8 +4198,7 @@ export default function App() {
                     }
                   />
                 </div>
-              </div>
-
+              </EditorSection>
             </div>
           ) : null}
         </Modal>

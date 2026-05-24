@@ -5,12 +5,12 @@ kubernetes_version            = "1.35"
 cluster_log_retention_in_days = 90
 cluster_admin_principal_arns  = []
 analysis_subjects = {
-  "ward-template-app" = {
-    tier        = "template"
-    description = "Reference ward used as a full-feature application template for platform-driven deployments."
+  "ward-public-api" = {
+    tier        = "public-demo"
+    description = "Ingress-exposed Python API meant for lab demonstrations around reachability, egress, and operator workflow."
     labels = {
-      owner        = "platform"
-      template_for = "frontend-driven-apps"
+      owner    = "demo"
+      scenario = "public-api"
     }
     resource_quota = {
       pods            = "10"
@@ -24,28 +24,34 @@ analysis_subjects = {
 
 ward_applications = [
   {
-    name      = "template-app"
-    namespace = "ward-template-app"
+    name      = "public-python-api"
+    namespace = "ward-public-api"
     replicas  = 2
     pod_labels = {
       app_role     = "api"
+      scenario     = "public"
       expose_class = "web"
     }
     service = {
-      port = 8080
+      enabled     = true
+      type        = "ClusterIP"
+      port        = 80
+      target_port = 80
+      annotations = {}
     }
     network_policy = {
       ingress = [
         {
           ports = [
             {
-              port = 8080
+              port     = 80
+              protocol = "TCP"
             }
           ]
           from = [
             {
-              pod_selector = {
-                app_role = "ingress"
+              namespace_selector = {
+                "kubernetes.io/metadata.name" = "ingress-nginx"
               }
             },
             {
@@ -60,24 +66,8 @@ ward_applications = [
         {
           ports = [
             {
-              port = 5432
-            }
-          ]
-          to = [
-            {
-              namespace_selector = {
-                "kubernetes.io/metadata.name" = "ward-template-app"
-              }
-              pod_selector = {
-                app_role = "db"
-              }
-            }
-          ]
-        },
-        {
-          ports = [
-            {
-              port = 443
+              port     = 443
+              protocol = "TCP"
             }
           ]
           to = [
@@ -93,26 +83,36 @@ ward_applications = [
     ingress = {
       enabled    = true
       class_name = "nginx"
-      host       = "template-app.lab.internal"
+      host       = "public-python-api.lab.internal"
       path       = "/"
+      path_type  = "Prefix"
       annotations = {
         "nginx.ingress.kubernetes.io/ssl-redirect" = "false"
       }
     }
     containers = [
       {
-        name  = "template-app"
-        image = "nginxinc/nginx-unprivileged:1.27-alpine"
+        name              = "api"
+        image             = "tiangolo/uvicorn-gunicorn-fastapi:python3.11-slim"
+        image_pull_policy = "IfNotPresent"
+        port              = 80
         env = {
-          APP_PROFILE = "template"
-          APP_MODE    = "frontend-managed"
+          APP_DISPLAY_NAME = "Public Python API"
+          SCENARIO_NAME    = "public-python-api"
+          SCENARIO_PROFILE = "internet-egress"
+          DEMO_EGRESS_URL  = "https://example.com"
         }
+        env_from_secret_names = []
         probes = {
           readiness = {
             enabled = true
+            path    = "/health"
+            port    = 80
           }
           liveness = {
             enabled = true
+            path    = "/health"
+            port    = 80
           }
         }
         resources = {
@@ -121,31 +121,73 @@ ward_applications = [
           limits_cpu      = "500m"
           limits_memory   = "256Mi"
         }
-      },
-      {
-        name  = "log-sidecar"
-        image = "nginxinc/nginx-unprivileged:1.27-alpine"
-        port  = 9090
-        args  = ["nginx", "-g", "daemon off;"]
-        volume_mounts = [
-          {
-            name       = "shared-cache"
-            mount_path = "/tmp"
-          }
-        ]
+        volume_mounts = []
       }
     ]
-    volumes = [
-      {
-        name      = "shared-cache"
-        empty_dir = true
-      }
-    ]
+    volumes = []
     config_map = {
       enabled    = true
-      mount_path = "/usr/share/nginx/html"
+      mount_path = "/app"
       data = {
-        "index.html" = "<html><body><h1>template-app</h1><p>Single reference app for frontend-driven cluster changes.</p></body></html>"
+        "main.py" = <<-EOT
+          from fastapi import FastAPI, Request
+          from fastapi.responses import JSONResponse
+
+          import os
+          import socket
+          import urllib.error
+          import urllib.request
+
+          app = FastAPI(title=os.getenv("APP_DISPLAY_NAME", "Isolens Demo API"))
+
+          @app.get("/health")
+          def health():
+              return {
+                  "status": "ok",
+                  "scenario": os.getenv("SCENARIO_NAME", "demo"),
+                  "hostname": socket.gethostname(),
+              }
+
+          @app.get("/")
+          def root():
+              return {
+                  "message": "Isolens demo workload is live",
+                  "scenario": os.getenv("SCENARIO_NAME", "demo"),
+                  "profile": os.getenv("SCENARIO_PROFILE", "baseline"),
+              }
+
+          @app.get("/headers")
+          def headers(request: Request):
+              selected_headers = {}
+              for key, value in request.headers.items():
+                  if key.lower() in {"host", "user-agent", "x-forwarded-for", "x-forwarded-proto"}:
+                      selected_headers[key] = value
+              return {
+                  "scenario": os.getenv("SCENARIO_NAME", "demo"),
+                  "headers": selected_headers,
+              }
+
+          @app.get("/egress-check")
+          def egress_check(url: str = os.getenv("DEMO_EGRESS_URL", "https://example.com")):
+              try:
+                  with urllib.request.urlopen(url, timeout=5) as response:
+                      return {
+                          "ok": True,
+                          "target": url,
+                          "status": response.status,
+                          "scenario": os.getenv("SCENARIO_NAME", "demo"),
+                      }
+              except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                  return JSONResponse(
+                      status_code=502,
+                      content={
+                          "ok": False,
+                          "target": url,
+                          "scenario": os.getenv("SCENARIO_NAME", "demo"),
+                          "error": str(exc),
+                      },
+                  )
+        EOT
       }
     }
   }
