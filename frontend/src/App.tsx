@@ -34,6 +34,21 @@ type AppReview = {
   secretDependencies: string[];
 };
 
+function stageIsEffectivelyApplied(runs: TerraformRun[], stage: RunStage): boolean {
+  for (const run of runs) {
+    if (run.stage !== stage || (run.kind !== "apply" && run.kind !== "destroy")) {
+      continue;
+    }
+    if (run.kind === "destroy" && run.status === "destroyed") {
+      return false;
+    }
+    if (run.kind === "apply" && run.status === "applied") {
+      return true;
+    }
+  }
+  return false;
+}
+
 function kubeSafeName(value: string): string {
   const normalized = value
     .toLowerCase()
@@ -1851,14 +1866,9 @@ export default function App() {
   const latestCoreRun = useMemo(() => runs.find((run) => run.stage === "core") ?? null, [runs]);
   const latestPlatformRun = useMemo(() => runs.find((run) => run.stage === "platform") ?? null, [runs]);
   const latestPoliciesRun = useMemo(() => runs.find((run) => run.stage === "policies") ?? null, [runs]);
-  const hasAppliedCoreRun = useMemo(
-    () => runs.some((run) => run.stage === "core" && run.kind === "apply" && run.status === "applied"),
-    [runs],
-  );
-  const hasAppliedPlatformRun = useMemo(
-    () => runs.some((run) => run.stage === "platform" && run.kind === "apply" && run.status === "applied"),
-    [runs],
-  );
+  const hasAppliedCoreRun = useMemo(() => stageIsEffectivelyApplied(runs, "core"), [runs]);
+  const hasAppliedPlatformRun = useMemo(() => stageIsEffectivelyApplied(runs, "platform"), [runs]);
+  const hasAppliedPoliciesRun = useMemo(() => stageIsEffectivelyApplied(runs, "policies"), [runs]);
   const hasAdminAccess = useMemo(
     () => (config?.cluster_admin_principal_arns ?? []).some((arn) => arn.trim() !== ""),
     [config?.cluster_admin_principal_arns],
@@ -1901,8 +1911,18 @@ export default function App() {
     : undefined;
   const platformLockedReason = !hasAppliedCoreRun ? "Apply core first to unlock the platform stage." : undefined;
   const policiesLockedReason = !hasAppliedPlatformRun ? "Apply platform first to unlock the policies stage." : undefined;
+  const coreDestroyBlockedReason = hasAppliedPoliciesRun
+    ? "Destroy the policies stage first. The policies stage still owns resources that depend on core."
+    : hasAppliedPlatformRun
+      ? "Destroy the platform stage first. The platform stage still owns resources that depend on core."
+      : undefined;
+  const platformDestroyBlockedReason = hasAppliedPoliciesRun
+    ? "Destroy the policies stage first. The policies stage still owns resources that depend on platform."
+    : undefined;
   const coreActionDisabledReason = adminAccessDisabledReason;
+  const coreDestroyActionDisabledReason = adminAccessDisabledReason ?? coreDestroyBlockedReason;
   const platformActionDisabledReason = adminAccessDisabledReason ?? platformLockedReason;
+  const platformDestroyActionDisabledReason = adminAccessDisabledReason ?? platformDestroyBlockedReason;
   const policiesActionDisabledReason = adminAccessDisabledReason ?? policiesLockedReason;
 
   useEffect(() => {
@@ -2737,14 +2757,16 @@ export default function App() {
                     </CardHeader>
                     <CardContent className="grid gap-4">
                       <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0 flex-1">
                             <p className="text-lg font-semibold">Core</p>
                             <p className="mt-2 text-sm leading-6 text-neutral-400">
                               VPC, EKS, node access, and the cluster foundation that everything else depends on.
                             </p>
                           </div>
-                          <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
+                          <div className="shrink-0 self-start">
+                            <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
+                          </div>
                         </div>
                         <div className="mt-4 grid gap-3 md:grid-cols-3">
                           <MetricTile label="Admin ARNs" value={configuredAdminArnsCount} />
@@ -2761,12 +2783,12 @@ export default function App() {
                             </Button>
                           </StageAction>
                           <div data-destroy-arm>
-                            <StageAction disabledReason={coreActionDisabledReason}>
+                            <StageAction disabledReason={coreDestroyActionDisabledReason}>
                               <Button
                                 variant={armedDestroyStage === "core" ? "danger" : "ghost"}
                                 className={armedDestroyStage === "core" ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]" : ""}
                                 onClick={() => void startDestroy("core")}
-                                disabled={isBusy || !hasAdminAccess}
+                                disabled={isBusy || !hasAdminAccess || hasAppliedPlatformRun || hasAppliedPoliciesRun}
                               >
                                 Destroy core
                               </Button>
@@ -2779,14 +2801,16 @@ export default function App() {
                       </div>
 
                       <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0 flex-1">
                             <p className="text-lg font-semibold">Platform</p>
                             <p className="mt-2 text-sm leading-6 text-neutral-400">
                               Namespaces, Helm add-ons, workloads, ingress, and the operator-facing outputs for the live lab.
                             </p>
                           </div>
-                          <Badge>{latestPlatformRun ? latestPlatformRun.status : "idle"}</Badge>
+                          <div className="shrink-0 self-start">
+                            <Badge>{latestPlatformRun ? latestPlatformRun.status : "idle"}</Badge>
+                          </div>
                         </div>
                         <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
                           {hasAppliedCoreRun ? "Core applied, platform stage unlocked" : "Apply core first to unlock this stage"}
@@ -2810,12 +2834,12 @@ export default function App() {
                             </Button>
                           </StageAction>
                           <div data-destroy-arm>
-                            <StageAction disabledReason={platformActionDisabledReason}>
+                            <StageAction disabledReason={platformDestroyActionDisabledReason}>
                               <Button
                                 variant={armedDestroyStage === "platform" ? "danger" : "ghost"}
                                 className={armedDestroyStage === "platform" ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]" : ""}
                                 onClick={() => void startDestroy("platform")}
-                                disabled={isBusy || !hasAdminAccess || !hasAppliedCoreRun}
+                                disabled={isBusy || !hasAdminAccess || hasAppliedPoliciesRun}
                               >
                                 Destroy platform
                               </Button>
@@ -2828,14 +2852,16 @@ export default function App() {
                       </div>
 
                       <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0 flex-1">
                             <p className="text-lg font-semibold">Policies</p>
                             <p className="mt-2 text-sm leading-6 text-neutral-400">
                               Kyverno and Tetragon custom resources applied only after the platform layer is healthy.
                             </p>
                           </div>
-                          <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
+                          <div className="shrink-0 self-start">
+                            <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
+                          </div>
                         </div>
                         <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
                           {hasAppliedPlatformRun ? "Platform applied, policy stage unlocked" : "Apply platform first to unlock this stage"}
@@ -2883,20 +2909,22 @@ export default function App() {
                     </CardHeader>
                     <CardContent className="grid gap-4">
                       <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0 flex-1">
                             <p className="text-lg font-semibold">Hubble UI</p>
                             <p className="mt-2 text-sm leading-6 text-neutral-400">
                               Keep flow analysis in the native UI through the platform endpoint instead of flattening it into this dashboard.
                             </p>
                           </div>
-                          <Badge>{observabilityLinks?.hubble_available ? "Ready" : "Pending apply"}</Badge>
+                          <div className="shrink-0 self-start">
+                            <Badge>{observabilityLinks?.hubble_available ? "Ready" : "Pending apply"}</Badge>
+                          </div>
                         </div>
 
                         <div className="mt-4 rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
                           <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Target</p>
                           <p className="mt-3 break-all text-sm font-medium">
-                            {observabilityLinks?.hubble_ui_url ?? "Run platform apply to provision hubble.lab.internal, or set ISOLENS_HUBBLE_UI_URL for a manual override."}
+                            {observabilityLinks?.hubble_ui_url ?? "Run platform apply to provision hubble.lab.internal."}
                           </p>
                         </div>
 
@@ -3353,8 +3381,8 @@ export default function App() {
                     </CardContent>
                   </Card>
 
-                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-                    <Card>
+                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] xl:items-stretch">
+                    <Card className="flex h-full flex-col">
                       <CardHeader className="flex flex-wrap items-center justify-between gap-3">
                         <CardTitle>Run Logs</CardTitle>
                         <div className="flex items-center gap-2">
@@ -3363,13 +3391,13 @@ export default function App() {
                           </Button>
                         </div>
                       </CardHeader>
-                      <CardContent>
-                        <div className="overflow-hidden rounded-[1.2rem] border border-[#ab9f9d]/45 bg-[#f5f1fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+                      <CardContent className="flex min-h-0 flex-1">
+                        <div className="flex min-h-[16rem] max-h-[40rem] flex-1 flex-col overflow-hidden rounded-[1.2rem] border border-[#ab9f9d]/45 bg-[#f5f1fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
                           <div className="flex items-center justify-between gap-3 border-b border-[#ab9f9d]/35 bg-[#dddbf1]/72 px-4 py-3 text-[11px] uppercase tracking-[0.24em] text-[#383f51]/78">
                             <span>{selectedRun ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}` : "No run selected"}</span>
                             <span>{selectedRunLogs.length} lines • {groupedSelectedRunLogs.length} entries</span>
                           </div>
-                          <div ref={logsViewportRef} className="themed-scrollbar max-h-[32rem] overflow-auto p-4 font-mono text-xs text-[#383f51]">
+                          <div ref={logsViewportRef} className="themed-scrollbar min-h-0 flex-1 overflow-auto p-4 pr-5 font-mono text-xs text-[#383f51]">
                             {groupedSelectedRunLogs.length > 0 ? (
                               <div className="space-y-2.5">
                                 {groupedSelectedRunLogs.map((group, index) => (
@@ -3412,46 +3440,45 @@ export default function App() {
                       </CardContent>
                     </Card>
 
-                    <Card>
+                    <Card className="flex h-full flex-col">
                       <CardHeader>
                         <CardTitle>Terraform Outputs</CardTitle>
                       </CardHeader>
-                      <CardContent>
-                        {hasTerraformOutputs(outputs) ? (
-                          <div className="themed-scrollbar max-h-[32rem] space-y-3 overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4">
-                            {Object.entries(outputs ?? {}).map(([key, entry]) => {
-                              const normalized = formatTerraformOutputValue(entry);
-                              return (
-                                <div key={key} className="rounded-[1rem] border border-border/70 bg-background/45 p-3">
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <p className="font-mono text-xs uppercase tracking-[0.2em] text-neutral-500">{key}</p>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      {normalized.type ? (
-                                        <Badge className="border-border/80 bg-card/80 text-foreground/70">
-                                          {typeof normalized.type === "string" ? normalized.type : prettyPrint(normalized.type)}
-                                        </Badge>
-                                      ) : null}
-                                      {normalized.sensitive ? (
-                                        <Badge className="border-warning/40 bg-warning/12 text-warning">Sensitive</Badge>
-                                      ) : null}
+                      <CardContent className="flex min-h-0 flex-1">
+                          <div className="themed-scrollbar min-h-[16rem] max-h-[40rem] flex-1 overflow-auto pr-2">
+                          {hasTerraformOutputs(outputs) ? (
+                            <div className="space-y-4">
+                              {Object.entries(outputs ?? {}).map(([key, entry]) => {
+                                const normalized = formatTerraformOutputValue(entry);
+                                return (
+                                  <div key={key} className="min-w-0 rounded-[1rem] border border-border/70 bg-white/48 p-4 shadow-[0_10px_24px_rgba(56,63,81,0.05)]">
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                      <p className="min-w-0 flex-1 break-all font-mono text-xs uppercase tracking-[0.2em] text-neutral-500">{key}</p>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {normalized.sensitive ? (
+                                          <Badge className="border-warning/40 bg-warning/12 text-warning">Sensitive</Badge>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 overflow-hidden rounded-[0.9rem] border border-border/60 bg-white/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]">
+                                      <pre className="themed-scrollbar scrollbar-gutter-stable max-h-[18rem] w-full overflow-auto whitespace-pre px-3 py-3 font-mono text-xs leading-6 text-foreground/82">
+                                        {normalized.sensitive
+                                          ? "(sensitive output)"
+                                          : typeof normalized.value === "string"
+                                            ? normalized.value
+                                            : prettyPrint(normalized.value)}
+                                      </pre>
                                     </div>
                                   </div>
-                                  <pre className="mt-3 overflow-auto rounded-[0.9rem] border border-border/60 bg-white/30 p-3 font-mono text-xs text-foreground/82">
-                                    {normalized.sensitive
-                                      ? "(sensitive output)"
-                                      : typeof normalized.value === "string"
-                                        ? normalized.value
-                                        : prettyPrint(normalized.value)}
-                                  </pre>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-neutral-500">
-                            No outputs available.
-                          </div>
-                        )}
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="flex min-h-[16rem] items-center justify-center text-sm text-neutral-500">
+                              No outputs available.
+                            </div>
+                          )}
+                        </div>
                       </CardContent>
                     </Card>
                   </div>

@@ -233,9 +233,9 @@ resource "helm_release" "keycloak" {
   count = local.observability_identity_enabled ? 1 : 0
 
   name            = local.keycloak_service_name
-  repository      = "https://charts.bitnami.com/bitnami"
+  repository      = "oci://registry-1.docker.io/bitnamicharts"
   chart           = "keycloak"
-  version         = "26.5.0"
+  version         = "25.2.0"
   namespace       = kubernetes_namespace.identity[0].metadata[0].name
   wait            = true
   timeout         = 900
@@ -248,10 +248,48 @@ resource "helm_release" "keycloak" {
       httpEnabled    = true
       proxyHeaders   = "xforwarded"
       hostnameStrict = true
+      image = {
+        repository = "bitnamilegacy/keycloak"
+        tag        = "26.3.3-debian-12-r0"
+      }
+      livenessProbe = {
+        enabled             = true
+        initialDelaySeconds = 240
+        periodSeconds       = 10
+        timeoutSeconds      = 5
+        failureThreshold    = 6
+        successThreshold    = 1
+      }
+      readinessProbe = {
+        enabled             = true
+        initialDelaySeconds = 45
+        periodSeconds       = 10
+        timeoutSeconds      = 5
+        failureThreshold    = 12
+        successThreshold    = 1
+      }
+      startupProbe = {
+        enabled             = true
+        initialDelaySeconds = 30
+        periodSeconds       = 10
+        timeoutSeconds      = 5
+        failureThreshold    = 30
+        successThreshold    = 1
+      }
       auth = {
         adminUser         = "admin"
         existingSecret    = kubernetes_secret.observability_identity_bootstrap[0].metadata[0].name
         passwordSecretKey = "admin-password"
+      }
+      postgresql = {
+        image = {
+          repository = "bitnamilegacy/postgresql"
+        }
+        primary = {
+          persistence = {
+            enabled = false
+          }
+        }
       }
       ingress = {
         enabled          = true
@@ -261,6 +299,14 @@ resource "helm_release" "keycloak" {
       }
       keycloakConfigCli = {
         enabled = true
+        availabilityCheck = {
+          enabled = true
+          timeout = "300s"
+        }
+        image = {
+          repository = "bitnamilegacy/keycloak-config-cli"
+          tag        = "6.4.0-debian-12-r11"
+        }
         extraEnvVars = [
           {
             name  = "IMPORT_VARSUBSTITUTION_ENABLED"

@@ -69,4 +69,8 @@
   .themed-scrollbar::-webkit-scrollbar-thumb:hover {
     background: linear-gradient(180deg, rgba(60, 79, 118, 1), rgba(56, 63, 81, 0.86));
   }
+
+  .scrollbar-gutter-stable {
+    scrollbar-gutter: stable both-edges;
+  }
 }
