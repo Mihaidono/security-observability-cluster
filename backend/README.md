@@ -136,13 +136,12 @@ Current routes:
 - `GET /api/runs`
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/logs`
+- `POST /api/runs/prune?keep=10`
 - `POST /api/runs/plan/{stage}`
 - `POST /api/runs/{run_id}/apply`
 - `POST /api/runs/destroy/{stage}`
 - `POST /api/runs/{run_id}/cancel`
 - `GET /api/outputs`
-- `GET /api/observability/links`
-- `GET /api/observability/hubble-ui?token=...`
 - `WS /api/runs/{run_id}/events?token=...`
 
 ## Environment Variables
@@ -152,7 +151,6 @@ Current routes:
 - `ISOLENS_API_TOKEN`: bearer token for API and WebSocket auth
 - `TERRAFORM_BIN`: Terraform executable name or path
 - `ISOLENS_CORS_ORIGINS`: comma-separated frontend origins
-- `ISOLENS_HUBBLE_UI_URL`: optional override for the redirect helper. If unset, the backend now falls back to the latest Terraform `hubble_ui_url` output.
 - AWS credential variables:
   - `AWS_PROFILE`
   - `AWS_SDK_LOAD_CONFIG`

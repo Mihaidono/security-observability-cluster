@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -167,6 +168,31 @@ class SqliteStore:
         with self._connection() as connection:
             rows = connection.execute("SELECT * FROM runs ORDER BY created_at DESC").fetchall()
         return [self._row_to_run(row) for row in rows]
+
+    def prune_runs(self, keep: int) -> tuple[list[TerraformRun], int]:
+        runs = self.list_runs()
+        if keep < 0:
+            keep = 0
+
+        runs_to_delete = runs[keep:]
+        if not runs_to_delete:
+            return runs, 0
+
+        run_ids_to_delete = [run.id for run in runs_to_delete]
+        with self._connection() as connection:
+            connection.executemany(
+                "DELETE FROM run_logs WHERE run_id = ?",
+                [(run_id,) for run_id in run_ids_to_delete],
+            )
+            connection.executemany(
+                "DELETE FROM runs WHERE id = ?",
+                [(run_id,) for run_id in run_ids_to_delete],
+            )
+
+        for run_id in run_ids_to_delete:
+            shutil.rmtree(self.settings.runs_dir / run_id, ignore_errors=True)
+
+        return runs[:keep], len(run_ids_to_delete)
 
     def append_logs(self, run_id: str, lines: list[str]) -> None:
         if not lines:

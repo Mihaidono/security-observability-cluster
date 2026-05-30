@@ -4,12 +4,11 @@ import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
-import { api, buildObservabilityLaunchUrl, buildRunEventsUrl, getApiToken } from "./lib/api";
+import { api, buildRunEventsUrl, getApiToken } from "./lib/api";
 import type {
   AnalysisSubject,
   ContainerConfig,
   IngressConfig,
-  ObservabilityLinksResponse,
   NetworkPolicyPeer,
   NetworkPolicyPort,
   NetworkPolicyRule,
@@ -596,7 +595,25 @@ function normalizeTerraformOutputs(value: unknown): Record<string, unknown> | nu
     return null;
   }
 
-  return value as Record<string, unknown>;
+  const filteredEntries = Object.entries(value as Record<string, unknown>).filter(([, entry]) => {
+    if (entry == null) {
+      return false;
+    }
+
+    if (
+      entry &&
+      typeof entry === "object" &&
+      !Array.isArray(entry) &&
+      "value" in entry &&
+      (entry as { value?: unknown }).value == null
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return filteredEntries.length > 0 ? Object.fromEntries(filteredEntries) : null;
 }
 
 function hasTerraformOutputs(value: Record<string, unknown> | null): boolean {
@@ -1793,6 +1810,28 @@ function StageAction({
   );
 }
 
+function StageNotice({
+  title,
+  body,
+  tone = "neutral",
+}: {
+  title: string;
+  body: string;
+  tone?: "neutral" | "warning";
+}) {
+  const toneClass =
+    tone === "warning"
+      ? "border-warning/35 bg-warning/10 text-warning"
+      : "border-border/80 bg-card/85 text-foreground";
+
+  return (
+    <div className={`rounded-[1.25rem] border px-4 py-3 ${toneClass}`}>
+      <p className="text-[11px] uppercase tracking-[0.22em]">{title}</p>
+      <p className="mt-2 text-sm leading-6">{body}</p>
+    </div>
+  );
+}
+
 function formatRunTimestamp(value: string | null | undefined) {
   if (!value) return "-";
 
@@ -1822,7 +1861,6 @@ export default function App() {
   const [selectedRun, setSelectedRun] = useState<TerraformRun | null>(null);
   const [selectedRunLogs, setSelectedRunLogs] = useState<string[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown> | null>(null);
-  const [observabilityLinks, setObservabilityLinks] = useState<ObservabilityLinksResponse | null>(null);
   const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
   const [isAppModalOpen, setIsAppModalOpen] = useState(false);
   const [armedDestroyStage, setArmedDestroyStage] = useState<RunStage | null>(null);
@@ -1922,8 +1960,23 @@ export default function App() {
   const coreActionDisabledReason = adminAccessDisabledReason;
   const coreDestroyActionDisabledReason = adminAccessDisabledReason ?? coreDestroyBlockedReason;
   const platformActionDisabledReason = adminAccessDisabledReason ?? platformLockedReason;
-  const platformDestroyActionDisabledReason = adminAccessDisabledReason ?? platformDestroyBlockedReason;
+  const platformDestroyActionDisabledReason = adminAccessDisabledReason ?? platformLockedReason ?? platformDestroyBlockedReason;
   const policiesActionDisabledReason = adminAccessDisabledReason ?? policiesLockedReason;
+  const platformStageLocked = !hasAppliedCoreRun;
+  const policiesStageLocked = !hasAppliedPlatformRun;
+  const platformStageNotice = platformStageLocked
+    ? "Platform stays unavailable until core has been applied successfully. Once the cluster exists, you can plan and apply namespaces, add-ons, workloads, and ingress."
+    : null;
+  const policiesStageNotice = policiesStageLocked
+    ? "Policies stay unavailable until platform has been applied successfully. Apply the add-ons and workloads layer first, then come back here."
+    : null;
+  const coreDestroyNotice = hasAppliedPoliciesRun
+    ? "Destroy order is policies, then platform, then core. Policies is still applied right now, so core destroy remains locked."
+    : hasAppliedPlatformRun
+      ? "Destroy order is platform, then core. Platform is still applied right now, so core destroy remains locked."
+      : null;
+  const hubblePortForwardCommand = "kubectl -n kube-system port-forward svc/hubble-ui 12000:80";
+  const hubbleLocalUrl = "http://127.0.0.1:12000";
 
   useEffect(() => {
     selectedRunStatusRef.current = selectedRun?.status;
@@ -2104,15 +2157,13 @@ export default function App() {
 
   async function loadInitial() {
     try {
-      const [loadedConfig, runResponse, health, links] = await Promise.all([
+      const [loadedConfig, runResponse, health] = await Promise.all([
         api.getConfig(),
         api.listRuns(),
         api.getHealth(),
-        api.getObservabilityLinks(),
       ]);
       setConfig(loadedConfig);
       setRuns(sortRuns(runResponse.items));
-      setObservabilityLinks(links);
       const firstSubjectKey = Object.keys(loadedConfig.analysis_subjects)[0] ?? "";
       const firstAppIndex = loadedConfig.ward_applications.findIndex((application) => application.namespace === firstSubjectKey);
       setSelectedSubjectKey(firstSubjectKey);
@@ -2134,8 +2185,8 @@ export default function App() {
     }
   }
 
-  function openHubbleUi() {
-    window.open(buildObservabilityLaunchUrl("hubble-ui"), "_blank", "noopener,noreferrer");
+  function openLocalHubbleUi() {
+    window.open(hubbleLocalUrl, "_blank", "noopener,noreferrer");
   }
 
   async function refreshOutputs() {
@@ -2416,6 +2467,42 @@ export default function App() {
       setSelectedSubjectKey(firstSubjectKey);
       setSelectedAppIndex(firstAppIndex >= 0 ? firstAppIndex : 0);
       setStatusMessage("Managed config reset.");
+      setErrorMessage("");
+    } catch (error) {
+      setErrorMessage((error as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function pruneRunHistory(keep: number) {
+    setIsBusy(true);
+    try {
+      const response = await api.pruneRuns(keep);
+      const nextRuns = sortRuns(response.items);
+      setRuns(nextRuns);
+
+      const currentSelectionStillExists = nextRuns.some((run) => run.id === selectedRunId);
+      if (currentSelectionStillExists) {
+        const nextSelectedRun = nextRuns.find((run) => run.id === selectedRunId) ?? null;
+        setSelectedRun(nextSelectedRun);
+      } else if (nextRuns[0]) {
+        setSelectedRunId(nextRuns[0].id);
+        setSelectedRun(nextRuns[0]);
+        setSelectedRunLogs([]);
+        setOutputs(normalizeTerraformOutputs(nextRuns[0].outputs));
+      } else {
+        setSelectedRunId("");
+        setSelectedRun(null);
+        setSelectedRunLogs([]);
+        setOutputs(null);
+      }
+
+      setStatusMessage(
+        response.deleted_count > 0
+          ? `Deleted ${response.deleted_count} older runs. Keeping the latest ${response.kept_count}.`
+          : `Run history already fits within the latest ${response.kept_count}.`,
+      );
       setErrorMessage("");
     } catch (error) {
       setErrorMessage((error as Error).message);
@@ -2768,6 +2855,11 @@ export default function App() {
                             <Badge>{latestCoreRun ? latestCoreRun.status : "idle"}</Badge>
                           </div>
                         </div>
+                        {coreDestroyNotice ? (
+                          <div className="mt-4">
+                            <StageNotice title="Destroy Order" body={coreDestroyNotice} tone="warning" />
+                          </div>
+                        ) : null}
                         <div className="mt-4 grid gap-3 md:grid-cols-3">
                           <MetricTile label="Admin ARNs" value={configuredAdminArnsCount} />
                           <MetricTile label="Wards Planned" value={subjectKeys.length} />
@@ -2800,7 +2892,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                      <div className={classNames("rounded-[1.8rem] border border-border/80 bg-muted/55 p-5", platformStageLocked && "border-dashed opacity-75")}>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0 flex-1">
                             <p className="text-lg font-semibold">Platform</p>
@@ -2812,6 +2904,11 @@ export default function App() {
                             <Badge>{latestPlatformRun ? latestPlatformRun.status : "idle"}</Badge>
                           </div>
                         </div>
+                        {platformStageNotice ? (
+                          <div className="mt-4">
+                            <StageNotice title="Stage Locked" body={platformStageNotice} />
+                          </div>
+                        ) : null}
                         <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
                           {hasAppliedCoreRun ? "Core applied, platform stage unlocked" : "Apply core first to unlock this stage"}
                         </p>
@@ -2839,19 +2936,19 @@ export default function App() {
                                 variant={armedDestroyStage === "platform" ? "danger" : "ghost"}
                                 className={armedDestroyStage === "platform" ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]" : ""}
                                 onClick={() => void startDestroy("platform")}
-                                disabled={isBusy || !hasAdminAccess || hasAppliedPoliciesRun}
+                                disabled={isBusy || !hasAdminAccess || platformStageLocked || hasAppliedPoliciesRun}
                               >
                                 Destroy platform
                               </Button>
                             </StageAction>
                           </div>
-                          <Button variant="ghost" onClick={() => void unlockState("platform")} disabled={isBusy}>
+                          <Button variant="ghost" onClick={() => void unlockState("platform")} disabled={isBusy || platformStageLocked}>
                             Unlock state
                           </Button>
                         </div>
                       </div>
 
-                      <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
+                      <div className={classNames("rounded-[1.8rem] border border-border/80 bg-muted/55 p-5", policiesStageLocked && "border-dashed opacity-75")}>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0 flex-1">
                             <p className="text-lg font-semibold">Policies</p>
@@ -2863,6 +2960,11 @@ export default function App() {
                             <Badge>{latestPoliciesRun ? latestPoliciesRun.status : "idle"}</Badge>
                           </div>
                         </div>
+                        {policiesStageNotice ? (
+                          <div className="mt-4">
+                            <StageNotice title="Stage Locked" body={policiesStageNotice} />
+                          </div>
+                        ) : null}
                         <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
                           {hasAppliedPlatformRun ? "Platform applied, policy stage unlocked" : "Apply platform first to unlock this stage"}
                         </p>
@@ -2895,7 +2997,7 @@ export default function App() {
                               </Button>
                             </StageAction>
                           </div>
-                          <Button variant="ghost" onClick={() => void unlockState("policies")} disabled={isBusy}>
+                          <Button variant="ghost" onClick={() => void unlockState("policies")} disabled={isBusy || policiesStageLocked}>
                             Unlock state
                           </Button>
                         </div>
@@ -2913,23 +3015,30 @@ export default function App() {
                           <div className="min-w-0 flex-1">
                             <p className="text-lg font-semibold">Hubble UI</p>
                             <p className="mt-2 text-sm leading-6 text-neutral-400">
-                              Keep flow analysis in the native UI through the platform endpoint instead of flattening it into this dashboard.
+                              Keep flow analysis internal to the cluster and tunnel into the native UI from the same machine where your browser is running.
                             </p>
                           </div>
                           <div className="shrink-0 self-start">
-                            <Badge>{observabilityLinks?.hubble_available ? "Ready" : "Pending apply"}</Badge>
+                            <Badge>{hasAppliedPlatformRun ? "Internal access" : "Pending apply"}</Badge>
                           </div>
                         </div>
 
                         <div className="mt-4 rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-                          <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Target</p>
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Port-Forward</p>
+                          <p className="mt-3 break-all font-mono text-sm font-medium">
+                            {hubblePortForwardCommand}
+                          </p>
+                        </div>
+
+                        <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+                          <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Local URL</p>
                           <p className="mt-3 break-all text-sm font-medium">
-                            {observabilityLinks?.hubble_ui_url ?? "Run platform apply to provision hubble.lab.internal."}
+                            {hubbleLocalUrl}
                           </p>
                         </div>
 
                         <div className="mt-4 flex flex-wrap gap-2">
-                          <Button onClick={openHubbleUi} disabled={!observabilityLinks?.hubble_available}>Open Hubble UI</Button>
+                          <Button onClick={openLocalHubbleUi} disabled={!hasAppliedPlatformRun}>Open local Hubble UI</Button>
                           <Button variant="ghost" onClick={() => void loadInitial()} disabled={isBusy}>Refresh status</Button>
                         </div>
                       </div>
@@ -3209,8 +3318,16 @@ export default function App() {
             {activeTab === "activity" ? (
               <div className="grid h-full min-h-0 gap-6 2xl:grid-cols-[340px_minmax(0,1fr)] 2xl:items-stretch">
                 <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
-                  <CardHeader>
+                  <CardHeader className="flex flex-wrap items-center justify-between gap-3">
                     <CardTitle>Runs</CardTitle>
+                    <Button
+                      variant="ghost"
+                      className="px-3 py-1.5 text-xs"
+                      onClick={() => void pruneRunHistory(10)}
+                      disabled={isBusy || runs.length <= 10}
+                    >
+                      Keep latest 10
+                    </Button>
                   </CardHeader>
                   <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
                     <div className="themed-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">

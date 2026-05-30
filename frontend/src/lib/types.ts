@@ -141,19 +141,6 @@ export interface TerraformConfig {
   kubernetes_version: string;
   cluster_log_retention_in_days: number;
   cluster_admin_principal_arns: string[];
-  expose_hubble_ui?: boolean;
-  hubble_ui_host?: string;
-  hubble_ui_ingress_class_name?: string;
-  observability_ingress_whitelist_cidrs?: string[];
-  hubble_ui_ingress_annotations?: Record<string, string>;
-  enable_observability_identity?: boolean;
-  protect_hubble_ui_with_identity?: boolean;
-  keycloak_host?: string;
-  oauth2_proxy_host?: string;
-  observability_realm_name?: string;
-  observability_allowed_group?: string;
-  observability_demo_username?: string;
-  observability_demo_email?: string;
   analysis_subjects: Record<string, AnalysisSubject>;
   ward_applications: WardApplication[];
 }
@@ -227,15 +214,16 @@ export interface UnlockStateResponse {
   source_run_id?: string | null;
 }
 
-export interface ObservabilityLinksResponse {
-  hubble_ui_url?: string | null;
-  hubble_available: boolean;
-}
-
 export interface RunEventSnapshot {
   type: "run.snapshot";
   run: TerraformRun;
   logs: string[];
+}
+
+export interface RunPruneResponse {
+  items: TerraformRun[];
+  deleted_count: number;
+  kept_count: number;
 }
 
 export interface RunEventUpdated {

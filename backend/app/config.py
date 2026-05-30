@@ -22,7 +22,6 @@ class Settings:
     terraform_bin: str
     cors_origins: list[str]
     api_token: str
-    hubble_ui_url: str | None
 
 
 def get_settings() -> Settings:
@@ -60,5 +59,4 @@ def get_settings() -> Settings:
         terraform_bin=os.getenv("TERRAFORM_BIN", "terraform"),
         cors_origins=cors_origins,
         api_token=os.getenv("ISOLENS_API_TOKEN", "dev-token"),
-        hubble_ui_url=os.getenv("ISOLENS_HUBBLE_UI_URL", "").strip() or None,
     )

@@ -27,7 +27,6 @@ The UI loads:
 - config from `GET /api/config`
 - run history from `GET /api/runs`
 - health from `GET /api/health`
-- observability links from `GET /api/observability/links`
 
 ## Authentication
 
@@ -112,6 +111,7 @@ The Activity tab shows:
 - source plan reference for apply runs
 - live and persisted logs
 - Terraform outputs
+- a run-history cleanup action that can keep only the latest 10 runs
 
 Output behavior reflects the current implementation:
 
@@ -123,13 +123,11 @@ This prevents stale outputs from a different run from staying visible.
 
 ## Observability Handoff
 
-The UI does not embed Hubble. It offers a handoff button that opens:
+The UI does not embed Hubble. It shows the local `kubectl port-forward` command and opens the local forwarded URL:
 
 ```text
-/api/observability/hubble-ui?token=<token>
+http://127.0.0.1:12000
 ```
-
-That backend route redirects to `ISOLENS_HUBBLE_UI_URL` when configured.
 
 ## Local Development
 
@@ -158,5 +156,5 @@ npm run build
 ## Current Limitations
 
 - The UI is intentionally backend-driven. It cannot operate offline or apply Terraform locally in the browser.
-- The Hubble button is only a redirect helper; there is no embedded observability dashboard in this app.
+- The Hubble button assumes you already started the local `kubectl port-forward`; there is no embedded observability dashboard in this app.
 - The UI does not currently expose every Terraform input for editing. For example, `cluster_log_retention_in_days` is visible as read-only metadata, but changing it still requires editing the managed config file or extending the form.

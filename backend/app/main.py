@@ -5,12 +5,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
 
 from .auth import require_api_token, require_websocket_token
 from .config import Settings, get_settings
 from .events import RunEventBroker
-from .models import HealthResponse, ObservabilityLinksResponse, OutputsResponse, RunListResponse, RunLogsResponse, RunStage, TerraformConfig, TerraformRun, UnlockStateResponse
+from .models import HealthResponse, OutputsResponse, RunListResponse, RunLogsResponse, RunPruneResponse, RunStage, TerraformConfig, TerraformRun, UnlockStateResponse
 from .store import SqliteStore
 from .terraform_runner import TerraformRunner
 
@@ -25,28 +24,6 @@ def auth_dependency(
     authorization: str | None = Header(default=None),
 ) -> None:
     require_api_token(settings=settings, authorization=authorization)
-
-
-def _string_output(outputs: dict[str, object] | None, name: str) -> str | None:
-    if not outputs:
-        return None
-
-    candidate = outputs.get(name)
-    if isinstance(candidate, str):
-        return candidate.strip() or None
-
-    if isinstance(candidate, dict):
-        value = candidate.get("value")
-        if isinstance(value, str):
-            return value.strip() or None
-
-    return None
-
-
-def resolved_hubble_ui_url() -> str | None:
-    if settings.hubble_ui_url:
-        return settings.hubble_ui_url
-    return _string_output(store.latest_outputs(), "hubble_ui_url")
 
 
 @asynccontextmanager
@@ -123,6 +100,19 @@ async def get_run_logs(run_id: str) -> RunLogsResponse:
     return RunLogsResponse(run_id=run_id, logs=store.read_logs(run_id))
 
 
+@app.post("/api/runs/prune", response_model=RunPruneResponse, dependencies=[Depends(auth_dependency)])
+async def prune_runs(keep: int = Query(default=10, ge=0, le=200)) -> RunPruneResponse:
+    if runner.active_run_id is not None or runner.queue_depth > 0:
+        raise HTTPException(status_code=409, detail="Cannot prune run history while another run is active or queued.")
+
+    items, deleted_count = store.prune_runs(keep)
+    return RunPruneResponse(
+        items=items,
+        deleted_count=deleted_count,
+        kept_count=len(items),
+    )
+
+
 @app.post("/api/runs/plan/{stage}", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
 async def start_plan(stage: RunStage) -> TerraformRun:
     return await runner.start_plan(stage)
@@ -154,24 +144,6 @@ async def get_outputs() -> OutputsResponse:
     if outputs is None:
         raise HTTPException(status_code=404, detail="No outputs are available yet.")
     return OutputsResponse(outputs=outputs)
-
-
-@app.get("/api/observability/links", response_model=ObservabilityLinksResponse, dependencies=[Depends(auth_dependency)])
-async def get_observability_links() -> ObservabilityLinksResponse:
-    hubble_ui_url = resolved_hubble_ui_url()
-    return ObservabilityLinksResponse(
-        hubble_ui_url=hubble_ui_url,
-        hubble_available=bool(hubble_ui_url),
-    )
-
-
-@app.get("/api/observability/hubble-ui")
-async def open_hubble_ui(token: str | None = Query(default=None)) -> RedirectResponse:
-    require_api_token(settings=settings, authorization=f"Bearer {token}" if token else None)
-    hubble_ui_url = resolved_hubble_ui_url()
-    if not hubble_ui_url:
-        raise HTTPException(status_code=404, detail="Hubble UI is not configured.")
-    return RedirectResponse(url=hubble_ui_url, status_code=307)
 
 
 @app.websocket("/api/runs/{run_id}/events")

@@ -11,21 +11,8 @@ resource "time_sleep" "cluster_access_ready" {
 module "addons" {
   source = "../modules/platform-addons"
 
-  kubernetes_version                    = var.kubernetes_version
-  ward_applications                     = var.ward_applications
-  expose_hubble_ui                      = var.expose_hubble_ui
-  hubble_ui_host                        = var.hubble_ui_host
-  hubble_ui_ingress_class_name          = var.hubble_ui_ingress_class_name
-  observability_ingress_whitelist_cidrs = var.observability_ingress_whitelist_cidrs
-  hubble_ui_ingress_annotations         = var.hubble_ui_ingress_annotations
-  enable_observability_identity         = var.enable_observability_identity
-  protect_hubble_ui_with_identity       = var.protect_hubble_ui_with_identity
-  keycloak_host                         = var.keycloak_host
-  oauth2_proxy_host                     = var.oauth2_proxy_host
-  observability_realm_name              = var.observability_realm_name
-  observability_allowed_group           = var.observability_allowed_group
-  observability_demo_username           = var.observability_demo_username
-  observability_demo_email              = var.observability_demo_email
+  kubernetes_version = var.kubernetes_version
+  ward_applications  = var.ward_applications
 
   depends_on = [time_sleep.cluster_access_ready]
 }

@@ -217,19 +217,17 @@ Specific behavior to verify:
 
 ## Hubble Handoff
 
-If Hubble UI is reachable from your workstation, a common local setup is:
+For the current internal-only Hubble path, run:
 
 ```bash
 kubectl -n kube-system port-forward svc/hubble-ui 12000:80
 ```
 
-Set in `backend/.env`:
+Then open:
 
-```env
-ISOLENS_HUBBLE_UI_URL=http://127.0.0.1:12000
+```text
+http://127.0.0.1:12000
 ```
-
-Then restart the backend. The frontend `Open Hubble UI` button should redirect through the backend helper route.
 
 ## Direct Terraform Validation
 

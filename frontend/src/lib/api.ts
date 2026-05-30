@@ -1,4 +1,4 @@
-import type { HealthResponse, ObservabilityLinksResponse, RunStage, TerraformConfig, TerraformRun, UnlockStateResponse } from "./types";
+import type { HealthResponse, RunPruneResponse, RunStage, TerraformConfig, TerraformRun, UnlockStateResponse } from "./types";
 
 const tokenStorageKey = "isolens-api-token";
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/$/, "");
@@ -28,11 +28,6 @@ function getApiBaseUrl(): string {
   }
 
   return window.location.origin;
-}
-
-export function buildObservabilityLaunchUrl(path: "hubble-ui"): string {
-  const token = encodeURIComponent(getApiToken());
-  return `${getApiBaseUrl()}/api/observability/${path}?token=${token}`;
 }
 
 function parseErrorPayload(payload: string): string {
@@ -93,7 +88,7 @@ export const api = {
   startDestroy: (stage: RunStage) => request<TerraformRun>(`/api/runs/destroy/${stage}`, { method: "POST" }),
   unlockState: (stage: RunStage) => request<UnlockStateResponse>(`/api/state/unlock/${stage}`, { method: "POST" }),
   cancelRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/cancel`, { method: "POST" }),
+  pruneRuns: (keep: number) => request<RunPruneResponse>(`/api/runs/prune?keep=${encodeURIComponent(String(keep))}`, { method: "POST" }),
   getOutputs: () => request<{ outputs: Record<string, unknown> }>("/api/outputs"),
   getHealth: () => request<HealthResponse>("/api/health"),
-  getObservabilityLinks: () => request<ObservabilityLinksResponse>("/api/observability/links"),
 };
