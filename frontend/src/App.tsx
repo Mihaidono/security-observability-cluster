@@ -2904,9 +2904,6 @@ export default function App() {
                           <Button onClick={openHubbleUi} disabled={!observabilityLinks?.hubble_available}>Open Hubble UI</Button>
                           <Button variant="ghost" onClick={() => void loadInitial()} disabled={isBusy}>Refresh status</Button>
                         </div>
-                        <p className="mt-3 text-xs text-neutral-500">
-                          Managed host: `hubble.lab.internal`. Local fallback: `kubectl -n kube-system port-forward svc/hubble-ui 12000:80`
-                        </p>
                       </div>
 
                     </CardContent>

@@ -47,3 +47,38 @@ output "hubble_ui_url" {
   description = "Platform-managed Hubble UI URL when a dedicated ingress endpoint is enabled."
   value       = module.addons.hubble_ui_url
 }
+
+output "identity_namespace" {
+  description = "Namespace containing the platform-managed identity stack when observability identity is enabled."
+  value       = module.addons.identity_namespace
+}
+
+output "keycloak_url" {
+  description = "Platform-managed Keycloak URL when observability identity is enabled."
+  value       = module.addons.keycloak_url
+}
+
+output "oauth2_proxy_url" {
+  description = "Platform-managed oauth2-proxy URL when observability identity is enabled."
+  value       = module.addons.oauth2_proxy_url
+}
+
+output "observability_demo_username" {
+  description = "Bootstrap Keycloak username created for observability demos."
+  value       = module.addons.observability_demo_username
+}
+
+output "observability_bootstrap_secret_name" {
+  description = "Secret containing the generated Keycloak admin password and demo user password."
+  value       = module.addons.observability_bootstrap_secret_name
+}
+
+output "keycloak_admin_password_command" {
+  description = "kubectl command for retrieving the generated Keycloak admin password."
+  value       = module.addons.keycloak_admin_password_command
+}
+
+output "observability_demo_password_command" {
+  description = "kubectl command for retrieving the generated observability demo user password."
+  value       = module.addons.observability_demo_password_command
+}

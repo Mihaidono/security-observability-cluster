@@ -10,6 +10,14 @@
   "hubble_ui_ingress_class_name": "nginx",
   "observability_ingress_whitelist_cidrs": [],
   "hubble_ui_ingress_annotations": {},
+  "enable_observability_identity": true,
+  "protect_hubble_ui_with_identity": true,
+  "keycloak_host": "keycloak.lab.internal",
+  "oauth2_proxy_host": "auth.lab.internal",
+  "observability_realm_name": "isolens-observability",
+  "observability_allowed_group": "/observability-users",
+  "observability_demo_username": "observer",
+  "observability_demo_email": "observer@lab.internal",
   "analysis_subjects": {
     "ward-public-api": {
       "tier": "public-demo",

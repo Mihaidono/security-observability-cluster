@@ -167,6 +167,197 @@ resource "helm_release" "ingress_nginx" {
   ]
 }
 
+resource "kubernetes_namespace" "identity" {
+  count = local.observability_identity_enabled ? 1 : 0
+
+  metadata {
+    name = local.identity_namespace
+    labels = {
+      "pod-security.kubernetes.io/enforce"         = "baseline"
+      "pod-security.kubernetes.io/enforce-version" = local.kubernetes_psa_version
+      "access-role"                                = "identity"
+    }
+  }
+}
+
+resource "random_password" "keycloak_admin_password" {
+  count = local.observability_identity_enabled ? 1 : 0
+
+  length           = 24
+  special          = true
+  override_special = "!@#%^*-_=+"
+}
+
+resource "random_password" "observability_demo_user_password" {
+  count = local.observability_identity_enabled ? 1 : 0
+
+  length           = 24
+  special          = true
+  override_special = "!@#%^*-_=+"
+}
+
+resource "random_password" "oauth2_proxy_client_secret" {
+  count = local.observability_identity_enabled ? 1 : 0
+
+  length  = 48
+  special = false
+}
+
+resource "random_password" "oauth2_proxy_cookie_secret" {
+  count = local.observability_identity_enabled ? 1 : 0
+
+  length  = 32
+  special = false
+}
+
+resource "kubernetes_secret" "observability_identity_bootstrap" {
+  count = local.observability_identity_enabled ? 1 : 0
+
+  metadata {
+    name      = "observability-identity-bootstrap"
+    namespace = kubernetes_namespace.identity[0].metadata[0].name
+  }
+
+  data = {
+    "admin-password"     = random_password.keycloak_admin_password[0].result
+    "client-id"          = local.oauth2_proxy_service_name
+    "client-secret"      = random_password.oauth2_proxy_client_secret[0].result
+    "cookie-secret"      = random_password.oauth2_proxy_cookie_secret[0].result
+    "demo-user-password" = random_password.observability_demo_user_password[0].result
+  }
+
+  type = "Opaque"
+}
+
+resource "helm_release" "keycloak" {
+  count = local.observability_identity_enabled ? 1 : 0
+
+  name            = local.keycloak_service_name
+  repository      = "https://charts.bitnami.com/bitnami"
+  chart           = "keycloak"
+  version         = "26.5.0"
+  namespace       = kubernetes_namespace.identity[0].metadata[0].name
+  wait            = true
+  timeout         = 900
+  atomic          = true
+  cleanup_on_fail = true
+
+  values = [
+    yamlencode({
+      production     = true
+      httpEnabled    = true
+      proxyHeaders   = "xforwarded"
+      hostnameStrict = true
+      auth = {
+        adminUser         = "admin"
+        existingSecret    = kubernetes_secret.observability_identity_bootstrap[0].metadata[0].name
+        passwordSecretKey = "admin-password"
+      }
+      ingress = {
+        enabled          = true
+        hostname         = var.keycloak_host
+        ingressClassName = local.observability_ingress_class_name
+        annotations      = local.keycloak_ingress_annotations
+      }
+      keycloakConfigCli = {
+        enabled = true
+        extraEnvVars = [
+          {
+            name  = "IMPORT_VARSUBSTITUTION_ENABLED"
+            value = "true"
+          },
+          {
+            name = "OAUTH2_PROXY_CLIENT_SECRET"
+            valueFrom = {
+              secretKeyRef = {
+                name = kubernetes_secret.observability_identity_bootstrap[0].metadata[0].name
+                key  = "client-secret"
+              }
+            }
+          },
+          {
+            name = "OBSERVABILITY_DEMO_USER_PASSWORD"
+            valueFrom = {
+              secretKeyRef = {
+                name = kubernetes_secret.observability_identity_bootstrap[0].metadata[0].name
+                key  = "demo-user-password"
+              }
+            }
+          },
+        ]
+        configuration = {
+          "${var.observability_realm_name}-realm.json" = jsonencode(local.observability_realm_configuration)
+        }
+      }
+    }),
+  ]
+
+  depends_on = [
+    helm_release.cilium,
+    helm_release.ingress_nginx,
+    kubernetes_namespace.identity,
+    kubernetes_secret.observability_identity_bootstrap,
+  ]
+}
+
+resource "helm_release" "oauth2_proxy" {
+  count = local.observability_identity_enabled ? 1 : 0
+
+  name            = local.oauth2_proxy_service_name
+  repository      = "https://oauth2-proxy.github.io/manifests"
+  chart           = "oauth2-proxy"
+  version         = "10.6.0"
+  namespace       = kubernetes_namespace.identity[0].metadata[0].name
+  wait            = true
+  timeout         = 900
+  atomic          = true
+  cleanup_on_fail = true
+
+  values = [
+    yamlencode({
+      config = {
+        existingSecret = kubernetes_secret.observability_identity_bootstrap[0].metadata[0].name
+        emailDomains   = ["*"]
+        upstreams      = ["static://202"]
+      }
+      ingress = {
+        enabled     = true
+        className   = local.observability_ingress_class_name
+        path        = "/"
+        pathType    = "Prefix"
+        hosts       = [var.oauth2_proxy_host]
+        annotations = local.oauth2_proxy_ingress_annotations
+      }
+      extraArgs = {
+        provider                  = "oidc"
+        reverse-proxy             = "true"
+        redirect-url              = local.oauth2_proxy_redirect_url
+        oidc-issuer-url           = local.keycloak_external_realm_base_url
+        skip-oidc-discovery       = "true"
+        login-url                 = "${local.keycloak_external_realm_base_url}/protocol/openid-connect/auth"
+        redeem-url                = "${local.keycloak_internal_realm_base_url}/protocol/openid-connect/token"
+        oidc-jwks-url             = "${local.keycloak_internal_realm_base_url}/protocol/openid-connect/certs"
+        profile-url               = "${local.keycloak_internal_realm_base_url}/protocol/openid-connect/userinfo"
+        allowed-group             = var.observability_allowed_group
+        oidc-groups-claim         = "groups"
+        scope                     = "openid profile email groups"
+        cookie-domain             = ".lab.internal"
+        cookie-secure             = "false"
+        whitelist-domain          = ".lab.internal"
+        set-xauthrequest          = "true"
+        skip-provider-button      = "true"
+        pass-authorization-header = "true"
+      }
+    }),
+  ]
+
+  depends_on = [
+    helm_release.keycloak,
+    helm_release.ingress_nginx,
+    kubernetes_secret.observability_identity_bootstrap,
+  ]
+}
+
 resource "kubernetes_ingress_v1" "hubble_ui" {
   count = local.hubble_ui_ingress_enabled ? 1 : 0
 
@@ -209,5 +400,6 @@ resource "kubernetes_ingress_v1" "hubble_ui" {
   depends_on = [
     helm_release.cilium,
     helm_release.ingress_nginx,
+    helm_release.oauth2_proxy,
   ]
 }

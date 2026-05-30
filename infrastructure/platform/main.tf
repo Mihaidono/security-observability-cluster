@@ -18,6 +18,14 @@ module "addons" {
   hubble_ui_ingress_class_name          = var.hubble_ui_ingress_class_name
   observability_ingress_whitelist_cidrs = var.observability_ingress_whitelist_cidrs
   hubble_ui_ingress_annotations         = var.hubble_ui_ingress_annotations
+  enable_observability_identity         = var.enable_observability_identity
+  protect_hubble_ui_with_identity       = var.protect_hubble_ui_with_identity
+  keycloak_host                         = var.keycloak_host
+  oauth2_proxy_host                     = var.oauth2_proxy_host
+  observability_realm_name              = var.observability_realm_name
+  observability_allowed_group           = var.observability_allowed_group
+  observability_demo_username           = var.observability_demo_username
+  observability_demo_email              = var.observability_demo_email
 
   depends_on = [time_sleep.cluster_access_ready]
 }

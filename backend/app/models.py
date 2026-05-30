@@ -19,6 +19,14 @@ class TerraformConfig(BaseModel):
     hubble_ui_ingress_class_name: str = "nginx"
     observability_ingress_whitelist_cidrs: list[str] = Field(default_factory=list)
     hubble_ui_ingress_annotations: dict[str, str] = Field(default_factory=dict)
+    enable_observability_identity: bool = True
+    protect_hubble_ui_with_identity: bool = True
+    keycloak_host: str = "keycloak.lab.internal"
+    oauth2_proxy_host: str = "auth.lab.internal"
+    observability_realm_name: str = "isolens-observability"
+    observability_allowed_group: str = "/observability-users"
+    observability_demo_username: str = "observer"
+    observability_demo_email: str = "observer@lab.internal"
     analysis_subjects: dict[str, dict[str, Any]] = Field(default_factory=dict)
     ward_applications: list[dict[str, Any]] = Field(default_factory=list)
 

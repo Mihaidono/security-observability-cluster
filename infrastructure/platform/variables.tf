@@ -40,7 +40,7 @@ variable "hubble_ui_host" {
   default     = "hubble.lab.internal"
 
   validation {
-    condition     = !var.expose_hubble_ui || trim(var.hubble_ui_host) != ""
+    condition     = !var.expose_hubble_ui || trimspace(var.hubble_ui_host) != ""
     error_message = "hubble_ui_host must be non-empty when expose_hubble_ui is true."
   }
 }
@@ -66,6 +66,54 @@ variable "hubble_ui_ingress_annotations" {
   description = "Additional annotations merged onto the platform-managed Hubble UI ingress. Useful for auth integrations such as oauth2-proxy."
   type        = map(string)
   default     = {}
+}
+
+variable "enable_observability_identity" {
+  description = "Whether to install the platform-managed Keycloak and oauth2-proxy stack for observability endpoints."
+  type        = bool
+  default     = true
+}
+
+variable "protect_hubble_ui_with_identity" {
+  description = "Whether the dedicated Hubble UI ingress should require oauth2-proxy authentication."
+  type        = bool
+  default     = true
+}
+
+variable "keycloak_host" {
+  description = "Host exposed through ingress-nginx for the platform-managed Keycloak endpoint."
+  type        = string
+  default     = "keycloak.lab.internal"
+}
+
+variable "oauth2_proxy_host" {
+  description = "Host exposed through ingress-nginx for the platform-managed oauth2-proxy endpoint."
+  type        = string
+  default     = "auth.lab.internal"
+}
+
+variable "observability_realm_name" {
+  description = "Keycloak realm used for protecting observability endpoints."
+  type        = string
+  default     = "isolens-observability"
+}
+
+variable "observability_allowed_group" {
+  description = "Keycloak group path required by oauth2-proxy for observability access."
+  type        = string
+  default     = "/observability-users"
+}
+
+variable "observability_demo_username" {
+  description = "Bootstrap Keycloak user created for observability demos."
+  type        = string
+  default     = "observer"
+}
+
+variable "observability_demo_email" {
+  description = "Bootstrap Keycloak user email created for observability demos."
+  type        = string
+  default     = "observer@lab.internal"
 }
 
 variable "cluster_admin_principal_arns" {

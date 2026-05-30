@@ -8,6 +8,7 @@ The `platform` stage owns everything that runs inside the already-created EKS cl
 
 - Cilium with Hubble enabled, chained on top of the AWS VPC CNI plugin
 - optional dedicated `hubble.lab.internal` ingress for Hubble UI
+- optional Keycloak and oauth2-proxy stack for protecting observability endpoints
 - Tetragon Helm release
 - Kyverno namespace and Helm release
 - `monitoring-zone` namespace
@@ -69,7 +70,9 @@ It accepts the remaining shared tfvars fields only for compatibility with the si
 
 - `expose_hubble_ui=true` creates a dedicated Hubble ingress at `hubble.lab.internal`
 - `observability_ingress_whitelist_cidrs` can restrict that ingress by source CIDR through `ingress-nginx`
-- `hubble_ui_ingress_annotations` can layer in auth annotations later, which is the clean path for `oauth2-proxy` + Keycloak or another OIDC provider
+- `enable_observability_identity=true` installs Keycloak and oauth2-proxy for platform-managed SSO
+- `protect_hubble_ui_with_identity=true` places Hubble behind oauth2-proxy using ingress-nginx external auth
+- `hubble_ui_ingress_annotations` can still layer in additional ingress behavior if needed
 
 ## Outputs
 
@@ -85,6 +88,9 @@ Current outputs include:
 - `ward_ingress_hosts`
 - `ingress_controller_namespace`
 - `hubble_ui_url`
+- `keycloak_url`
+- `oauth2_proxy_url`
+- `observability_demo_username`
 
 ## Backend and State
 
