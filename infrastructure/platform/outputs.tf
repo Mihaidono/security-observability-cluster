@@ -42,3 +42,8 @@ output "ingress_controller_namespace" {
   description = "Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled."
   value       = module.addons.ingress_controller_namespace
 }
+
+output "hubble_ui_url" {
+  description = "Platform-managed Hubble UI URL when a dedicated ingress endpoint is enabled."
+  value       = module.addons.hubble_ui_url
+}

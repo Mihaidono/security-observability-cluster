@@ -152,7 +152,7 @@ Current routes:
 - `ISOLENS_API_TOKEN`: bearer token for API and WebSocket auth
 - `TERRAFORM_BIN`: Terraform executable name or path
 - `ISOLENS_CORS_ORIGINS`: comma-separated frontend origins
-- `ISOLENS_HUBBLE_UI_URL`: optional URL used by the redirect helper
+- `ISOLENS_HUBBLE_UI_URL`: optional override for the redirect helper. If unset, the backend now falls back to the latest Terraform `hubble_ui_url` output.
 - AWS credential variables:
   - `AWS_PROFILE`
   - `AWS_SDK_LOAD_CONFIG`

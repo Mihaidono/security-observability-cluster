@@ -141,6 +141,11 @@ export interface TerraformConfig {
   kubernetes_version: string;
   cluster_log_retention_in_days: number;
   cluster_admin_principal_arns: string[];
+  expose_hubble_ui?: boolean;
+  hubble_ui_host?: string;
+  hubble_ui_ingress_class_name?: string;
+  observability_ingress_whitelist_cidrs?: string[];
+  hubble_ui_ingress_annotations?: Record<string, string>;
   analysis_subjects: Record<string, AnalysisSubject>;
   ward_applications: WardApplication[];
 }

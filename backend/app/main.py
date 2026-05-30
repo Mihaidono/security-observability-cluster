@@ -27,6 +27,28 @@ def auth_dependency(
     require_api_token(settings=settings, authorization=authorization)
 
 
+def _string_output(outputs: dict[str, object] | None, name: str) -> str | None:
+    if not outputs:
+        return None
+
+    candidate = outputs.get(name)
+    if isinstance(candidate, str):
+        return candidate.strip() or None
+
+    if isinstance(candidate, dict):
+        value = candidate.get("value")
+        if isinstance(value, str):
+            return value.strip() or None
+
+    return None
+
+
+def resolved_hubble_ui_url() -> str | None:
+    if settings.hubble_ui_url:
+        return settings.hubble_ui_url
+    return _string_output(store.latest_outputs(), "hubble_ui_url")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await runner.start()
@@ -136,18 +158,20 @@ async def get_outputs() -> OutputsResponse:
 
 @app.get("/api/observability/links", response_model=ObservabilityLinksResponse, dependencies=[Depends(auth_dependency)])
 async def get_observability_links() -> ObservabilityLinksResponse:
+    hubble_ui_url = resolved_hubble_ui_url()
     return ObservabilityLinksResponse(
-        hubble_ui_url=settings.hubble_ui_url,
-        hubble_available=bool(settings.hubble_ui_url),
+        hubble_ui_url=hubble_ui_url,
+        hubble_available=bool(hubble_ui_url),
     )
 
 
 @app.get("/api/observability/hubble-ui")
 async def open_hubble_ui(token: str | None = Query(default=None)) -> RedirectResponse:
     require_api_token(settings=settings, authorization=f"Bearer {token}" if token else None)
-    if not settings.hubble_ui_url:
+    hubble_ui_url = resolved_hubble_ui_url()
+    if not hubble_ui_url:
         raise HTTPException(status_code=404, detail="Hubble UI is not configured.")
-    return RedirectResponse(url=settings.hubble_ui_url, status_code=307)
+    return RedirectResponse(url=hubble_ui_url, status_code=307)
 
 
 @app.websocket("/api/runs/{run_id}/events")

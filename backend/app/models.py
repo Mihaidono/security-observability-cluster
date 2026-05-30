@@ -14,6 +14,11 @@ class TerraformConfig(BaseModel):
     kubernetes_version: str
     cluster_log_retention_in_days: int = 90
     cluster_admin_principal_arns: list[str] = Field(default_factory=list)
+    expose_hubble_ui: bool = True
+    hubble_ui_host: str = "hubble.lab.internal"
+    hubble_ui_ingress_class_name: str = "nginx"
+    observability_ingress_whitelist_cidrs: list[str] = Field(default_factory=list)
+    hubble_ui_ingress_annotations: dict[str, str] = Field(default_factory=dict)
     analysis_subjects: dict[str, dict[str, Any]] = Field(default_factory=dict)
     ward_applications: list[dict[str, Any]] = Field(default_factory=list)
 

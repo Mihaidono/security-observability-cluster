@@ -11,8 +11,13 @@ resource "time_sleep" "cluster_access_ready" {
 module "addons" {
   source = "../modules/platform-addons"
 
-  kubernetes_version = var.kubernetes_version
-  ward_applications  = var.ward_applications
+  kubernetes_version                    = var.kubernetes_version
+  ward_applications                     = var.ward_applications
+  expose_hubble_ui                      = var.expose_hubble_ui
+  hubble_ui_host                        = var.hubble_ui_host
+  hubble_ui_ingress_class_name          = var.hubble_ui_ingress_class_name
+  observability_ingress_whitelist_cidrs = var.observability_ingress_whitelist_cidrs
+  hubble_ui_ingress_annotations         = var.hubble_ui_ingress_annotations
 
   depends_on = [time_sleep.cluster_access_ready]
 }

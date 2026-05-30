@@ -90,7 +90,7 @@ resource "kubernetes_deployment" "ward_application" {
 
             security_context {
               allow_privilege_escalation = false
-              run_as_non_root           = true
+              run_as_non_root            = true
               read_only_root_filesystem  = container.value.security_context.read_only_root_filesystem
               run_as_user                = container.value.security_context.run_as_user
               run_as_group               = container.value.security_context.run_as_group

@@ -166,3 +166,48 @@ resource "helm_release" "ingress_nginx" {
     kubernetes_namespace.ingress_nginx,
   ]
 }
+
+resource "kubernetes_ingress_v1" "hubble_ui" {
+  count = local.hubble_ui_ingress_enabled ? 1 : 0
+
+  metadata {
+    name      = "hubble-ui"
+    namespace = "kube-system"
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraform"
+      "app.kubernetes.io/name"       = "hubble-ui"
+      "observability-role"           = "network-visibility"
+    }
+    annotations = local.hubble_ui_ingress_annotations
+  }
+
+  spec {
+    ingress_class_name = var.hubble_ui_ingress_class_name
+
+    rule {
+      host = var.hubble_ui_host
+
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+
+          backend {
+            service {
+              name = "hubble-ui"
+
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    helm_release.cilium,
+    helm_release.ingress_nginx,
+  ]
+}

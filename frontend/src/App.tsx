@@ -2887,16 +2887,16 @@ export default function App() {
                           <div>
                             <p className="text-lg font-semibold">Hubble UI</p>
                             <p className="mt-2 text-sm leading-6 text-neutral-400">
-                              Keep flow analysis in the native UI instead of flattening it into this dashboard.
+                              Keep flow analysis in the native UI through the platform endpoint instead of flattening it into this dashboard.
                             </p>
                           </div>
-                          <Badge>{observabilityLinks?.hubble_available ? "Ready" : "Needs URL"}</Badge>
+                          <Badge>{observabilityLinks?.hubble_available ? "Ready" : "Pending apply"}</Badge>
                         </div>
 
                         <div className="mt-4 rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
                           <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">Target</p>
                           <p className="mt-3 break-all text-sm font-medium">
-                            {observabilityLinks?.hubble_ui_url ?? "Set ISOLENS_HUBBLE_UI_URL in backend/.env"}
+                            {observabilityLinks?.hubble_ui_url ?? "Run platform apply to provision hubble.lab.internal, or set ISOLENS_HUBBLE_UI_URL for a manual override."}
                           </p>
                         </div>
 
@@ -2905,7 +2905,7 @@ export default function App() {
                           <Button variant="ghost" onClick={() => void loadInitial()} disabled={isBusy}>Refresh status</Button>
                         </div>
                         <p className="mt-3 text-xs text-neutral-500">
-                          Local path: `kubectl -n kube-system port-forward svc/hubble-ui 12000:80`
+                          Managed host: `hubble.lab.internal`. Local fallback: `kubectl -n kube-system port-forward svc/hubble-ui 12000:80`
                         </p>
                       </div>
 

@@ -17,3 +17,8 @@ output "ingress_controller_namespace" {
   description = "Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled."
   value       = local.requires_ingress_nginx ? kubernetes_namespace.ingress_nginx[0].metadata[0].name : null
 }
+
+output "hubble_ui_url" {
+  description = "Platform-managed Hubble UI URL when a dedicated ingress endpoint is enabled."
+  value       = local.hubble_ui_ingress_enabled ? "http://${var.hubble_ui_host}" : null
+}

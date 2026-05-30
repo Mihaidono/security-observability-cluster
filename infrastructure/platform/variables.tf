@@ -28,6 +28,46 @@ variable "kubernetes_version" {
   default     = "1.35"
 }
 
+variable "expose_hubble_ui" {
+  description = "Whether to create a dedicated ingress endpoint for Hubble UI."
+  type        = bool
+  default     = true
+}
+
+variable "hubble_ui_host" {
+  description = "Host exposed through ingress-nginx for the platform-managed Hubble UI endpoint."
+  type        = string
+  default     = "hubble.lab.internal"
+
+  validation {
+    condition     = !var.expose_hubble_ui || trim(var.hubble_ui_host) != ""
+    error_message = "hubble_ui_host must be non-empty when expose_hubble_ui is true."
+  }
+}
+
+variable "hubble_ui_ingress_class_name" {
+  description = "IngressClass name used for the platform-managed Hubble UI ingress."
+  type        = string
+  default     = "nginx"
+}
+
+variable "observability_ingress_whitelist_cidrs" {
+  description = "Optional CIDR allowlist applied to observability ingresses through ingress-nginx whitelist annotations."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for cidr in var.observability_ingress_whitelist_cidrs : can(cidrhost(cidr, 0))])
+    error_message = "observability_ingress_whitelist_cidrs must contain valid CIDR ranges."
+  }
+}
+
+variable "hubble_ui_ingress_annotations" {
+  description = "Additional annotations merged onto the platform-managed Hubble UI ingress. Useful for auth integrations such as oauth2-proxy."
+  type        = map(string)
+  default     = {}
+}
+
 variable "cluster_admin_principal_arns" {
   description = "IAM principal ARNs granted cluster-admin access in the core stage. Used here to keep the post-core readiness wait tied to access configuration changes."
   type        = list(string)
