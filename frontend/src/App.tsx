@@ -661,7 +661,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     title: "Public Ingress Proof",
     description: "Provision a public FastAPI workload and prove the ingress path with a host-header curl plus Hubble evidence.",
     tag: "Ingress path",
-    requirements: "Platform apply",
+    requirements: "Platform apply for Cilium proof, policies apply for Tetragon proof",
     proofSurfaces: ["curl", "Hubble"],
     build(namespace, bundleId) {
       const app = withScenarioMetadata(makePublicPythonApiApp(namespace), "public-ingress", bundleId, "public-api");
@@ -821,7 +821,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     title: "Blocked Internet Egress",
     description: "Deploy a toolbox pod with no outbound allowlist so you can capture a blocked internet call and suspicious exec activity.",
     tag: "Cilium + Tetragon",
-    requirements: "Platform apply for Cilium proof, policies apply for Tetragon proof",
+    requirements: "Platform apply",
     proofSurfaces: ["kubectl exec", "Hubble", "Tetragon logs"],
     build(namespace, bundleId) {
       return [
@@ -1503,7 +1503,7 @@ function KeyValueEditor({
       {entries.length === 0 ? <p className="text-sm text-neutral-500">No entries.</p> : null}
       <div className="grid gap-2">
         {entries.map(([entryKey, entryValue], index) => (
-          <div key={`${entryKey}-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <div key={`kv-row-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <Input value={entryKey} onChange={(event) => updateRow(index, event.target.value, entryValue)} placeholder="Key" />
             <Input value={entryValue} onChange={(event) => updateRow(index, entryKey, event.target.value)} placeholder="Value" />
             <Button variant="danger" type="button" onClick={() => removeRow(index)}>
@@ -1553,7 +1553,7 @@ function StringListEditor({
       {items.length === 0 ? <p className="text-sm text-neutral-500">No entries.</p> : null}
       <div className="grid gap-2">
         {items.map((item, index) => (
-          <div key={`${item}-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
+          <div key={`string-row-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
             <Input value={item} onChange={(event) => updateItem(index, event.target.value)} />
             <Button variant="danger" type="button" onClick={() => removeItem(index)}>
               Remove
@@ -1652,7 +1652,7 @@ function VolumeMountEditor({
       {mounts.length === 0 ? <p className="text-sm text-neutral-500">No mounts.</p> : null}
       <div className="grid gap-2">
         {mounts.map((mount, index) => (
-          <div key={`${mount.name}-${index}`} className="grid gap-2 rounded-2xl border border-border bg-muted/60 p-3">
+          <div key={`mount-row-${index}`} className="grid gap-2 rounded-2xl border border-border bg-muted/60 p-3">
             <div className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_160px_auto]">
             <Input value={mount.name} onChange={(event) => updateMount(index, { ...mount, name: event.target.value })} placeholder="Volume name" />
             <Input
@@ -1708,7 +1708,7 @@ function NetworkPortsEditor({
       {ports.length === 0 ? <p className="text-sm text-neutral-500">No ports.</p> : null}
       <div className="grid gap-2">
         {ports.map((port, index) => (
-          <div key={`${port.port}-${index}`} className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_160px_auto]">
+          <div key={`port-row-${index}`} className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_160px_auto]">
             <Input
               type="number"
               value={String(port.port)}
@@ -4286,7 +4286,7 @@ export default function App() {
                     <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
                       <div className="grid gap-2">
                         {config.cluster_admin_principal_arns.map((arn, index) => (
-                          <div key={`${arn}-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
+                          <div key={`admin-arn-${index}`} className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]">
                             <Input
                               value={arn}
                               onChange={(event) => updateClusterAdminArn(index, event.target.value)}
@@ -4836,7 +4836,7 @@ export default function App() {
                   </div>
                   {(selectedApp.containers ?? []).map((container, index) => (
                     <ContainerEditor
-                      key={`${container.name}-${index}`}
+                      key={`container-row-${index}`}
                       index={index}
                       container={container}
                       onChange={(nextContainer) =>
@@ -4880,7 +4880,7 @@ export default function App() {
                   {(selectedApp.volumes ?? []).map((volume, index) => {
                     const volumeType = volume.empty_dir ? "empty_dir" : volume.secret_name ? "secret" : volume.config_map_name ? "config_map" : "empty_dir";
                     return (
-                      <div key={`${volume.name}-${index}`} className="grid gap-3 rounded-2xl border border-border bg-muted/60 p-4 2xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)_auto]">
+                      <div key={`volume-row-${index}`} className="grid gap-3 rounded-2xl border border-border bg-muted/60 p-4 2xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)_auto]">
                         <Input
                           value={volume.name}
                           onChange={(event) =>

@@ -6,6 +6,6 @@ variable "analysis_subjects" {
 
 variable "ward_applications" {
   description = "Accepted for compatibility with the shared tfvars payload. The core stage no longer manages in-cluster workloads directly."
-  type        = list(any)
+  type        = any
   default     = []
 }

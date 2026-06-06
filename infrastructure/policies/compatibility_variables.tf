@@ -1,3 +1,9 @@
+variable "cluster_log_retention_in_days" {
+  description = "Accepted for compatibility with the shared tfvars payload."
+  type        = number
+  default     = 90
+}
+
 variable "vpc_cidr" {
   description = "Accepted for compatibility with the shared tfvars payload."
   type        = string
@@ -49,6 +55,6 @@ variable "cluster_admin_principal_arns" {
 
 variable "ward_applications" {
   description = "Unused by this stage. Accepted so the shared tfvars payload can be passed unchanged to both Terraform stages."
-  type        = list(any)
+  type        = any
   default     = []
 }
