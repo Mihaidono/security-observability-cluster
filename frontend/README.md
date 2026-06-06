@@ -16,7 +16,7 @@ The UI works with four tabs:
 - `Overview`
   stage actions, stage status, and Hubble handoff
 - `Assets`
-  subject and application editing
+  ward editing, application editing, app templates, scenarios, and scenario playbooks
 - `Activity`
   run history, plan summary, logs, and Terraform outputs
 - `Settings`
@@ -66,6 +66,17 @@ The frontend edits the managed config model returned by the backend:
 - `ward_applications` can be added, edited, and removed
 - `cluster_admin_principal_arns` can be edited in `Settings`
 
+The `Assets` tab now has three distinct layers:
+
+- `Wards`
+  choose the namespace-like subject you want to work in
+- `App Templates`
+  add one standalone workload without disturbing the rest of the ward
+- `Scenario Library`
+  replace the selected ward's current applications with a curated proof bundle
+
+When a scenario is active in the selected ward, the UI also renders `Scenario Playbooks`. Those playbooks are runbooks, not automations: they list the commands you should execute and the evidence you should expect to capture.
+
 Current read-only cluster metadata includes:
 
 - project
@@ -99,6 +110,7 @@ Important behavior:
 - apply can be queued behind the latest stage plan while that plan is still running, and it will fail closed if the source plan does not finish successfully
 - platform-stage actions stay disabled until a successful core apply exists
 - policy-stage actions stay disabled until a successful platform apply exists
+- core destroy is visually blocked while downstream stages are still effectively applied
 - cancel is only enabled for queued or active runs
 - destroy uses a two-click arming pattern in the UI, but the backend still enforces the real safety checks
 
@@ -158,3 +170,4 @@ npm run build
 - The UI is intentionally backend-driven. It cannot operate offline or apply Terraform locally in the browser.
 - The Hubble button assumes you already started the local `kubectl port-forward`; there is no embedded observability dashboard in this app.
 - The UI does not currently expose every Terraform input for editing. For example, `cluster_log_retention_in_days` is visible as read-only metadata, but changing it still requires editing the managed config file or extending the form.
+- Scenario playbooks explain how to capture proof, but the UI does not yet mark scenarios as completed or store screenshots and output artifacts for you.

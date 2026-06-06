@@ -23,7 +23,13 @@ import type {
 
 type Direction = "ingress" | "egress";
 type AppTab = "overview" | "assets" | "activity" | "settings";
-type DemoScenarioId = "public-python-api" | "internal-python-api" | "static-site";
+type AppTemplateId = "public-python-api" | "internal-python-api" | "static-site";
+type ScenarioBlueprintId =
+  | "public-ingress"
+  | "east-west-allowed"
+  | "east-west-blocked"
+  | "blocked-egress-runtime"
+  | "kyverno-deny-latest";
 
 type AppReview = {
   errors: string[];
@@ -32,6 +38,37 @@ type AppReview = {
   resources: string[];
   secretDependencies: string[];
 };
+
+type ScenarioContext = {
+  namespace: string;
+  bundleId: string;
+  apps: WardApplication[];
+  appByRole: (role: string) => WardApplication | undefined;
+};
+
+type ScenarioBlueprint = {
+  id: ScenarioBlueprintId;
+  title: string;
+  description: string;
+  tag: string;
+  requirements: string;
+  proofSurfaces: string[];
+  caution?: string;
+  build: (namespace: string, bundleId: string) => WardApplication[];
+  commandSteps: (context: ScenarioContext) => string[];
+  expectedSignals: (context: ScenarioContext) => string[];
+};
+
+type ActiveScenarioBundle = {
+  bundleId: string;
+  blueprint: ScenarioBlueprint;
+  namespace: string;
+  apps: WardApplication[];
+};
+
+const SCENARIO_ID_LABEL = "isolens.io/scenario-id";
+const SCENARIO_BUNDLE_LABEL = "isolens.io/scenario-bundle";
+const SCENARIO_ROLE_LABEL = "isolens.io/scenario-role";
 
 function stageIsEffectivelyApplied(runs: TerraformRun[], stage: RunStage): boolean {
   for (const run of runs) {
@@ -434,6 +471,421 @@ function makeStaticSiteApp(namespace: string): WardApplication {
     },
   };
 }
+
+function scenarioLabelSelector(bundleId: string, role: string): Record<string, string> {
+  return {
+    [SCENARIO_BUNDLE_LABEL]: bundleId,
+    [SCENARIO_ROLE_LABEL]: role,
+  };
+}
+
+function scenarioIdForApp(app: WardApplication | null | undefined): ScenarioBlueprintId | null {
+  const value = app?.pod_labels?.[SCENARIO_ID_LABEL];
+  if (
+    value === "public-ingress" ||
+    value === "east-west-allowed" ||
+    value === "east-west-blocked" ||
+    value === "blocked-egress-runtime" ||
+    value === "kyverno-deny-latest"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function scenarioBundleForApp(app: WardApplication | null | undefined): string | null {
+  return app?.pod_labels?.[SCENARIO_BUNDLE_LABEL] ?? null;
+}
+
+function scenarioRoleForApp(app: WardApplication | null | undefined): string | null {
+  return app?.pod_labels?.[SCENARIO_ROLE_LABEL] ?? null;
+}
+
+function nextScenarioBundleId(blueprintId: ScenarioBlueprintId, applications: WardApplication[]): string {
+  const existingBundles = new Set(
+    applications
+      .map((application) => scenarioBundleForApp(application))
+      .filter((bundleId): bundleId is string => Boolean(bundleId)),
+  );
+
+  let index = 0;
+  let candidate: string = blueprintId;
+  while (existingBundles.has(candidate)) {
+    index += 1;
+    candidate = `${blueprintId}-${index}`;
+  }
+
+  return candidate;
+}
+
+function withScenarioMetadata(
+  app: WardApplication,
+  scenarioId: ScenarioBlueprintId,
+  bundleId: string,
+  role: string,
+): WardApplication {
+  return {
+    ...structuredClone(app),
+    pod_labels: {
+      ...(app.pod_labels ?? {}),
+      [SCENARIO_ID_LABEL]: scenarioId,
+      [SCENARIO_BUNDLE_LABEL]: bundleId,
+      [SCENARIO_ROLE_LABEL]: role,
+    },
+  };
+}
+
+function buildScenarioContext(namespace: string, bundleId: string, apps: WardApplication[]): ScenarioContext {
+  return {
+    namespace,
+    bundleId,
+    apps,
+    appByRole: (role: string) =>
+      apps.find((application) => application.pod_labels?.[SCENARIO_ROLE_LABEL] === role),
+  };
+}
+
+function makeToolboxApp(namespace: string, name: string, displayName: string, profile: string): WardApplication {
+  return {
+    name,
+    namespace,
+    replicas: 1,
+    pod_labels: {
+      app_role: "toolbox",
+      expose_class: "cluster",
+      scenario: profile,
+    },
+    pod_annotations: {},
+    automount_service_account_token: false,
+    allow_same_namespace_ingress: false,
+    service: {
+      enabled: false,
+      type: "ClusterIP",
+      port: 8080,
+      target_port: 8080,
+      annotations: {},
+    },
+    ingress: {
+      enabled: false,
+      class_name: "nginx",
+      host: "",
+      path: "/",
+      path_type: "Prefix",
+      annotations: {},
+    },
+    config_map: {
+      enabled: false,
+      mount_path: "/tmp",
+      data: {},
+    },
+    containers: [
+      {
+        name: "toolbox",
+        image: "busybox:1.36",
+        image_pull_policy: "IfNotPresent",
+        port: 8080,
+        command: ["sh", "-c", "while true; do sleep 3600; done"],
+        args: [],
+        env: {
+          APP_DISPLAY_NAME: displayName,
+          SCENARIO_NAME: name,
+          SCENARIO_PROFILE: profile,
+        },
+        env_from_secret_names: [],
+        probes: {
+          readiness: emptyProbe(),
+          liveness: emptyProbe(),
+          startup: emptyProbe(),
+        },
+        resources: {
+          requests_cpu: "50m",
+          requests_memory: "64Mi",
+          limits_cpu: "150m",
+          limits_memory: "128Mi",
+        },
+        volume_mounts: [],
+        security_context: {
+          run_as_user: 101,
+          run_as_group: 101,
+          read_only_root_filesystem: false,
+        },
+      },
+    ],
+    volumes: [],
+    network_policy: {
+      ingress: [],
+      egress: [],
+    },
+  };
+}
+
+function makeKyvernoLatestViolationApp(namespace: string): WardApplication {
+  const app = makeStaticSiteApp(namespace);
+  app.name = "kyverno-latest-violation";
+  app.service = {
+    ...app.service,
+    enabled: false,
+  };
+  app.ingress = {
+    ...app.ingress,
+    enabled: false,
+    host: "",
+  };
+  app.allow_same_namespace_ingress = false;
+  app.network_policy = {
+    ingress: [],
+    egress: [],
+  };
+  app.config_map = {
+    ...app.config_map,
+    enabled: false,
+    data: {},
+  };
+  if (app.containers?.[0]) {
+    app.containers[0] = {
+      ...app.containers[0],
+      image: "nginxinc/nginx-unprivileged:latest",
+      env: {
+        APP_DISPLAY_NAME: "Kyverno Latest Tag Violation",
+        SCENARIO_NAME: "kyverno-latest-violation",
+        SCENARIO_PROFILE: "kyverno-deny",
+      },
+    };
+  }
+  return app;
+}
+
+const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
+  "public-ingress": {
+    id: "public-ingress",
+    title: "Public Ingress Proof",
+    description: "Provision a public FastAPI workload and prove the ingress path with a host-header curl plus Hubble evidence.",
+    tag: "Ingress path",
+    requirements: "Platform apply",
+    proofSurfaces: ["curl", "Hubble"],
+    build(namespace, bundleId) {
+      const app = withScenarioMetadata(makePublicPythonApiApp(namespace), "public-ingress", bundleId, "public-api");
+      app.name = "edge-public-api";
+      app.replicas = 1;
+      if (app.containers?.[0]) {
+        app.containers[0] = {
+          ...app.containers[0],
+          env: {
+            ...(app.containers[0].env ?? {}),
+            APP_DISPLAY_NAME: "Edge Public API",
+            SCENARIO_NAME: "public-ingress",
+            SCENARIO_PROFILE: "ingress-path",
+          },
+        };
+      }
+      return [app];
+    },
+    commandSteps(context) {
+      const app = context.appByRole("public-api");
+      const ingressHost = app?.ingress?.host ?? `${app?.name ?? "edge-public-api"}.lab.internal`;
+      return [
+        "kubectl -n kube-system port-forward svc/hubble-ui 12000:80",
+        "LB=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{.status.loadBalancer.ingress[0].ip}')",
+        `curl -H 'Host: ${ingressHost}' "http://$LB/headers"`,
+        `Open http://127.0.0.1:12000/?namespace=${context.namespace}`,
+      ];
+    },
+    expectedSignals(context) {
+      const app = context.appByRole("public-api");
+      return [
+        `The curl should return JSON headers from ${app?.name ?? "the public API"} instead of a DNS or 404 error.`,
+        `Hubble should show ingress-nginx talking to ${app?.name ?? "the public API"} with an allowed verdict on port 80.`,
+      ];
+    },
+  },
+  "east-west-allowed": {
+    id: "east-west-allowed",
+    title: "Allowed East-West Call",
+    description: "Spawn a client toolbox and an internal API with the exact policy needed for one successful same-namespace request.",
+    tag: "Cilium allow",
+    requirements: "Platform apply",
+    proofSurfaces: ["kubectl exec", "Hubble"],
+    build(namespace, bundleId) {
+      const api = withScenarioMetadata(makeInternalPythonApiApp(namespace), "east-west-allowed", bundleId, "api");
+      api.name = "mesh-allowed-api";
+      api.allow_same_namespace_ingress = true;
+      if (api.containers?.[0]) {
+        api.containers[0] = {
+          ...api.containers[0],
+          env: {
+            ...(api.containers[0].env ?? {}),
+            APP_DISPLAY_NAME: "Allowed East-West API",
+            SCENARIO_NAME: "east-west-allowed",
+            SCENARIO_PROFILE: "mesh-allow",
+          },
+        };
+      }
+
+      const client = withScenarioMetadata(
+        makeToolboxApp(namespace, "mesh-allowed-client", "Allowed East-West Client", "mesh-allow"),
+        "east-west-allowed",
+        bundleId,
+        "client",
+      );
+      client.network_policy = {
+        ingress: [],
+        egress: [
+          {
+            ports: [{ port: 80, protocol: "TCP" }],
+            to: [{ pod_selector: scenarioLabelSelector(bundleId, "api") }],
+          },
+        ],
+      };
+
+      return [client, api];
+    },
+    commandSteps(context) {
+      const client = context.appByRole("client");
+      const api = context.appByRole("api");
+      return [
+        "kubectl -n kube-system port-forward svc/hubble-ui 12000:80",
+        `kubectl -n ${context.namespace} exec deploy/${client?.name ?? "mesh-allowed-client"} -- sh -c 'wget -T 5 -qO- http://${api?.name ?? "mesh-allowed-api"}-svc/headers'`,
+        `Open http://127.0.0.1:12000/?namespace=${context.namespace}`,
+      ];
+    },
+    expectedSignals(context) {
+      const client = context.appByRole("client");
+      const api = context.appByRole("api");
+      return [
+        `The client command should return JSON from ${api?.name ?? "the API"} instead of timing out.`,
+        `Hubble should show green or allowed flow records from ${client?.name ?? "the client"} to ${api?.name ?? "the API"} on port 80.`,
+      ];
+    },
+  },
+  "east-west-blocked": {
+    id: "east-west-blocked",
+    title: "Blocked East-West Call",
+    description: "Spawn a client toolbox and an internal API that refuses same-namespace ingress so you can capture a clear dropped flow.",
+    tag: "Cilium deny",
+    requirements: "Platform apply",
+    proofSurfaces: ["kubectl exec", "Hubble"],
+    build(namespace, bundleId) {
+      const api = withScenarioMetadata(makeInternalPythonApiApp(namespace), "east-west-blocked", bundleId, "api");
+      api.name = "mesh-blocked-api";
+      api.allow_same_namespace_ingress = false;
+      if (api.containers?.[0]) {
+        api.containers[0] = {
+          ...api.containers[0],
+          env: {
+            ...(api.containers[0].env ?? {}),
+            APP_DISPLAY_NAME: "Blocked East-West API",
+            SCENARIO_NAME: "east-west-blocked",
+            SCENARIO_PROFILE: "mesh-deny",
+          },
+        };
+      }
+
+      const client = withScenarioMetadata(
+        makeToolboxApp(namespace, "mesh-blocked-client", "Blocked East-West Client", "mesh-deny"),
+        "east-west-blocked",
+        bundleId,
+        "client",
+      );
+      client.network_policy = {
+        ingress: [],
+        egress: [
+          {
+            ports: [{ port: 80, protocol: "TCP" }],
+            to: [{ pod_selector: scenarioLabelSelector(bundleId, "api") }],
+          },
+        ],
+      };
+
+      return [client, api];
+    },
+    commandSteps(context) {
+      const client = context.appByRole("client");
+      const api = context.appByRole("api");
+      return [
+        "kubectl -n kube-system port-forward svc/hubble-ui 12000:80",
+        `kubectl -n ${context.namespace} exec deploy/${client?.name ?? "mesh-blocked-client"} -- sh -c 'wget -T 5 -qO- http://${api?.name ?? "mesh-blocked-api"}-svc/headers || true'`,
+        `Open http://127.0.0.1:12000/?namespace=${context.namespace}`,
+      ];
+    },
+    expectedSignals(context) {
+      const client = context.appByRole("client");
+      const api = context.appByRole("api");
+      return [
+        "The client command should fail or time out because the destination workload no longer allows same-namespace ingress.",
+        `Hubble should show dropped traffic from ${client?.name ?? "the client"} to ${api?.name ?? "the API"} on port 80.`,
+      ];
+    },
+  },
+  "blocked-egress-runtime": {
+    id: "blocked-egress-runtime",
+    title: "Blocked Internet Egress",
+    description: "Deploy a toolbox pod with no outbound allowlist so you can capture a blocked internet call and suspicious exec activity.",
+    tag: "Cilium + Tetragon",
+    requirements: "Platform apply for Cilium proof, policies apply for Tetragon proof",
+    proofSurfaces: ["kubectl exec", "Hubble", "Tetragon logs"],
+    build(namespace, bundleId) {
+      return [
+        withScenarioMetadata(
+          makeToolboxApp(namespace, "runtime-blocked-egress", "Blocked Egress Toolbox", "runtime-blocked-egress"),
+          "blocked-egress-runtime",
+          bundleId,
+          "toolbox",
+        ),
+      ];
+    },
+    commandSteps(context) {
+      const toolbox = context.appByRole("toolbox");
+      return [
+        "kubectl -n kube-system port-forward svc/hubble-ui 12000:80",
+        `kubectl -n ${context.namespace} exec deploy/${toolbox?.name ?? "runtime-blocked-egress"} -- sh -c 'wget -T 5 -qO- http://example.com || true'`,
+        "kubectl -n kube-system logs -l app.kubernetes.io/name=tetragon -c tetragon --tail=120",
+        `Open http://127.0.0.1:12000/?namespace=${context.namespace}`,
+      ];
+    },
+    expectedSignals() {
+      return [
+        "The wget command should fail because the ward keeps default-deny egress and this toolbox does not get an outbound allowlist.",
+        "Hubble should show dropped flows toward the external destination on port 80.",
+        "After the policies stage is applied, Tetragon logs should include the sh and wget exec chain from the toolbox pod.",
+      ];
+    },
+  },
+  "kyverno-deny-latest": {
+    id: "kyverno-deny-latest",
+    title: "Kyverno Latest Tag Deny",
+    description: "Add a deliberately violating workload that uses a latest tag so the policy layer can block it and leave proof in your run logs.",
+    tag: "Kyverno deny",
+    requirements: "Policies apply",
+    proofSurfaces: ["Activity logs", "Kyverno logs", "Events"],
+    caution: "This scenario is meant to fail. Remove the violating app after you capture the evidence so normal platform applies can succeed again.",
+    build(namespace, bundleId) {
+      return [
+        withScenarioMetadata(
+          makeKyvernoLatestViolationApp(namespace),
+          "kyverno-deny-latest",
+          bundleId,
+          "violator",
+        ),
+      ];
+    },
+    commandSteps(context) {
+      return [
+        "Run platform apply after the policies stage is already healthy.",
+        `kubectl get events -n ${context.namespace} --sort-by=.lastTimestamp | tail -n 20`,
+        "kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=120",
+      ];
+    },
+    expectedSignals(context) {
+      const violator = context.appByRole("violator");
+      return [
+        `The platform apply should fail or stall around ${violator?.name ?? "the violating workload"} instead of creating a healthy deployment.`,
+        "Activity -> Run Logs should contain the admission or rollout failure, and Kyverno logs/events should mention the latest-tag policy.",
+      ];
+    },
+  },
+};
+
+const scenarioBlueprintList = Object.values(scenarioBlueprints);
 
 function emptySubject(): AnalysisSubject {
   return {
@@ -1736,6 +2188,78 @@ function ScenarioTile({
   );
 }
 
+function ScenarioPlaybookCard({
+  title,
+  tag,
+  requirements,
+  proofSurfaces,
+  caution,
+  appNames,
+  commands,
+  expectedSignals,
+}: {
+  title: string;
+  tag: string;
+  requirements: string;
+  proofSurfaces: string[];
+  caution?: string;
+  appNames: string[];
+  commands: string[];
+  expectedSignals: string[];
+}) {
+  return (
+    <div className="rounded-[1.5rem] border border-border/80 bg-card/80 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold">{title}</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-500">{requirements}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge>{tag}</Badge>
+          {proofSurfaces.map((surface) => (
+            <Badge key={surface} className="border-border/70 bg-muted/60 text-foreground/75">
+              {surface}
+            </Badge>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        <div className="rounded-[1rem] border border-border/70 bg-muted/45 p-4">
+          <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">Provisioned apps</p>
+          <p className="mt-2 text-sm text-foreground/80">{appNames.join(", ")}</p>
+        </div>
+
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">Run these</p>
+          <div className="mt-3 grid gap-3">
+            {commands.map((command) => (
+              <pre key={command} className="themed-scrollbar overflow-auto rounded-[1rem] border border-border/70 bg-[#f5f1fb] px-4 py-3 font-mono text-xs leading-6 text-[#383f51]">
+                {command}
+              </pre>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">Capture this proof</p>
+          <div className="mt-3 space-y-2 text-sm leading-6 text-foreground/80">
+            {expectedSignals.map((signal, index) => (
+              <p key={`${title}-signal-${index}`}>{signal}</p>
+            ))}
+          </div>
+        </div>
+
+        {caution ? (
+          <div className="rounded-[1rem] border border-warning/35 bg-warning/10 px-4 py-3 text-sm leading-6 text-warning">
+            {caution}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function EditorSection({
   title,
   summary,
@@ -1895,6 +2419,33 @@ export default function App() {
 
     return appsForSelectedSubject[0]?.application ?? null;
   }, [appsForSelectedSubject, config, selectedAppIndex, selectedSubjectKey]);
+  const activeScenarioBundles = useMemo<ActiveScenarioBundle[]>(() => {
+    const bundles = new Map<string, ActiveScenarioBundle>();
+
+    for (const { application } of appsForSelectedSubject) {
+      const bundleId = scenarioBundleForApp(application);
+      const scenarioId = scenarioIdForApp(application);
+      if (!bundleId || !scenarioId) {
+        continue;
+      }
+
+      const blueprint = scenarioBlueprints[scenarioId];
+      const existingBundle = bundles.get(bundleId);
+      if (existingBundle) {
+        existingBundle.apps.push(application);
+        continue;
+      }
+
+      bundles.set(bundleId, {
+        bundleId,
+        blueprint,
+        namespace: selectedSubjectKey,
+        apps: [application],
+      });
+    }
+
+    return [...bundles.values()].sort((left, right) => left.blueprint.title.localeCompare(right.blueprint.title));
+  }, [appsForSelectedSubject, selectedSubjectKey]);
   const selectedAppPrimaryContainer = useMemo(() => primaryContainer(selectedApp), [selectedApp]);
   const selectedAppReview = useMemo(() => buildAppReview(selectedApp, subjectKeys), [selectedApp, subjectKeys]);
   const selectedAppPrimaryConfigFile = useMemo<[string, string]>(() => {
@@ -2331,14 +2882,14 @@ export default function App() {
     setSelectedAppIndex(config.ward_applications.length);
   }
 
-  function addDemoScenario(scenario: DemoScenarioId) {
+  function addAppTemplate(templateId: AppTemplateId) {
     if (!config) return;
 
     const namespace = selectedSubjectKey || subjectKeys[0] || "ward-template-app";
     const app =
-      scenario === "public-python-api"
+      templateId === "public-python-api"
         ? makePublicPythonApiApp(namespace)
-        : scenario === "internal-python-api"
+        : templateId === "internal-python-api"
           ? makeInternalPythonApiApp(namespace)
           : makeStaticSiteApp(namespace);
     app.name = kubeSafeName(uniqueName(app.name, config.ward_applications.map((existing) => existing.name)));
@@ -2353,12 +2904,40 @@ export default function App() {
     setSelectedSubjectKey(namespace);
     setSelectedAppIndex(config.ward_applications.length);
     setStatusMessage(
-      scenario === "public-python-api"
-        ? `Added public API app to ${namespace}.`
-        : scenario === "internal-python-api"
-          ? `Added internal API app to ${namespace}.`
-          : `Added static site probe app to ${namespace}.`,
+      templateId === "public-python-api"
+        ? `Added public API template to ${namespace}.`
+        : templateId === "internal-python-api"
+          ? `Added internal API template to ${namespace}.`
+          : `Added static site template to ${namespace}.`,
     );
+    setErrorMessage("");
+  }
+
+  function addScenarioBlueprint(blueprintId: ScenarioBlueprintId) {
+    if (!config) return;
+
+    const namespace = selectedSubjectKey || subjectKeys[0] || "ward-template-app";
+    const blueprint = scenarioBlueprints[blueprintId];
+    const keptApplications = config.ward_applications.filter((application) => application.namespace !== namespace);
+    const bundleId = nextScenarioBundleId(blueprintId, keptApplications);
+    const existingNames = keptApplications.map((application) => application.name);
+    const scenarioApps = blueprint.build(namespace, bundleId).map((application) => structuredClone(application));
+
+    scenarioApps.forEach((application) => {
+      application.name = kubeSafeName(uniqueName(application.name, existingNames));
+      existingNames.push(application.name);
+      if (application.ingress?.enabled) {
+        application.ingress.host = `${application.name}.lab.internal`;
+      }
+    });
+
+    updateConfig((current) => ({
+      ...current,
+      ward_applications: [...current.ward_applications.filter((application) => application.namespace !== namespace), ...scenarioApps],
+    }));
+    setSelectedSubjectKey(namespace);
+    setSelectedAppIndex(keptApplications.length);
+    setStatusMessage(`Loaded ${blueprint.title} into ${namespace}. Existing apps in that ward were replaced.`);
     setErrorMessage("");
   }
 
@@ -3201,11 +3780,11 @@ export default function App() {
                     <Card className="overflow-hidden">
                       <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
                         <div>
-                          <CardTitle>Scenario Library</CardTitle>
-                          <p className="mt-2 text-sm leading-6 text-neutral-500">Create a new demo application in this ward from a safe, working starting point.</p>
+                          <CardTitle>App Templates</CardTitle>
+                          <p className="mt-2 text-sm leading-6 text-neutral-500">Create a single workload from a safe, working starting point before you customize it in the builder.</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Badge>Demo-ready</Badge>
+                          <Badge>Builder starters</Badge>
                         </div>
                       </CardHeader>
                       <CardContent className="grid gap-4">
@@ -3214,24 +3793,86 @@ export default function App() {
                             title="Public Python API"
                             description="Ingress-exposed FastAPI with a built-in egress check."
                             tag="Public traffic"
-                            actionLabel="Add to this ward"
-                            onApply={() => addDemoScenario("public-python-api")}
+                            actionLabel="Add template"
+                            onApply={() => addAppTemplate("public-python-api")}
                           />
                           <ScenarioTile
                             title="Internal Python API"
                             description="Cluster-only FastAPI for a quieter comparison case."
                             tag="Internal traffic"
-                            actionLabel="Add to this ward"
-                            onApply={() => addDemoScenario("internal-python-api")}
+                            actionLabel="Add template"
+                            onApply={() => addAppTemplate("internal-python-api")}
                           />
                           <ScenarioTile
                             title="Static Site Probe"
                             description="Minimal web probe for service and ingress validation."
                             tag="Smoke test"
-                            actionLabel="Add to this ward"
-                            onApply={() => addDemoScenario("static-site")}
+                            actionLabel="Add template"
+                            onApply={() => addAppTemplate("static-site")}
                           />
                         </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="overflow-hidden">
+                      <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div>
+                          <CardTitle>Scenario Library</CardTitle>
+                          <p className="mt-2 text-sm leading-6 text-neutral-500">Load an opinionated proof bundle for this ward. Choosing one replaces the ward's current applications with the scenario resources.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge>Evidence packs</Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="grid gap-4">
+                        <div className="themed-scrollbar flex gap-4 overflow-x-auto pb-2">
+                          {scenarioBlueprintList.map((blueprint) => (
+                            <ScenarioTile
+                              key={blueprint.id}
+                              title={blueprint.title}
+                              description={blueprint.description}
+                              tag={blueprint.tag}
+                              actionLabel="Load scenario"
+                              onApply={() => addScenarioBlueprint(blueprint.id)}
+                            />
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="overflow-hidden">
+                      <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div>
+                          <CardTitle>Scenario Playbooks</CardTitle>
+                          <p className="mt-2 text-sm leading-6 text-neutral-500">Every active scenario in this ward carries a built-in runbook so you know exactly what to curl, what to screenshot, and what to expect from Hubble, Kyverno, or Tetragon.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge>{activeScenarioBundles.length} active</Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="grid gap-4">
+                        {activeScenarioBundles.length === 0 ? (
+                          <div className="rounded-[1.6rem] border border-dashed border-border/80 bg-muted/45 px-5 py-6 text-sm leading-6 text-neutral-500">
+                            This ward only has standalone applications right now. Add one of the scenario bundles above when you want a repeatable Cilium, Kyverno, or Tetragon proof case.
+                          </div>
+                        ) : (
+                          activeScenarioBundles.map((bundle) => {
+                            const context = buildScenarioContext(bundle.namespace, bundle.bundleId, bundle.apps);
+                            return (
+                              <ScenarioPlaybookCard
+                                key={bundle.bundleId}
+                                title={bundle.blueprint.title}
+                                tag={bundle.blueprint.tag}
+                                requirements={bundle.blueprint.requirements}
+                                proofSurfaces={bundle.blueprint.proofSurfaces}
+                                caution={bundle.blueprint.caution}
+                                appNames={bundle.apps.map((application) => application.name)}
+                                commands={bundle.blueprint.commandSteps(context)}
+                                expectedSignals={bundle.blueprint.expectedSignals(context)}
+                              />
+                            );
+                          })
+                        )}
                       </CardContent>
                     </Card>
                   </div>

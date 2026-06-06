@@ -22,11 +22,14 @@ The current implementation provisions or manages:
 - conditional `ingress-nginx` when any ward application declares `ingress.class_name = "nginx"`
 - a Helm release named `lgtm` that currently installs the `grafana-agent` chart
 - ward namespaces, quotas, baseline network policies, workloads, and outputs
+- an internal-only Hubble access path through `kubectl port-forward`
+- an operator UI that can load single-app templates or replace a ward with a bundled proof scenario
 
 Two important reality checks:
 
 - The repo currently uses standard Kubernetes `NetworkPolicy` resources for workload isolation. It does not define Cilium L7 policy resources.
 - The monitoring release is explicitly pinned and still installs `grafana-agent`; it is not a full maintained LGTM stack.
+- Hubble is currently intended to stay internal to the cluster. The UI helps you reach it through a local `kubectl port-forward`, not through a public auth gateway.
 
 ## Repository Map
 
@@ -52,6 +55,26 @@ The Terraform is intentionally split:
 
 4. `policies`
    Owns the manifest layer that depends on the cluster, namespaces, and CRDs already existing.
+
+## Operator Workflow
+
+The UI is intentionally split between three kinds of work:
+
+- `Overview`
+  run Terraform stages in order, inspect stage status, and launch the internal Hubble handoff
+- `Assets`
+  manage wards, edit applications, load single-app templates, and load proof scenarios
+- `Activity`
+  inspect run history, live logs, Terraform outputs, and prune older runs
+
+Inside `Assets`, there are now two different ways to provision workloads:
+
+- `App Templates`
+  single safe starting points such as a public FastAPI app, an internal FastAPI app, or a static NGINX probe
+- `Scenario Library`
+  bundled proof cases that replace the selected ward's current applications with a repeatable demo setup
+
+Every active scenario also generates a `Scenario Playbook` in the UI. Those playbooks do not execute anything automatically. They tell you which commands to run and what proof to capture in Hubble, Tetragon, Kyverno logs, or Terraform run logs.
 
 ## Quick Start
 
@@ -144,11 +167,14 @@ The shared handwritten example file at `infrastructure/terraform.tfvars` remains
 
 That managed JSON file now explicitly carries `cluster_log_retention_in_days`, so the backend/frontend/Terraform path preserves the EKS control-plane log-retention setting instead of depending on an implicit default.
 
+The same managed file also carries the full ward and workload inventory. Scenario loading is still implemented as managed config changes; selecting a scenario replaces the current ward's `ward_applications` with the bundle defined by that scenario.
+
 ## Current Caveats
 
 - the monitoring release is still `grafana-agent`, even though the repo language historically referred to it as an LGTM stack.
 - ingress resources only get a controller automatically for the `nginx` ingress class. Other classes are still treated as bring-your-own controller.
 - `platform` and `policies` still depend on a live reachable cluster, so breaking cluster access outside Terraform can still complicate cleanup.
+- scenario proof capture is guided in the UI, but evidence is not stored or exported automatically. Screenshots and command output still need to be gathered manually.
 
 ## Next Reads
 

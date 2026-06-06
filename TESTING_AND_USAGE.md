@@ -212,8 +212,11 @@ Specific behavior to verify:
 
 - `Plan platform` stays disabled until core has been applied
 - `Plan policies` stays disabled until platform has been applied
+- `Destroy core` is visually blocked while platform or policies are still effectively applied
 - `Cancel run` is only enabled for queued or active runs
 - selecting a run with no outputs clears the outputs panel instead of showing stale values
+- `Keep latest 10` prunes older run history once no active or queued run is in progress
+- loading a scenario in `Assets` replaces the selected ward's current applications and creates a matching `Scenario Playbook`
 
 ## Hubble Handoff
 
@@ -228,6 +231,41 @@ Then open:
 ```text
 http://127.0.0.1:12000
 ```
+
+If you want to look only at one ward, append the namespace query parameter:
+
+```text
+http://127.0.0.1:12000/?namespace=ward-public-api
+```
+
+## Scenario Validation
+
+The frontend now distinguishes between:
+
+- `App Templates`
+  single workloads you can keep editing freely
+- `Scenario Library`
+  repeatable demo bundles that replace the selected ward's current applications
+
+After loading a scenario in `Assets`, verify:
+
+- the ward app list now contains only that scenario's resources
+- the `Scenario Playbooks` card appears for the ward
+- the playbook lists the expected `kubectl` or `curl` commands
+- the playbook explains what proof should appear in Hubble, Tetragon, Kyverno, or Terraform logs
+
+High-value scenarios to test:
+
+- `Public Ingress Proof`
+  prove the ingress path with a host-header curl and a matching Hubble flow
+- `Allowed East-West Call`
+  prove same-namespace traffic can succeed when explicitly allowed
+- `Blocked East-West Call`
+  prove same-namespace traffic is dropped when that allow path is removed
+- `Blocked Internet Egress`
+  prove default-deny egress and runtime exec visibility
+- `Kyverno Latest Tag Deny`
+  prove the policy layer blocks a violating workload and leaves evidence in run logs and Kyverno logs
 
 ## Direct Terraform Validation
 
@@ -258,6 +296,8 @@ If a run fails with missing credentials or SSO expiration:
 The current backend intentionally stops rather than retrying a reviewed plan with a fresh unreviewed apply. If you see the EKS access propagation error:
 
 1. wait briefly
+2. create a fresh reviewed plan
+3. apply that new plan
 2. create a fresh plan
 3. apply that new plan
 

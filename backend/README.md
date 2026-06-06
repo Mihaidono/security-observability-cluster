@@ -25,7 +25,7 @@ If the managed config file does not exist yet, the backend seeds it from the def
 
 ## Authentication
 
-Every HTTP API route except the redirect helper requires:
+Every HTTP API route requires:
 
 ```http
 Authorization: Bearer <token>
@@ -180,3 +180,4 @@ Or use the repo-level Docker Compose setup from the root README.
 - The backend is intentionally single-worker and only executes one Terraform run at a time.
 - Successful apply output collection is best-effort. If `terraform output -json` fails after the apply itself succeeded, the run still remains `applied`.
 - `platform` and `policies` depend on a live cluster connection, so out-of-band cluster access issues can still interrupt destroy flows.
+- The backend stores raw configuration and run metadata, but it does not store scenario evidence such as screenshots or operator notes.

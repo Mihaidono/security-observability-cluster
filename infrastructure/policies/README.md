@@ -15,6 +15,8 @@ The stage currently creates two cluster-scoped Kyverno policies:
 - `disallow-latest-tag-in-wards`
   blocks workloads that use `:latest` container image tags in ward namespaces
 
+Even though these are cluster-scoped `ClusterPolicy` objects, they are effectively ward-focused because they only match namespaces with the `analysis-tier` label created by the platform stage.
+
 ### Tetragon tracing policies
 
 For each `analysis_subjects` entry, the stage creates a namespaced `TracingPolicyNamespaced` named `suspicious-exec`.
@@ -26,6 +28,8 @@ The current selectors watch for execution of:
 - `nc`
 - `bash`
 - `sh`
+
+That means the current Tetragon behavior is ward-wide, not per-application. Any workload inside the ward can trigger the tracing policy.
 
 ## Prerequisites
 
@@ -94,6 +98,7 @@ use_lockfile = true
 - This stage depends on CRDs installed by the platform stage, so the stage order matters.
 - The Kyverno policies target namespaces by the `analysis-tier` label, which the platform stage adds to ward namespaces.
 - If the cluster is manually deleted or cluster access is broken, this stage cannot clean itself up independently.
+- The current policies are intentionally small and evidence-oriented. They are good for demos and proof capture, but they are not yet a broad production policy catalog.
 
 ## Direct Terraform Usage
 

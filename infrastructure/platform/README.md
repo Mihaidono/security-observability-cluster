@@ -35,6 +35,13 @@ For each application entry, platform can create:
 - an optional same-namespace ingress allow policy
 - an optional `Ingress`
 
+The frontend can now populate `ward_applications` in two different ways:
+
+- standalone app templates
+- scenario bundles that replace a ward's current applications with a curated proof case
+
+Terraform does not know about those UI concepts directly. It only receives the resulting `ward_applications` list and provisions the corresponding Kubernetes resources.
+
 ## Prerequisites
 
 This stage expects:
@@ -76,6 +83,12 @@ Current outputs include:
 - `ward_ingress_hosts`
 - `ingress_controller_namespace`
 
+Those outputs are most useful for:
+
+- checking the service and ingress DNS names Terraform created
+- copying ready-made `kubectl` inspection commands
+- updating local kubeconfig for Hubble access and workload debugging
+
 ## Backend and State
 
 This stage uses the committed backend config in `backend.hcl`.
@@ -100,4 +113,18 @@ cd infrastructure/platform
 terraform init -reconfigure -backend-config=backend.hcl
 terraform plan -var-file=../terraform.tfvars
 terraform apply -var-file=../terraform.tfvars
+```
+
+## Current Hubble Access Model
+
+Hubble is currently intended to be used internally through the cluster API path, not through a public ingress. The normal operator flow is:
+
+```bash
+kubectl -n kube-system port-forward svc/hubble-ui 12000:80
+```
+
+and then:
+
+```text
+http://127.0.0.1:12000
 ```

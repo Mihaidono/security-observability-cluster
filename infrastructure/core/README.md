@@ -56,8 +56,9 @@ use_lockfile = true
 ## Operational Notes
 
 - The backend always runs `terraform init -reconfigure -backend-config=backend.hcl` before executing this stage.
-- Applys are executed from saved plan files, not fresh `terraform apply -auto-approve`.
+- Applies are executed from saved plan files, not fresh `terraform apply -auto-approve`.
 - This stage should finish before planning `platform`.
+- The operator UI also blocks `platform` and `policies` while core is not effectively applied, and it visually blocks `core` destroy while downstream stages still exist.
 
 ## Direct Terraform Usage
 
