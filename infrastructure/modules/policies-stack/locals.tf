@@ -6,6 +6,8 @@ locals {
     "/bin/wget",
     "/usr/bin/nc",
     "/bin/nc",
+    "/usr/bin/busybox",
+    "/bin/busybox",
   ]
 
   suspicious_shell_binaries = [
@@ -13,5 +15,9 @@ locals {
     "/bin/bash",
     "/usr/bin/sh",
     "/bin/sh",
+    "/usr/bin/ash",
+    "/bin/ash",
+    "/usr/bin/busybox",
+    "/bin/busybox",
   ]
 }
