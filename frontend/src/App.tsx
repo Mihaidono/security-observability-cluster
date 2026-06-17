@@ -838,7 +838,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
       return [
         "kubectl -n kube-system port-forward svc/hubble-ui 12000:80",
         `kubectl -n ${context.namespace} exec deploy/${toolbox?.name ?? "runtime-blocked-egress"} -- sh -c 'wget -T 5 -qO- http://example.com || true'`,
-        `kubectl -n kube-system logs -l app.kubernetes.io/name=tetragon -c tetragon --since=2m | grep -E '${context.namespace}|${toolbox?.name ?? "runtime-blocked-egress"}|wget|sh|busybox'`,
+        `kubectl -n kube-system logs -l app.kubernetes.io/name=tetragon -c export-stdout --since=2m | grep -E '${context.namespace}|${toolbox?.name ?? "runtime-blocked-egress"}|wget|sh|busybox'`,
         `Open http://127.0.0.1:12000/?namespace=${context.namespace}`,
       ];
     },
