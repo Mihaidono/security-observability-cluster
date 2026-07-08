@@ -37,7 +37,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Isolens Control Plane",
-    version="0.2.0",
+    version="0.1.0",
     lifespan=lifespan,
 )
 app.add_middleware(
