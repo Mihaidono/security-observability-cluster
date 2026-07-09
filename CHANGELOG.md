@@ -1,3 +1,10 @@
+## [0.3.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.2.0...v0.3.0) (2026-07-09)
+
+### Features
+
+* **ci:** separated container scan from image building into its own step ([f35f38b](https://github.com/Mihaidono/security-observability-cluster/commit/f35f38b3624f3f36d22dc5615c65d8abb35c64cd))
+* **infra:** united platform and policies, added postgres as chosen db, corrected trivy ([1a47942](https://github.com/Mihaidono/security-observability-cluster/commit/1a47942100a3f1f99dff5442499fd816139dc0eb))
+
 ## [0.2.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.1.0...v0.2.0) (2026-07-09)
 
 ### Features
