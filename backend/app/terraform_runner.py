@@ -14,7 +14,15 @@ from fastapi import HTTPException
 
 from .config import Settings
 from .events import RunEventBroker
-from .models import PlanSummary, RunKind, RunStage, RunStatus, StateLockInfo, TerraformRun, UnlockStateResponse
+from .models import (
+    PlanSummary,
+    RunKind,
+    RunStage,
+    RunStatus,
+    StateLockInfo,
+    TerraformRun,
+    UnlockStateResponse,
+)
 from .store import SqliteStore, normalize_log_lines, strip_ansi
 
 
@@ -119,14 +127,24 @@ class TerraformRunner:
         if source_run is None:
             raise HTTPException(status_code=404, detail="Run not found.")
         if source_run.kind != RunKind.plan:
-            raise HTTPException(status_code=409, detail="Only a plan run can be used as the source for apply.")
-        if source_run.status not in {RunStatus.queued, RunStatus.running, RunStatus.planned}:
+            raise HTTPException(
+                status_code=409,
+                detail="Only a plan run can be used as the source for apply.",
+            )
+        if source_run.status not in {
+            RunStatus.queued,
+            RunStatus.running,
+            RunStatus.planned,
+        }:
             raise HTTPException(
                 status_code=409,
                 detail="Apply can only be queued from a plan run that is queued, running, or planned.",
             )
         if not source_run.plan_path:
-            raise HTTPException(status_code=409, detail="The selected run does not have a saved plan file.")
+            raise HTTPException(
+                status_code=409,
+                detail="The selected run does not have a saved plan file.",
+            )
         if self._has_apply_attempt_for_plan(source_run.id):
             raise HTTPException(
                 status_code=409,
@@ -160,7 +178,10 @@ class TerraformRunner:
 
         for blocking_stage in self._destroy_blockers_for_stage(stage):
             if self._stage_is_applied(blocking_stage):
-                raise HTTPException(status_code=409, detail=self._destroy_blocker_message(stage, blocking_stage))
+                raise HTTPException(
+                    status_code=409,
+                    detail=self._destroy_blocker_message(stage, blocking_stage),
+                )
 
         destroy_run_id = uuid.uuid4().hex[:12]
         command = [
@@ -240,7 +261,13 @@ class TerraformRunner:
             raise HTTPException(status_code=404, detail="Run not found.")
         if run.status == RunStatus.canceling:
             return run
-        if run.status in {RunStatus.applied, RunStatus.destroyed, RunStatus.failed, RunStatus.canceled, RunStatus.planned}:
+        if run.status in {
+            RunStatus.applied,
+            RunStatus.destroyed,
+            RunStatus.failed,
+            RunStatus.canceled,
+            RunStatus.planned,
+        }:
             raise HTTPException(status_code=409, detail="This run is already finished.")
 
         if run_id in self._queue_order:
@@ -308,7 +335,11 @@ class TerraformRunner:
                 await self._persist_run(run)
                 continue
 
-            if run.status in {RunStatus.running, RunStatus.applying, RunStatus.destroying}:
+            if run.status in {
+                RunStatus.running,
+                RunStatus.applying,
+                RunStatus.destroying,
+            }:
                 run.status = RunStatus.failed
                 run.completed_at = now
                 run.updated_at = now
@@ -414,9 +445,15 @@ class TerraformRunner:
                     run_id=run.id,
                 )
             except RunCanceledError:
-                await self._append_internal_log(run.id, "Plan completed successfully, but summary generation was canceled.")
+                await self._append_internal_log(
+                    run.id,
+                    "Plan completed successfully, but summary generation was canceled.",
+                )
             except Exception as exc:  # noqa: BLE001
-                await self._append_internal_log(run.id, f"Plan completed successfully, but summary generation failed: {exc}")
+                await self._append_internal_log(
+                    run.id,
+                    f"Plan completed successfully, but summary generation failed: {exc}",
+                )
             else:
                 self.store.save_json_artifact(run.id, "plan.json", show_payload)
                 run.plan_summary = summarize_plan(show_payload)
@@ -488,9 +525,15 @@ class TerraformRunner:
                     run_id=run.id,
                 )
             except RunCanceledError:
-                await self._append_internal_log(run.id, "Apply completed successfully, but output collection was canceled.")
+                await self._append_internal_log(
+                    run.id,
+                    "Apply completed successfully, but output collection was canceled.",
+                )
             except Exception as exc:  # noqa: BLE001
-                await self._append_internal_log(run.id, f"Apply completed successfully, but output collection failed: {exc}")
+                await self._append_internal_log(
+                    run.id,
+                    f"Apply completed successfully, but output collection failed: {exc}",
+                )
             else:
                 run.outputs = outputs_payload
                 run.updated_at = utc_now()
@@ -710,7 +753,9 @@ class TerraformRunner:
             if self._stopping or (run_id is not None and run_id in self._cancel_requested):
                 raise RunCanceledError("Run canceled by user.")
             if proc.returncode != 0:
-                cleaned_message = strip_ansi(stderr.decode("utf-8", errors="replace").strip() or "Terraform command failed.")
+                cleaned_message = strip_ansi(
+                    stderr.decode("utf-8", errors="replace").strip() or "Terraform command failed."
+                )
                 raise RuntimeError(explain_terraform_output(cleaned_message) or cleaned_message)
             return json.loads(stdout.decode("utf-8"))
         except asyncio.CancelledError:
@@ -864,7 +909,7 @@ class TerraformRunner:
             "Kubernetes cluster unreachable: the server has asked for the client to provide credentials",
             "Unauthorized",
             "namespaces is forbidden",
-            "cannot create resource \"namespaces\" in API group \"\" at the cluster scope",
+            'cannot create resource "namespaces" in API group "" at the cluster scope',
         ]
         access_entry_markers = [
             "aws_eks_access_entry.cluster_admins",
@@ -960,7 +1005,10 @@ def explain_terraform_output(output: str) -> str | None:
             bucket, key = lock_path.split("/", 1)
             direct_delete_hint = f"aws s3 rm s3://{bucket}/{key}.tflock"
 
-        details = [f"- ID: {lock_id}" if lock_id else None, f"- Path: {lock_path}" if lock_path else None]
+        details = [
+            f"- ID: {lock_id}" if lock_id else None,
+            f"- Path: {lock_path}" if lock_path else None,
+        ]
         if lock_who:
             details.append(f"- Who: {lock_who}")
         if lock_created:
@@ -1001,7 +1049,7 @@ def explain_terraform_output(output: str) -> str | None:
         "Kubernetes cluster unreachable: the server has asked for the client to provide credentials",
         "Unauthorized",
         "namespaces is forbidden",
-        "cannot create resource \"namespaces\" in API group \"\" at the cluster scope",
+        'cannot create resource "namespaces" in API group "" at the cluster scope',
     ]
     access_entry_markers = [
         "aws_eks_access_entry.cluster_admins",
@@ -1069,8 +1117,7 @@ def build_command_error_message(command: list[str], exit_code: int, recent_lines
 
     if recent_output:
         return (
-            f"{' '.join(command)} failed with exit code {exit_code}.\n\n"
-            f"Recent Terraform output:\n{recent_output}"
+            f"{' '.join(command)} failed with exit code {exit_code}.\n\n" f"Recent Terraform output:\n{recent_output}"
         )
 
     return f"{' '.join(command)} failed with exit code {exit_code}"

@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
-from .models import PlanSummary, RunKind, RunStage, RunStatus, TerraformConfig, TerraformRun
+from .models import (
+    PlanSummary,
+    RunKind,
+    RunStage,
+    RunStatus,
+    TerraformConfig,
+    TerraformRun,
+)
 
 
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
@@ -78,10 +85,7 @@ class SqliteStore:
                 );
                 """
             )
-            columns = {
-                str(row["name"])
-                for row in connection.execute("PRAGMA table_info(runs)").fetchall()
-            }
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(runs)").fetchall()}
             if "stage" not in columns:
                 connection.execute("ALTER TABLE runs ADD COLUMN stage TEXT NOT NULL DEFAULT 'core'")
 
@@ -150,7 +154,7 @@ class SqliteStore:
                     run.plan_path,
                     run.log_path,
                     run.error,
-                    json.dumps(run.plan_summary.model_dump(mode="json")) if run.plan_summary else None,
+                    (json.dumps(run.plan_summary.model_dump(mode="json")) if run.plan_summary else None),
                     json.dumps(run.outputs) if run.outputs else None,
                     run.source_run_id,
                     run.queue_position,
@@ -264,5 +268,5 @@ class SqliteStore:
             plan_summary=plan_summary,
             outputs=outputs,
             source_run_id=str(row["source_run_id"]) if row["source_run_id"] else None,
-            queue_position=int(row["queue_position"]) if row["queue_position"] is not None else None,
+            queue_position=(int(row["queue_position"]) if row["queue_position"] is not None else None),
         )

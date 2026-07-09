@@ -1,3 +1,5 @@
+# tflint-ignore-file: terraform_unused_declarations
+
 variable "cluster_log_retention_in_days" {
   description = "Accepted for compatibility with the shared tfvars payload."
   type        = number

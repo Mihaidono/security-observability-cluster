@@ -5,7 +5,10 @@ Creates the ward namespaces and their baseline quota and policy controls.
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
-No requirements.
+| Name | Version |
+| ---- | ------- |
+| terraform | >= 1.7.0 |
+| kubernetes | 2.37.1 |
 
 ## Modules
 
@@ -15,12 +18,12 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
-| [kubernetes_config_map.ward_metadata](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map) | resource |
-| [kubernetes_limit_range.ward_defaults](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/limit_range) | resource |
-| [kubernetes_namespace.wards](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/namespace) | resource |
-| [kubernetes_network_policy.allow_dns](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/network_policy) | resource |
-| [kubernetes_network_policy.default_deny](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/network_policy) | resource |
-| [kubernetes_resource_quota.ward_quota](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/resource_quota) | resource |
+| [kubernetes_config_map.ward_metadata](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/config_map) | resource |
+| [kubernetes_limit_range.ward_defaults](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/limit_range) | resource |
+| [kubernetes_namespace.wards](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace) | resource |
+| [kubernetes_network_policy.allow_dns](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/network_policy) | resource |
+| [kubernetes_network_policy.default_deny](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/network_policy) | resource |
+| [kubernetes_resource_quota.ward_quota](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/resource_quota) | resource |
 
 ## Inputs
 

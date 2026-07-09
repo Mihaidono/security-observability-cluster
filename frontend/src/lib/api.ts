@@ -1,10 +1,24 @@
-import type { HealthResponse, RunPruneResponse, RunStage, TerraformConfig, TerraformRun, UnlockStateResponse } from "./types";
+import type {
+  HealthResponse,
+  RunPruneResponse,
+  RunStage,
+  TerraformConfig,
+  TerraformRun,
+  UnlockStateResponse,
+} from "./types";
 
 const tokenStorageKey = "isolens-api-token";
-const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/$/, "");
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(
+  /\/$/,
+  "",
+);
 
 export function getApiToken(): string {
-  return window.localStorage.getItem(tokenStorageKey) ?? import.meta.env.VITE_API_TOKEN ?? "dev-token";
+  return (
+    window.localStorage.getItem(tokenStorageKey) ??
+    import.meta.env.VITE_API_TOKEN ??
+    "dev-token"
+  );
 }
 
 export function setApiToken(token: string): void {
@@ -59,7 +73,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const payload = await response.text();
-    throw new Error(parseErrorPayload(payload) || `Request failed with status ${response.status}`);
+    throw new Error(
+      parseErrorPayload(payload) ||
+        `Request failed with status ${response.status}`,
+    );
   }
 
   return response.json() as Promise<T>;
@@ -79,16 +96,30 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(config),
     }),
-  resetConfig: () => request<TerraformConfig>("/api/config/reset", { method: "POST" }),
+  resetConfig: () =>
+    request<TerraformConfig>("/api/config/reset", { method: "POST" }),
   listRuns: () => request<{ items: TerraformRun[] }>("/api/runs"),
   getRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}`),
-  getRunLogs: (runId: string) => request<{ run_id: string; logs: string[] }>(`/api/runs/${runId}/logs`),
-  startPlan: (stage: RunStage) => request<TerraformRun>(`/api/runs/plan/${stage}`, { method: "POST" }),
-  startApply: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/apply`, { method: "POST" }),
-  startDestroy: (stage: RunStage) => request<TerraformRun>(`/api/runs/destroy/${stage}`, { method: "POST" }),
-  unlockState: (stage: RunStage) => request<UnlockStateResponse>(`/api/state/unlock/${stage}`, { method: "POST" }),
-  cancelRun: (runId: string) => request<TerraformRun>(`/api/runs/${runId}/cancel`, { method: "POST" }),
-  pruneRuns: (keep: number) => request<RunPruneResponse>(`/api/runs/prune?keep=${encodeURIComponent(String(keep))}`, { method: "POST" }),
-  getOutputs: () => request<{ outputs: Record<string, unknown> }>("/api/outputs"),
+  getRunLogs: (runId: string) =>
+    request<{ run_id: string; logs: string[] }>(`/api/runs/${runId}/logs`),
+  startPlan: (stage: RunStage) =>
+    request<TerraformRun>(`/api/runs/plan/${stage}`, { method: "POST" }),
+  startApply: (runId: string) =>
+    request<TerraformRun>(`/api/runs/${runId}/apply`, { method: "POST" }),
+  startDestroy: (stage: RunStage) =>
+    request<TerraformRun>(`/api/runs/destroy/${stage}`, { method: "POST" }),
+  unlockState: (stage: RunStage) =>
+    request<UnlockStateResponse>(`/api/state/unlock/${stage}`, {
+      method: "POST",
+    }),
+  cancelRun: (runId: string) =>
+    request<TerraformRun>(`/api/runs/${runId}/cancel`, { method: "POST" }),
+  pruneRuns: (keep: number) =>
+    request<RunPruneResponse>(
+      `/api/runs/prune?keep=${encodeURIComponent(String(keep))}`,
+      { method: "POST" },
+    ),
+  getOutputs: () =>
+    request<{ outputs: Record<string, unknown> }>("/api/outputs"),
   getHealth: () => request<HealthResponse>("/api/health"),
 };

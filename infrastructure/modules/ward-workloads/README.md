@@ -5,7 +5,10 @@ Renders the workload objects for applications deployed into ward namespaces.
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
-No requirements.
+| Name | Version |
+| ---- | ------- |
+| terraform | >= 1.7.0 |
+| kubernetes | 2.37.1 |
 
 ## Modules
 
@@ -15,13 +18,13 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
-| [kubernetes_config_map.application_config](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/config_map) | resource |
-| [kubernetes_deployment.ward_application](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/deployment) | resource |
-| [kubernetes_ingress_v1.ward_application](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/ingress_v1) | resource |
-| [kubernetes_network_policy.allow_same_namespace_ingress](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/network_policy) | resource |
-| [kubernetes_network_policy.application_egress_allowlist](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/network_policy) | resource |
-| [kubernetes_network_policy.application_ingress_allowlist](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/network_policy) | resource |
-| [kubernetes_service.ward_application](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/service) | resource |
+| [kubernetes_config_map.application_config](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/config_map) | resource |
+| [kubernetes_deployment.ward_application](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/deployment) | resource |
+| [kubernetes_ingress_v1.ward_application](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/ingress_v1) | resource |
+| [kubernetes_network_policy.allow_same_namespace_ingress](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/network_policy) | resource |
+| [kubernetes_network_policy.application_egress_allowlist](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/network_policy) | resource |
+| [kubernetes_network_policy.application_ingress_allowlist](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/network_policy) | resource |
+| [kubernetes_service.ward_application](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/service) | resource |
 
 ## Inputs
 

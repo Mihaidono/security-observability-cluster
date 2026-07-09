@@ -12,9 +12,21 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     background-image:
-      radial-gradient(circle at top left, rgba(60, 79, 118, 0.16), transparent 28%),
-      radial-gradient(circle at 84% 10%, rgba(209, 190, 176, 0.24), transparent 24%),
-      radial-gradient(circle at bottom right, rgba(171, 159, 157, 0.22), transparent 24%),
+      radial-gradient(
+        circle at top left,
+        rgba(60, 79, 118, 0.16),
+        transparent 28%
+      ),
+      radial-gradient(
+        circle at 84% 10%,
+        rgba(209, 190, 176, 0.24),
+        transparent 24%
+      ),
+      radial-gradient(
+        circle at bottom right,
+        rgba(171, 159, 157, 0.22),
+        transparent 24%
+      ),
       linear-gradient(180deg, rgba(221, 219, 241, 0.98), rgba(241, 237, 248, 1));
     min-height: 100vh;
   }
@@ -60,14 +72,22 @@
   }
 
   .themed-scrollbar::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(60, 79, 118, 0.95), rgba(56, 63, 81, 0.72));
+    background: linear-gradient(
+      180deg,
+      rgba(60, 79, 118, 0.95),
+      rgba(56, 63, 81, 0.72)
+    );
     border: 2px solid transparent;
     background-clip: padding-box;
     border-radius: 9999px;
   }
 
   .themed-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, rgba(60, 79, 118, 1), rgba(56, 63, 81, 0.86));
+    background: linear-gradient(
+      180deg,
+      rgba(60, 79, 118, 1),
+      rgba(56, 63, 81, 0.86)
+    );
   }
 
   .scrollbar-gutter-stable {

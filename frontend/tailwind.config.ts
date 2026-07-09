@@ -19,7 +19,12 @@ export default {
       },
       fontFamily: {
         sans: ["'Space Grotesk'", "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ["'IBM Plex Mono'", "ui-monospace", "SFMono-Regular", "monospace"],
+        mono: [
+          "'IBM Plex Mono'",
+          "ui-monospace",
+          "SFMono-Regular",
+          "monospace",
+        ],
       },
     },
   },

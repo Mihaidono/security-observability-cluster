@@ -3,13 +3,31 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import require_api_token, require_websocket_token
 from .config import Settings, get_settings
 from .events import RunEventBroker
-from .models import HealthResponse, OutputsResponse, RunListResponse, RunLogsResponse, RunPruneResponse, RunStage, TerraformConfig, TerraformRun, UnlockStateResponse
+from .models import (
+    HealthResponse,
+    OutputsResponse,
+    RunListResponse,
+    RunLogsResponse,
+    RunPruneResponse,
+    RunStage,
+    TerraformConfig,
+    TerraformRun,
+    UnlockStateResponse,
+)
 from .store import SqliteStore
 from .terraform_runner import TerraformRunner
 
@@ -49,7 +67,11 @@ app.add_middleware(
 )
 
 
-@app.get("/api/health", response_model=HealthResponse, dependencies=[Depends(auth_dependency)])
+@app.get(
+    "/api/health",
+    response_model=HealthResponse,
+    dependencies=[Depends(auth_dependency)],
+)
 async def health() -> HealthResponse:
     worker_running = runner.worker_running
     return HealthResponse(
@@ -63,18 +85,30 @@ async def health() -> HealthResponse:
     )
 
 
-@app.get("/api/config", response_model=TerraformConfig, dependencies=[Depends(auth_dependency)])
+@app.get(
+    "/api/config",
+    response_model=TerraformConfig,
+    dependencies=[Depends(auth_dependency)],
+)
 async def get_config() -> TerraformConfig:
     return store.load_config()
 
 
-@app.put("/api/config", response_model=TerraformConfig, dependencies=[Depends(auth_dependency)])
+@app.put(
+    "/api/config",
+    response_model=TerraformConfig,
+    dependencies=[Depends(auth_dependency)],
+)
 async def save_config(config: TerraformConfig) -> TerraformConfig:
     store.save_config(config)
     return config
 
 
-@app.post("/api/config/reset", response_model=TerraformConfig, dependencies=[Depends(auth_dependency)])
+@app.post(
+    "/api/config/reset",
+    response_model=TerraformConfig,
+    dependencies=[Depends(auth_dependency)],
+)
 async def reset_config() -> TerraformConfig:
     return store.reset_config()
 
@@ -84,7 +118,11 @@ async def list_runs() -> RunListResponse:
     return RunListResponse(items=store.list_runs())
 
 
-@app.get("/api/runs/{run_id}", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
+@app.get(
+    "/api/runs/{run_id}",
+    response_model=TerraformRun,
+    dependencies=[Depends(auth_dependency)],
+)
 async def get_run(run_id: str) -> TerraformRun:
     run = store.load_run(run_id)
     if run is None:
@@ -92,7 +130,11 @@ async def get_run(run_id: str) -> TerraformRun:
     return run
 
 
-@app.get("/api/runs/{run_id}/logs", response_model=RunLogsResponse, dependencies=[Depends(auth_dependency)])
+@app.get(
+    "/api/runs/{run_id}/logs",
+    response_model=RunLogsResponse,
+    dependencies=[Depends(auth_dependency)],
+)
 async def get_run_logs(run_id: str) -> RunLogsResponse:
     run = store.load_run(run_id)
     if run is None:
@@ -100,10 +142,17 @@ async def get_run_logs(run_id: str) -> RunLogsResponse:
     return RunLogsResponse(run_id=run_id, logs=store.read_logs(run_id))
 
 
-@app.post("/api/runs/prune", response_model=RunPruneResponse, dependencies=[Depends(auth_dependency)])
+@app.post(
+    "/api/runs/prune",
+    response_model=RunPruneResponse,
+    dependencies=[Depends(auth_dependency)],
+)
 async def prune_runs(keep: int = Query(default=10, ge=0, le=200)) -> RunPruneResponse:
     if runner.active_run_id is not None or runner.queue_depth > 0:
-        raise HTTPException(status_code=409, detail="Cannot prune run history while another run is active or queued.")
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot prune run history while another run is active or queued.",
+        )
 
     items, deleted_count = store.prune_runs(keep)
     return RunPruneResponse(
@@ -113,32 +162,56 @@ async def prune_runs(keep: int = Query(default=10, ge=0, le=200)) -> RunPruneRes
     )
 
 
-@app.post("/api/runs/plan/{stage}", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
+@app.post(
+    "/api/runs/plan/{stage}",
+    response_model=TerraformRun,
+    dependencies=[Depends(auth_dependency)],
+)
 async def start_plan(stage: RunStage) -> TerraformRun:
     return await runner.start_plan(stage)
 
 
-@app.post("/api/runs/{run_id}/apply", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
+@app.post(
+    "/api/runs/{run_id}/apply",
+    response_model=TerraformRun,
+    dependencies=[Depends(auth_dependency)],
+)
 async def start_apply(run_id: str) -> TerraformRun:
     return await runner.start_apply(run_id)
 
 
-@app.post("/api/runs/destroy/{stage}", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
+@app.post(
+    "/api/runs/destroy/{stage}",
+    response_model=TerraformRun,
+    dependencies=[Depends(auth_dependency)],
+)
 async def start_destroy(stage: RunStage) -> TerraformRun:
     return await runner.start_destroy(stage)
 
 
-@app.post("/api/state/unlock/{stage}", response_model=UnlockStateResponse, dependencies=[Depends(auth_dependency)])
+@app.post(
+    "/api/state/unlock/{stage}",
+    response_model=UnlockStateResponse,
+    dependencies=[Depends(auth_dependency)],
+)
 async def unlock_state(stage: RunStage) -> UnlockStateResponse:
     return await runner.unlock_state(stage)
 
 
-@app.post("/api/runs/{run_id}/cancel", response_model=TerraformRun, dependencies=[Depends(auth_dependency)])
+@app.post(
+    "/api/runs/{run_id}/cancel",
+    response_model=TerraformRun,
+    dependencies=[Depends(auth_dependency)],
+)
 async def cancel_run(run_id: str) -> TerraformRun:
     return await runner.cancel_run(run_id)
 
 
-@app.get("/api/outputs", response_model=OutputsResponse, dependencies=[Depends(auth_dependency)])
+@app.get(
+    "/api/outputs",
+    response_model=OutputsResponse,
+    dependencies=[Depends(auth_dependency)],
+)
 async def get_outputs() -> OutputsResponse:
     outputs = store.latest_outputs()
     if outputs is None:
@@ -161,7 +234,13 @@ async def run_events(run_id: str, websocket: WebSocket) -> None:
 
     queue = broker.subscribe(run_id)
     await websocket.accept()
-    await websocket.send_json({"type": "run.snapshot", "run": run.model_dump(mode="json"), "logs": store.read_logs(run_id)})
+    await websocket.send_json(
+        {
+            "type": "run.snapshot",
+            "run": run.model_dump(mode="json"),
+            "logs": store.read_logs(run_id),
+        }
+    )
 
     try:
         while True:

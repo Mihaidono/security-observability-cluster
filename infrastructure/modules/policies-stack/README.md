@@ -5,7 +5,10 @@ Applies the Kyverno and Tetragon policy resources used by the policy layer.
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
-No requirements.
+| Name | Version |
+| ---- | ------- |
+| terraform | >= 1.7.0 |
+| kubernetes | 2.37.1 |
 
 ## Modules
 
@@ -15,9 +18,9 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
-| [kubernetes_manifest.kyverno_disallow_latest_tag](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
-| [kubernetes_manifest.kyverno_require_subject_label](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
-| [kubernetes_manifest.tetragon_suspicious_exec](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/manifest) | resource |
+| [kubernetes_manifest.kyverno_disallow_latest_tag](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
+| [kubernetes_manifest.kyverno_require_subject_label](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
+| [kubernetes_manifest.tetragon_suspicious_exec](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
 
 ## Inputs
 

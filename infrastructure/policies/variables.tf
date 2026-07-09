@@ -22,12 +22,6 @@ variable "cluster_name" {
   default     = "forensic-lab"
 }
 
-variable "kubernetes_version" {
-  description = "Accepted for compatibility with the shared tfvars payload; the policies stage does not set cluster version directly."
-  type        = string
-  default     = "1.35"
-}
-
 variable "analysis_subjects" {
   description = "Ward namespace definitions consumed by namespaced Tetragon tracing policies and policy-stage outputs. The namespaces themselves must already exist from the platform stage."
   type = map(object({
