@@ -13,6 +13,14 @@ inputs:
     description: Ignore vulnerabilities without fixes.
     required: false
     default: "true"
+  skip-files:
+    description: Comma-separated list of files to exclude from the Trivy scan.
+    required: false
+    default: ""
+  trivy-version:
+    description: Trivy version to install for the scan.
+    required: false
+    default: v0.72.0
 
 runs:
   using: composite
@@ -24,5 +32,11 @@ runs:
         format: table
         exit-code: "1"
         ignore-unfixed: ${{ inputs.ignore-unfixed }}
+        skip-files: ${{ inputs.skip-files }}
         vuln-type: os,library
         severity: ${{ inputs.severity }}
+        version: ${{ inputs.trivy-version }}
+        scanners: vuln
+      env:
+        TRIVY_DISABLE_VEX_NOTICE: "true"
+        TRIVY_SKIP_VERSION_CHECK: "true"

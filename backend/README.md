@@ -17,8 +17,8 @@ At startup the backend resolves paths relative to the repo root:
 - Terraform roots:
   - `infrastructure/core`
   - `infrastructure/platform`
-  - `infrastructure/policies`
-- SQLite database: `backend/state/isolens.db`
+  - `infrastructure/applications`
+- PostgreSQL database: configured by `ISOLENS_DATABASE_URL`
 - per-run artifacts and logs: `backend/state/runs/<run_id>/`
 
 If the managed config file does not exist yet, the backend seeds it from the default JSON template.
@@ -68,7 +68,7 @@ Supported stages:
 
 - `core`
 - `platform`
-- `policies`
+- `applications`
 
 Run statuses:
 
@@ -87,10 +87,10 @@ Important guardrails implemented in `app/terraform_runner.py`:
 
 - at least one non-empty cluster admin ARN is required before plan/apply/destroy
 - `platform` plan/apply is blocked until there is a successful `core` apply
-- `policies` plan/apply is blocked until there is a successful `platform` apply
+- `applications` plan/apply is blocked until there is a successful `platform` apply
 - `apply` can be created from the latest plan while that source plan is `queued`, `running`, or `planned`, but it only executes if the plan finishes successfully as `planned`
 - each saved plan is single-use once an apply attempt exists
-- `platform` destroy is blocked while the latest policy-stage apply is still active
+- `platform` destroy is blocked while the latest applications-stage apply is still active
 - `core` destroy is blocked while the latest platform-stage apply is still active
 - stale queued/running runs are reconciled on backend startup
 
@@ -123,7 +123,7 @@ terraform output -json
 
 and stores the output payload on that run.
 
-`GET /api/outputs` combines the latest effective applied outputs from `core`, `platform`, and `policies`, while ignoring stages that have already been destroyed.
+`GET /api/outputs` combines the latest effective applied outputs from `core`, `platform`, and `applications`, while ignoring stages that have already been destroyed.
 
 ## HTTP API
 
@@ -179,5 +179,5 @@ Or use the repo-level Docker Compose setup from the root README.
 
 - The backend is intentionally single-worker and only executes one Terraform run at a time.
 - Successful apply output collection is best-effort. If `terraform output -json` fails after the apply itself succeeded, the run still remains `applied`.
-- `platform` and `policies` depend on a live cluster connection, so out-of-band cluster access issues can still interrupt destroy flows.
+- `platform` and `applications` depend on a live cluster connection, so out-of-band cluster access issues can still interrupt destroy flows.
 - The backend stores raw configuration and run metadata, but it does not store scenario evidence such as screenshots or operator notes.

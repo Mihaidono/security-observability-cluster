@@ -98,7 +98,7 @@ variable "node_group_scaling" {
 }
 
 variable "cluster_admin_principal_arns" {
-  description = "IAM principal ARNs granted EKS cluster-admin access through access entries so the later platform and policies stages can manage in-cluster resources safely."
+  description = "IAM principal ARNs granted EKS cluster-admin access through access entries so the later platform and applications stages can manage in-cluster resources safely."
   type        = list(string)
   default     = []
 

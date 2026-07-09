@@ -55,12 +55,6 @@ repos:
           - infrastructure/platform
         files: ^infrastructure/platform/.*\.tf$
       - id: terraform-docs-go
-        name: terraform-docs-policies
-        args:
-          - --config=tooling/terraform-docs.yml
-          - infrastructure/policies
-        files: ^infrastructure/policies/.*\.tf$
-      - id: terraform-docs-go
         name: terraform-docs-modules
         args:
           - --config=tooling/terraform-docs-modules.yml

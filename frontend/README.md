@@ -99,9 +99,9 @@ The UI exposes:
 - `Plan platform`
 - `Apply platform`
 - `Destroy platform`
-- `Plan policies`
-- `Apply policies`
-- `Destroy policies`
+- `Plan applications`
+- `Apply applications`
+- `Destroy applications`
 - `Cancel run`
 
 Important behavior:
@@ -109,7 +109,7 @@ Important behavior:
 - apply buttons operate on the latest planned run for that stage
 - apply can be queued behind the latest stage plan while that plan is still running, and it will fail closed if the source plan does not finish successfully
 - platform-stage actions stay disabled until a successful core apply exists
-- policy-stage actions stay disabled until a successful platform apply exists
+- applications-stage actions stay disabled until a successful platform apply exists
 - core destroy is visually blocked while downstream stages are still effectively applied
 - cancel is only enabled for queued or active runs
 - destroy uses a two-click arming pattern in the UI, but the backend still enforces the real safety checks

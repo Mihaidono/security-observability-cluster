@@ -28,12 +28,12 @@ from .models import (
     TerraformRun,
     UnlockStateResponse,
 )
-from .store import SqliteStore
+from .store import PostgresStore
 from .terraform_runner import TerraformRunner
 
 
 settings = get_settings()
-store = SqliteStore(settings)
+store = PostgresStore(settings)
 broker = RunEventBroker()
 runner = TerraformRunner(settings, store, broker)
 
@@ -81,7 +81,7 @@ async def health() -> HealthResponse:
         managed_tfvars_present=settings.managed_tfvars_path.exists(),
         queue_depth=runner.queue_depth,
         auth_enabled=True,
-        stages=[RunStage.core, RunStage.platform, RunStage.policies],
+        stages=[RunStage.core, RunStage.platform, RunStage.applications],
     )
 
 

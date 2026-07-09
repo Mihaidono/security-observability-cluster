@@ -5,9 +5,8 @@ Isolens is a Terraform-driven EKS lab with a small control plane:
 - `backend/` runs a FastAPI service that stores editable config, queues Terraform runs, and streams run events.
 - `frontend/` is a Vite + React operator UI for editing ward/application config and driving staged Terraform actions.
 - `infrastructure/core/` creates the AWS foundation, ECR repositories, and EKS cluster.
-- `infrastructure/platform/` creates the in-cluster add-ons and namespace bootstrap after core is live.
+- `infrastructure/platform/` creates the in-cluster add-ons, policy layer, control-plane namespace, and PostgreSQL service after core is live.
 - `infrastructure/applications/` creates workloads after the shared platform layer is live.
-- `infrastructure/policies/` applies the Kyverno and Tetragon manifest layer after platform is live.
 
 This document reflects the code that exists in the repository today, not the long-term intent.
 
@@ -40,7 +39,6 @@ Two important reality checks:
 - [infrastructure/core/README.md](infrastructure/core/README.md): core-stage resources, inputs, outputs, caveats
 - [infrastructure/platform/README.md](infrastructure/platform/README.md): platform-stage resources, inputs, outputs, and provider behavior
 - `infrastructure/applications/`: workload-only Terraform root with its own state boundary
-- [infrastructure/policies/README.md](infrastructure/policies/README.md): policy-stage resources, prerequisites, inputs, outputs
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md): commit convention, local hooks, PR quality gates, and release automation
 - [TESTING_AND_USAGE.md](TESTING_AND_USAGE.md): local bring-up, smoke tests, and operator workflow
 
@@ -55,10 +53,10 @@ The Terraform is intentionally split:
    Owns AWS infrastructure, the EKS cluster, and cluster-admin access bootstrap.
 
 3. `platform`
-   Owns Helm add-ons, ward namespaces, workloads, ingress, and most operator-facing outputs.
+   Owns Helm add-ons, ward namespaces, the policy layer, the control-plane namespace, PostgreSQL, and most operator-facing outputs.
 
-4. `policies`
-   Owns the manifest layer that depends on the cluster, namespaces, and CRDs already existing.
+4. `applications`
+   Owns workload deployments, Services, Ingresses, and app-specific network policies.
 
 ## Operator Workflow
 
@@ -94,7 +92,7 @@ The committed backend configs currently point at:
 
 - `s3://isolens-lab/dev/core/terraform.tfstate`
 - `s3://isolens-lab/dev/platform/terraform.tfstate`
-- `s3://isolens-lab/dev/policies/terraform.tfstate`
+- `s3://isolens-lab/dev/applications/terraform.tfstate`
 
 ### 2. Configure backend credentials
 
@@ -134,12 +132,12 @@ The backend and UI enforce the intended order:
 3. apply the saved `core` plan
 4. plan `platform`
 5. apply the saved `platform` plan
-6. plan `policies`
-7. apply the saved `policies` plan
+6. plan `applications`
+7. apply the saved `applications` plan
 
 Destroy order goes the other direction:
 
-1. destroy `policies`
+1. destroy `applications`
 2. destroy `platform`
 3. destroy `core`
 
@@ -152,8 +150,8 @@ The current backend behavior is intentionally conservative:
 - apply always uses a saved plan and can be queued from the latest plan while that plan is `queued`, `running`, or `planned`
 - a saved plan is single-use once an apply attempt has been created from it
 - platform-stage planning is blocked until a successful core apply exists
-- policy-stage planning is blocked until a successful platform apply exists
-- platform destroy is blocked while the latest policy-stage apply is still active
+- applications-stage planning is blocked until a successful platform apply exists
+- platform destroy is blocked while the latest applications-stage apply is still active
 - core destroy is blocked while the latest platform-stage apply is still active
 - startup reconciliation marks stale queued/running runs as canceled or failed instead of leaving them stuck forever
 
@@ -177,7 +175,7 @@ The same managed file also carries the full ward and workload inventory. Scenari
 
 - the monitoring release is still `grafana-agent`, even though the repo language historically referred to it as an LGTM stack.
 - ingress resources only get a controller automatically for the `nginx` ingress class. Other classes are still treated as bring-your-own controller.
-- `platform` and `policies` still depend on a live reachable cluster, so breaking cluster access outside Terraform can still complicate cleanup.
+- `platform` and `applications` still depend on a live reachable cluster, so breaking cluster access outside Terraform can still complicate cleanup.
 - scenario proof capture is guided in the UI, but evidence is not stored or exported automatically. Screenshots and command output still need to be gathered manually.
 
 ## Next Reads

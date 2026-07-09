@@ -50,6 +50,89 @@ variable "enable_ingress_nginx" {
   default     = false
 }
 
+variable "control_plane_namespace" {
+  description = "Namespace reserved for the Isolens backend and frontend workloads."
+  type        = string
+  default     = "isolens-system"
+}
+
+variable "control_plane_namespace_labels" {
+  description = "Additional labels applied to the control-plane namespace."
+  type        = map(string)
+  default     = {}
+}
+
+variable "control_plane_namespace_annotations" {
+  description = "Additional annotations applied to the control-plane namespace."
+  type        = map(string)
+  default     = {}
+}
+
+variable "postgresql_name" {
+  description = "Base name used for PostgreSQL resources in the control-plane namespace."
+  type        = string
+  default     = "isolens-postgresql"
+}
+
+variable "postgresql_database_name" {
+  description = "Database name created for the control plane."
+  type        = string
+  default     = "isolens"
+}
+
+variable "postgresql_username" {
+  description = "Application username created for the control plane database."
+  type        = string
+  default     = "isolens"
+}
+
+variable "postgresql_password" {
+  description = "Application password stored in the PostgreSQL Secret."
+  type        = string
+  sensitive   = true
+  default     = "isolens-dev-password-change-me"
+}
+
+variable "postgresql_image" {
+  description = "Container image used for the control-plane PostgreSQL workload."
+  type        = string
+  default     = "postgres:16.9-alpine"
+}
+
+variable "postgresql_storage_size" {
+  description = "Persistent volume size for the control-plane PostgreSQL data."
+  type        = string
+  default     = "20Gi"
+}
+
+variable "postgresql_storage_class_name" {
+  description = "Optional storage class name for the PostgreSQL persistent volume claim."
+  type        = string
+  default     = null
+}
+
+variable "postgresql_service_port" {
+  description = "Service port exposed by PostgreSQL."
+  type        = number
+  default     = 5432
+}
+
+variable "postgresql_resources" {
+  description = "Resource requests and limits for the PostgreSQL container."
+  type = object({
+    requests_cpu    = string
+    requests_memory = string
+    limits_cpu      = string
+    limits_memory   = string
+  })
+  default = {
+    requests_cpu    = "250m"
+    requests_memory = "512Mi"
+    limits_cpu      = "1000m"
+    limits_memory   = "1Gi"
+  }
+}
+
 variable "analysis_subjects" {
   description = "Ward namespace definitions. Each entry creates a namespace, ward metadata ConfigMap, ResourceQuota, LimitRange, and baseline NetworkPolicies."
   type = map(object({

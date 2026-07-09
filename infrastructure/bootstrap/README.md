@@ -42,6 +42,5 @@ No modules.
 | applications_backend_config_snippet | Backend configuration values that match infrastructure/applications/backend.hcl. |
 | core_backend_config_snippet | Backend configuration values that match infrastructure/core/backend.hcl. |
 | platform_backend_config_snippet | Backend configuration values that match infrastructure/platform/backend.hcl. |
-| policies_backend_config_snippet | Backend configuration values that match infrastructure/policies/backend.hcl. |
 | state_bucket_name | S3 bucket storing Terraform state. |
 <!-- END_TF_DOCS -->

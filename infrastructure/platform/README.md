@@ -24,23 +24,13 @@ For each subject entry, platform creates:
 - a default-deny `NetworkPolicy`
 - a DNS egress `NetworkPolicy`
 
-### Workload resources from `ward_applications`
+### Control-plane resources
 
-For each application entry, platform can create:
+Platform also creates:
 
-- a `Deployment`
-- an optional generated ConfigMap
-- an optional `Service`
-- optional ingress and egress allowlist `NetworkPolicy` resources
-- an optional same-namespace ingress allow policy
-- an optional `Ingress`
-
-The frontend can now populate `ward_applications` in two different ways:
-
-- standalone app templates
-- scenario bundles that replace a ward's current applications with a curated proof case
-
-Terraform does not know about those UI concepts directly. It only receives the resulting `ward_applications` list and provisions the corresponding Kubernetes resources.
+- a dedicated namespace for the Isolens backend and frontend
+- an in-cluster PostgreSQL StatefulSet, Service, Secret, PVC, and namespace-local NetworkPolicy
+- the Kyverno and Tetragon manifest layer after the add-ons and subject namespaces are ready
 
 ## Prerequisites
 
@@ -54,7 +44,7 @@ This stage expects:
 
 - The current platform design uses the Cilium-supported AWS VPC CNI chaining mode on EKS rather than Cilium ENI IPAM mode.
 - This keeps the EKS `aws-node` daemonset responsible for pod IP allocation and baseline node networking while still letting Cilium provide policy enforcement, Hubble, and the foundation for Tetragon.
-- Workload creation still waits for the add-on layer, so operator-managed apps are created only after the platform stack succeeds.
+- Policy creation waits for the add-on layer, ward namespaces, and control-plane services so in-cluster dependencies are applied in a safe order.
 
 ## Inputs
 
@@ -67,7 +57,8 @@ This stage actively uses:
 - `kubernetes_version`
 - `cluster_admin_principal_arns`
 - `analysis_subjects`
-- `ward_applications`
+- `control_plane_namespace`
+- `postgresql_*`
 
 ## Outputs
 
@@ -78,10 +69,14 @@ Current outputs include:
 - `monitoring_release_name`
 - `kyverno_namespace`
 - `update_kubeconfig_command`
-- `ward_service_endpoints`
-- `ward_kubectl_commands`
-- `ward_ingress_hosts`
 - `ingress_controller_namespace`
+- `control_plane_namespace`
+- `postgresql_service_fqdn`
+- `postgresql_secret_name`
+- `postgresql_database_name`
+- `postgresql_username`
+- `kyverno_cluster_policies`
+- `tetragon_policy_namespaces`
 
 Those outputs are most useful for:
 
@@ -147,6 +142,9 @@ http://127.0.0.1:12000
 | Name | Source | Version |
 | ---- | ------ | ------- |
 | addons | ../modules/platform-addons | n/a |
+| control_plane | ../modules/control-plane | n/a |
+| policy_manifests | ../modules/policies-stack | n/a |
+| postgresql | ../modules/platform-postgresql | n/a |
 | subjects | ../modules/ward-subjects | n/a |
 
 ## Resources
@@ -154,6 +152,7 @@ http://127.0.0.1:12000
 | Name | Type |
 | ---- | ---- |
 | [time_sleep.cluster_access_ready](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
+| [time_sleep.platform_services_ready](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
 | [aws_eks_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/eks_cluster) | data source |
 
 ## Inputs
@@ -164,11 +163,23 @@ http://127.0.0.1:12000
 | cluster_admin_principal_arns | IAM principal ARNs granted cluster-admin access in the core stage. Used here to keep the post-core readiness wait tied to access configuration changes. | `list(string)` | `[]` | no |
 | cluster_log_retention_in_days | Accepted for compatibility with the shared tfvars payload. | `number` | `90` | no |
 | cluster_name | Name of the existing EKS cluster targeted by the platform stage. | `string` | `"forensic-lab"` | no |
+| control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. | `string` | `"isolens-system"` | no |
+| control_plane_namespace_annotations | Additional annotations applied to the control-plane namespace. | `map(string)` | `{}` | no |
+| control_plane_namespace_labels | Additional labels applied to the control-plane namespace. | `map(string)` | `{}` | no |
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |
 | environment | Environment name used for tags and naming. | `string` | `"lab"` | no |
 | kubernetes_version | Cluster Kubernetes version used to label namespaces with the matching PSA version. | `string` | `"1.35"` | no |
 | node_group_scaling | Accepted for compatibility with the shared tfvars payload. | <pre>object({<br/>    min_size     = number<br/>    max_size     = number<br/>    desired_size = number<br/>  })</pre> | <pre>{<br/>  "desired_size": 2,<br/>  "max_size": 5,<br/>  "min_size": 2<br/>}</pre> | no |
 | node_instance_types | Accepted for compatibility with the shared tfvars payload. | `list(string)` | <pre>[<br/>  "t3.xlarge"<br/>]</pre> | no |
+| postgresql_database_name | Database name created for the control plane. | `string` | `"isolens"` | no |
+| postgresql_image | Container image used for the control-plane PostgreSQL workload. | `string` | `"postgres:16.9-alpine"` | no |
+| postgresql_name | Base name used for PostgreSQL resources in the control-plane namespace. | `string` | `"isolens-postgresql"` | no |
+| postgresql_password | Application password stored in the PostgreSQL Secret. | `string` | `"isolens-dev-password-change-me"` | no |
+| postgresql_resources | Resource requests and limits for the PostgreSQL container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
+| postgresql_service_port | Service port exposed by PostgreSQL. | `number` | `5432` | no |
+| postgresql_storage_class_name | Optional storage class name for the PostgreSQL persistent volume claim. | `string` | `null` | no |
+| postgresql_storage_size | Persistent volume size for the control-plane PostgreSQL data. | `string` | `"20Gi"` | no |
+| postgresql_username | Application username created for the control plane database. | `string` | `"isolens"` | no |
 | private_subnets | Accepted for compatibility with the shared tfvars payload. | `list(string)` | <pre>[<br/>  "10.0.1.0/24",<br/>  "10.0.2.0/24"<br/>]</pre> | no |
 | project_name | Logical project name used for tagging and naming. | `string` | `"isolens"` | no |
 | public_subnets | Accepted for compatibility with the shared tfvars payload. | `list(string)` | <pre>[<br/>  "10.0.101.0/24",<br/>  "10.0.102.0/24"<br/>]</pre> | no |
@@ -180,10 +191,17 @@ http://127.0.0.1:12000
 
 | Name | Description |
 | ---- | ----------- |
+| control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. |
 | ingress_controller_namespace | Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled. |
+| kyverno_cluster_policies | Kyverno ClusterPolicy objects managed by the platform stage. |
 | kyverno_namespace | Namespace containing the Kyverno policy engine. |
 | monitoring_namespace | Namespace containing the observability stack. |
 | monitoring_release_name | Helm release name used for the monitoring agent stack. |
+| postgresql_database_name | Database name provisioned for the control plane. |
+| postgresql_secret_name | Secret containing the PostgreSQL connection credentials. |
+| postgresql_service_fqdn | Cluster-local DNS name for the PostgreSQL service used by the control plane. |
+| postgresql_username | Application username provisioned for the control plane database. |
+| tetragon_policy_namespaces | Namespaces that receive Tetragon tracing policies. |
 | update_kubeconfig_command | Command to merge this cluster into the local kubeconfig. |
 | ward_namespaces | Ward namespaces created for analysis subjects. |
 <!-- END_TF_DOCS -->

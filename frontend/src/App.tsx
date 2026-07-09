@@ -692,8 +692,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     description:
       "Provision a public FastAPI workload and prove the ingress path with a host-header curl plus Hubble evidence.",
     tag: "Ingress path",
-    requirements:
-      "Platform apply for Cilium proof, policies apply for Tetragon proof",
+    requirements: "Platform and applications apply",
     proofSurfaces: ["curl", "Hubble"],
     build(namespace, bundleId) {
       const app = withScenarioMetadata(
@@ -742,7 +741,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     description:
       "Spawn a client toolbox and an internal API with the exact policy needed for one successful same-namespace request.",
     tag: "Cilium allow",
-    requirements: "Platform apply",
+    requirements: "Platform and applications apply",
     proofSurfaces: ["kubectl exec", "Hubble"],
     build(namespace, bundleId) {
       const api = withScenarioMetadata(
@@ -812,7 +811,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     description:
       "Spawn a client toolbox and an internal API that refuses same-namespace ingress so you can capture a clear dropped flow.",
     tag: "Cilium deny",
-    requirements: "Platform apply",
+    requirements: "Platform and applications apply",
     proofSurfaces: ["kubectl exec", "Hubble"],
     build(namespace, bundleId) {
       const api = withScenarioMetadata(
@@ -882,7 +881,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     description:
       "Deploy a toolbox pod with no outbound allowlist so you can capture a blocked internet call and suspicious exec activity.",
     tag: "Cilium + Tetragon",
-    requirements: "Platform apply",
+    requirements: "Platform and applications apply",
     proofSurfaces: ["kubectl exec", "Hubble", "Tetragon logs"],
     build(namespace, bundleId) {
       return [
@@ -912,7 +911,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
       return [
         "The wget command should fail because the ward keeps default-deny egress and this toolbox does not get an outbound allowlist.",
         "Hubble should show dropped flows toward the external destination on port 80.",
-        "After the policies stage is applied, Tetragon logs should include the sh and wget exec chain from the toolbox pod.",
+        "After the platform stage is applied, Tetragon logs should include the sh and wget exec chain from the toolbox pod.",
       ];
     },
   },
@@ -922,7 +921,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     description:
       "Add a deliberately violating workload that uses a latest tag so the policy layer can block it and leave proof in your run logs.",
     tag: "Kyverno deny",
-    requirements: "Policies apply",
+    requirements: "Platform and applications apply",
     proofSurfaces: ["Activity logs", "Kyverno logs", "Events"],
     caution:
       "This scenario is meant to fail. Remove the violating app after you capture the evidence so normal platform applies can succeed again.",
@@ -938,7 +937,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     },
     commandSteps(context) {
       return [
-        "Run platform apply after the policies stage is already healthy.",
+        "Run applications apply after the platform stage is already healthy.",
         `kubectl get events -n ${context.namespace} --sort-by=.lastTimestamp | tail -n 20`,
         "kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=120",
       ];
@@ -946,7 +945,7 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     expectedSignals(context) {
       const violator = context.appByRole("violator");
       return [
-        `The platform apply should fail or stall around ${violator?.name ?? "the violating workload"} instead of creating a healthy deployment.`,
+        `The applications apply should fail or stall around ${violator?.name ?? "the violating workload"} instead of creating a healthy deployment.`,
         "Activity -> Run Logs should contain the admission or rollout failure, and Kyverno logs/events should mention the latest-tag policy.",
       ];
     },
@@ -2492,7 +2491,7 @@ function statusTone(
 function stageLabel(stage: RunStage): string {
   if (stage === "core") return "Core";
   if (stage === "platform") return "Platform";
-  return "Policies";
+  return "Applications";
 }
 
 function isTerminalRunStatus(status?: TerraformRun["status"]): boolean {
@@ -2890,8 +2889,8 @@ export default function App() {
     () => runs.find((run) => run.stage === "platform") ?? null,
     [runs],
   );
-  const latestPoliciesRun = useMemo(
-    () => runs.find((run) => run.stage === "policies") ?? null,
+  const latestApplicationsRun = useMemo(
+    () => runs.find((run) => run.stage === "applications") ?? null,
     [runs],
   );
   const hasAppliedCoreRun = useMemo(
@@ -2902,8 +2901,8 @@ export default function App() {
     () => stageIsEffectivelyApplied(runs, "platform"),
     [runs],
   );
-  const hasAppliedPoliciesRun = useMemo(
-    () => stageIsEffectivelyApplied(runs, "policies"),
+  const hasAppliedApplicationsRun = useMemo(
+    () => stageIsEffectivelyApplied(runs, "applications"),
     [runs],
   );
   const hasAdminAccess = useMemo(
@@ -2970,16 +2969,16 @@ export default function App() {
   const platformLockedReason = !hasAppliedCoreRun
     ? "Apply core first to unlock the platform stage."
     : undefined;
-  const policiesLockedReason = !hasAppliedPlatformRun
-    ? "Apply platform first to unlock the policies stage."
+  const applicationsLockedReason = !hasAppliedPlatformRun
+    ? "Apply platform first to unlock the applications stage."
     : undefined;
-  const coreDestroyBlockedReason = hasAppliedPoliciesRun
-    ? "Destroy the policies stage first. The policies stage still owns resources that depend on core."
+  const coreDestroyBlockedReason = hasAppliedApplicationsRun
+    ? "Destroy the applications stage first. The applications stage still owns resources that depend on core."
     : hasAppliedPlatformRun
       ? "Destroy the platform stage first. The platform stage still owns resources that depend on core."
       : undefined;
-  const platformDestroyBlockedReason = hasAppliedPoliciesRun
-    ? "Destroy the policies stage first. The policies stage still owns resources that depend on platform."
+  const platformDestroyBlockedReason = hasAppliedApplicationsRun
+    ? "Destroy the applications stage first. The applications stage still owns resources that depend on platform."
     : undefined;
   const coreActionDisabledReason = adminAccessDisabledReason;
   const coreDestroyActionDisabledReason =
@@ -2990,18 +2989,18 @@ export default function App() {
     adminAccessDisabledReason ??
     platformLockedReason ??
     platformDestroyBlockedReason;
-  const policiesActionDisabledReason =
-    adminAccessDisabledReason ?? policiesLockedReason;
+  const applicationsActionDisabledReason =
+    adminAccessDisabledReason ?? applicationsLockedReason;
   const platformStageLocked = !hasAppliedCoreRun;
-  const policiesStageLocked = !hasAppliedPlatformRun;
+  const applicationsStageLocked = !hasAppliedPlatformRun;
   const platformStageNotice = platformStageLocked
-    ? "Platform stays unavailable until core has been applied successfully. Once the cluster exists, you can plan and apply namespaces, add-ons, workloads, and ingress."
+    ? "Platform stays unavailable until core has been applied successfully. Once the cluster exists, you can plan and apply namespaces, add-ons, control-plane services, and policies."
     : null;
-  const policiesStageNotice = policiesStageLocked
-    ? "Policies stay unavailable until platform has been applied successfully. Apply the add-ons and workloads layer first, then come back here."
+  const applicationsStageNotice = applicationsStageLocked
+    ? "Applications stay unavailable until platform has been applied successfully. Apply the shared in-cluster services and policy layer first, then deploy workloads."
     : null;
-  const coreDestroyNotice = hasAppliedPoliciesRun
-    ? "Destroy order is policies, then platform, then core. Policies is still applied right now, so core destroy remains locked."
+  const coreDestroyNotice = hasAppliedApplicationsRun
+    ? "Destroy order is applications, then platform, then core. Applications is still applied right now, so core destroy remains locked."
     : hasAppliedPlatformRun
       ? "Destroy order is platform, then core. Platform is still applied right now, so core destroy remains locked."
       : null;
@@ -4035,9 +4034,10 @@ export default function App() {
                             </h2>
                             <p className="max-w-3xl text-sm leading-7 text-neutral-400">
                               Start with core, move into platform once the
-                              cluster is real, then layer policies on top. This
-                              area should make the next step obvious before you
-                              drill into assets or logs.
+                              cluster is real. Platform now carries the
+                              in-cluster services, policy layer, and operator
+                              dependencies needed before you drill into assets
+                              or logs.
                             </p>
                           </div>
 
@@ -4185,7 +4185,7 @@ export default function App() {
                                       isBusy ||
                                       !hasAdminAccess ||
                                       hasAppliedPlatformRun ||
-                                      hasAppliedPoliciesRun
+                                      hasAppliedApplicationsRun
                                     }
                                   >
                                     Destroy core
@@ -4214,9 +4214,9 @@ export default function App() {
                                   Platform
                                 </p>
                                 <p className="mt-2 text-sm leading-6 text-neutral-400">
-                                  Namespaces, Helm add-ons, workloads, ingress,
-                                  and the operator-facing outputs for the live
-                                  lab.
+                                  Namespaces, Helm add-ons, control-plane
+                                  services, policy resources, and the
+                                  operator-facing outputs for the live lab.
                                 </p>
                               </div>
                               <div className="shrink-0 self-start">
@@ -4309,7 +4309,7 @@ export default function App() {
                                       isBusy ||
                                       !hasAdminAccess ||
                                       platformStageLocked ||
-                                      hasAppliedPoliciesRun
+                                      hasAppliedApplicationsRun
                                     }
                                   >
                                     Destroy platform
@@ -4329,102 +4329,112 @@ export default function App() {
                           <div
                             className={classNames(
                               "rounded-[1.8rem] border border-border/80 bg-muted/55 p-5",
-                              policiesStageLocked && "border-dashed opacity-75",
+                              applicationsStageLocked &&
+                                "border-dashed opacity-75",
                             )}
                           >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div className="min-w-0 flex-1">
                                 <p className="text-lg font-semibold">
-                                  Policies
+                                  Applications
                                 </p>
                                 <p className="mt-2 text-sm leading-6 text-neutral-400">
-                                  Kyverno and Tetragon custom resources applied
-                                  only after the platform layer is healthy.
+                                  Workload deployments, Services, Ingresses, and
+                                  application-specific network policies for the
+                                  live lab.
                                 </p>
                               </div>
                               <div className="shrink-0 self-start">
                                 <Badge>
-                                  {latestPoliciesRun
-                                    ? latestPoliciesRun.status
+                                  {latestApplicationsRun
+                                    ? latestApplicationsRun.status
                                     : "idle"}
                                 </Badge>
                               </div>
                             </div>
-                            {policiesStageNotice ? (
+                            {applicationsStageNotice ? (
                               <div className="mt-4">
                                 <StageNotice
                                   title="Stage Locked"
-                                  body={policiesStageNotice}
+                                  body={applicationsStageNotice}
                                 />
                               </div>
                             ) : null}
                             <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
                               {hasAppliedPlatformRun
-                                ? "Platform applied, policy stage unlocked"
+                                ? "Platform applied, applications stage unlocked"
                                 : "Apply platform first to unlock this stage"}
                             </p>
-                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            <div className="mt-4 grid gap-3 md:grid-cols-3">
                               <MetricTile
-                                label="Selected Run"
-                                value={
-                                  selectedRun
-                                    ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}`
-                                    : "None"
-                                }
+                                label="Apps"
+                                value={config.ward_applications.length}
                               />
                               <MetricTile
-                                label="Queue Depth"
-                                value={selectedRun?.queue_position ?? 0}
+                                label="Services"
+                                value={totalAppsWithService}
+                              />
+                              <MetricTile
+                                label="Ingress"
+                                value={totalAppsWithIngress}
                               />
                             </div>
                             <div className="mt-5 flex flex-wrap gap-2">
                               <StageAction
-                                disabledReason={policiesActionDisabledReason}
+                                disabledReason={
+                                  applicationsActionDisabledReason
+                                }
                               >
                                 <Button
-                                  onClick={() => void startPlan("policies")}
+                                  onClick={() => void startPlan("applications")}
                                   disabled={
                                     isBusy ||
                                     !hasAdminAccess ||
                                     !hasAppliedPlatformRun
                                   }
                                 >
-                                  Plan policies
+                                  Plan applications
                                 </Button>
                               </StageAction>
                               <StageAction
-                                disabledReason={policiesActionDisabledReason}
+                                disabledReason={
+                                  applicationsActionDisabledReason
+                                }
                               >
                                 <Button
                                   variant="secondary"
-                                  onClick={() => void startApply("policies")}
+                                  onClick={() =>
+                                    void startApply("applications")
+                                  }
                                   disabled={
                                     isBusy ||
                                     !hasAdminAccess ||
                                     !hasAppliedPlatformRun ||
-                                    !canQueueApplyFromPlan("policies")
+                                    !canQueueApplyFromPlan("applications")
                                   }
                                 >
-                                  Apply policies
+                                  Apply applications
                                 </Button>
                               </StageAction>
                               <div data-destroy-arm>
                                 <StageAction
-                                  disabledReason={policiesActionDisabledReason}
+                                  disabledReason={
+                                    applicationsActionDisabledReason
+                                  }
                                 >
                                   <Button
                                     variant={
-                                      armedDestroyStage === "policies"
+                                      armedDestroyStage === "applications"
                                         ? "danger"
                                         : "ghost"
                                     }
                                     className={
-                                      armedDestroyStage === "policies"
+                                      armedDestroyStage === "applications"
                                         ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]"
                                         : ""
                                     }
                                     onClick={() =>
-                                      void startDestroy("policies")
+                                      void startDestroy("applications")
                                     }
                                     disabled={
                                       isBusy ||
@@ -4432,14 +4442,14 @@ export default function App() {
                                       !hasAppliedPlatformRun
                                     }
                                   >
-                                    Destroy policies
+                                    Destroy applications
                                   </Button>
                                 </StageAction>
                               </div>
                               <Button
                                 variant="ghost"
-                                onClick={() => void unlockState("policies")}
-                                disabled={isBusy || policiesStageLocked}
+                                onClick={() => void unlockState("applications")}
+                                disabled={isBusy || applicationsStageLocked}
                               >
                                 Unlock state
                               </Button>

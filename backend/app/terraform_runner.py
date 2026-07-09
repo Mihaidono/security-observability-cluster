@@ -23,7 +23,7 @@ from .models import (
     TerraformRun,
     UnlockStateResponse,
 )
-from .store import SqliteStore, normalize_log_lines, strip_ansi
+from .store import PostgresStore, normalize_log_lines, strip_ansi
 
 
 def utc_now() -> datetime:
@@ -43,7 +43,7 @@ class CommandFailedError(RuntimeError):
 
 
 class TerraformRunner:
-    def __init__(self, settings: Settings, store: SqliteStore, broker: RunEventBroker) -> None:
+    def __init__(self, settings: Settings, store: PostgresStore, broker: RunEventBroker) -> None:
         self.settings = settings
         self.store = store
         self.broker = broker
@@ -799,7 +799,7 @@ class TerraformRunner:
             return self.settings.terraform_core_root
         if stage == RunStage.platform:
             return self.settings.terraform_platform_root
-        return self.settings.terraform_policies_root
+        return self.settings.terraform_applications_root
 
     def _find_recent_lock_for_stage(self, stage: RunStage) -> tuple[TerraformRun, StateLockInfo] | None:
         for run in self.store.list_runs():
@@ -823,15 +823,15 @@ class TerraformRunner:
     def _plan_dependency_for_stage(self, stage: RunStage) -> RunStage | None:
         if stage == RunStage.platform:
             return RunStage.core
-        if stage == RunStage.policies:
+        if stage == RunStage.applications:
             return RunStage.platform
         return None
 
     def _destroy_blockers_for_stage(self, stage: RunStage) -> list[RunStage]:
         if stage == RunStage.core:
-            return [RunStage.policies, RunStage.platform]
+            return [RunStage.applications, RunStage.platform]
         if stage == RunStage.platform:
-            return [RunStage.policies]
+            return [RunStage.applications]
         return []
 
     def _stage_is_applied(self, stage: RunStage) -> bool:
@@ -895,7 +895,7 @@ class TerraformRunner:
             status_code=409,
             detail=(
                 "Add at least one cluster admin IAM principal ARN in Settings -> Admin Access before planning or "
-                "applying. Without an admin ARN, core can create the cluster, but the later platform and policies "
+                "applying. Without an admin ARN, core can create the cluster, but the later platform "
                 "stages may not be able to manage or destroy in-cluster Kubernetes and Helm resources safely."
             ),
         )

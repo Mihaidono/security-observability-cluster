@@ -21,6 +21,10 @@ inputs:
     description: Comma-separated Trivy severity list that fails the workflow.
     required: false
     default: HIGH,CRITICAL
+  scan-skip-files:
+    description: Comma-separated list of files to exclude from the Trivy scan.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -44,6 +48,7 @@ runs:
       with:
         image-ref: localbuild/${{ inputs.image-name }}:${{ github.sha }}
         severity: ${{ inputs.scan-severity }}
+        skip-files: ${{ inputs.scan-skip-files }}
 
     - name: Login To Amazon ECR
       id: login-ecr

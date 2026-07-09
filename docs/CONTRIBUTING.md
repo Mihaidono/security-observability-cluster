@@ -54,7 +54,7 @@ Allowed scopes in this repository:
 - `infra`
 - `core`
 - `platform`
-- `policies`
+- `applications`
 - `docker`
 - `ci`
 - `docs`
@@ -73,7 +73,7 @@ or:
 ```text
 feat(core): rename Terraform output contract
 
-BREAKING CHANGE: platform and policies consumers must read the new output names.
+BREAKING CHANGE: platform and applications consumers must read the new output names.
 ```
 
 ## Local Hooks

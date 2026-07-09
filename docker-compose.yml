@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:16.9-alpine
+    environment:
+      POSTGRES_DB: isolens
+      POSTGRES_USER: isolens
+      POSTGRES_PASSWORD: isolens-dev-password-change-me
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   backend:
     build:
       context: .
@@ -13,6 +29,10 @@ services:
       AWS_SDK_LOAD_CONFIG: ${AWS_SDK_LOAD_CONFIG:-true}
       AWS_CONFIG_FILE: /home/backend/.aws/config
       AWS_SHARED_CREDENTIALS_FILE: /home/backend/.aws/credentials
+      ISOLENS_DATABASE_URL: postgresql://isolens:isolens-dev-password-change-me@postgres:5432/isolens
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8000:8000"
     volumes:
@@ -41,3 +61,4 @@ services:
 
 volumes:
   frontend_node_modules:
+  postgres_data:

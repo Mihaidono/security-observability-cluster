@@ -13,10 +13,10 @@ class Settings:
     infrastructure_root: Path
     terraform_core_root: Path
     terraform_platform_root: Path
-    terraform_policies_root: Path
+    terraform_applications_root: Path
     state_dir: Path
     runs_dir: Path
-    database_path: Path
+    database_url: str
     managed_tfvars_path: Path
     default_config_path: Path
     terraform_bin: str
@@ -31,11 +31,10 @@ def get_settings() -> Settings:
     infrastructure_root = project_root / "infrastructure"
     terraform_core_root = infrastructure_root / "core"
     terraform_platform_root = infrastructure_root / "platform"
-    terraform_policies_root = infrastructure_root / "policies"
+    terraform_applications_root = infrastructure_root / "applications"
     state_dir = backend_root / "state"
     runs_dir = state_dir / "runs"
     state_dir.mkdir(parents=True, exist_ok=True)
-    database_path = state_dir / "isolens.db"
     managed_tfvars_path = infrastructure_root / "frontend-managed.auto.tfvars.json"
     default_config_path = backend_root / "app" / "default_managed_config.json"
 
@@ -50,10 +49,13 @@ def get_settings() -> Settings:
         infrastructure_root=infrastructure_root,
         terraform_core_root=terraform_core_root,
         terraform_platform_root=terraform_platform_root,
-        terraform_policies_root=terraform_policies_root,
+        terraform_applications_root=terraform_applications_root,
         state_dir=state_dir,
         runs_dir=runs_dir,
-        database_path=database_path,
+        database_url=os.getenv(
+            "ISOLENS_DATABASE_URL",
+            "postgresql://isolens:isolens-dev-password-change-me@localhost:5432/isolens",
+        ),
         managed_tfvars_path=managed_tfvars_path,
         default_config_path=default_config_path,
         terraform_bin=os.getenv("TERRAFORM_BIN", "terraform"),

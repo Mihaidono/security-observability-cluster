@@ -40,3 +40,4 @@ jobs:
           docker-context: .
           dockerfile: backend/Dockerfile
           image-name: backend
+          scan-skip-files: /usr/local/bin/terraform

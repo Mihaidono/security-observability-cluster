@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import sqlite3
 from pathlib import Path
 from typing import Any
+
+import psycopg
+from psycopg.rows import dict_row
 
 from .config import Settings
 from .models import (
@@ -43,31 +45,29 @@ def normalize_log_lines(lines: list[str]) -> list[str]:
     return normalized
 
 
-class SqliteStore:
+class PostgresStore:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.settings.state_dir.mkdir(parents=True, exist_ok=True)
         self.settings.runs_dir.mkdir(parents=True, exist_ok=True)
         self._initialize_database()
 
-    def _connection(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.settings.database_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+    def _connection(self) -> psycopg.Connection:
+        return psycopg.connect(self.settings.database_url, row_factory=dict_row)
 
     def _initialize_database(self) -> None:
         with self._connection() as connection:
-            connection.executescript(
+            connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS runs (
                     id TEXT PRIMARY KEY,
                     stage TEXT NOT NULL DEFAULT 'core',
                     kind TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    started_at TEXT,
-                    completed_at TEXT,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL,
+                    started_at TIMESTAMPTZ,
+                    completed_at TIMESTAMPTZ,
                     command_json TEXT NOT NULL,
                     plan_path TEXT,
                     log_path TEXT,
@@ -76,18 +76,31 @@ class SqliteStore:
                     outputs_json TEXT,
                     source_run_id TEXT,
                     queue_position INTEGER
-                );
-
-                CREATE TABLE IF NOT EXISTS run_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    run_id TEXT NOT NULL,
-                    line TEXT NOT NULL
-                );
+                )
                 """
             )
-            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(runs)").fetchall()}
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS run_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    line TEXT NOT NULL
+                )
+                """
+            )
+            columns = {
+                str(row["column_name"])
+                for row in connection.execute(
+                    """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'runs'
+                """
+                ).fetchall()
+            }
             if "stage" not in columns:
                 connection.execute("ALTER TABLE runs ADD COLUMN stage TEXT NOT NULL DEFAULT 'core'")
+            connection.execute("UPDATE runs SET stage = 'platform' WHERE stage = 'policies'")
 
     def load_default_config(self) -> TerraformConfig:
         return TerraformConfig.model_validate_json(self.settings.default_config_path.read_text())
@@ -123,7 +136,7 @@ class SqliteStore:
                     id, stage, kind, status, created_at, updated_at, started_at, completed_at,
                     command_json, plan_path, log_path, error, plan_summary_json, outputs_json,
                     source_run_id, queue_position
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT(id) DO UPDATE SET
                     stage = excluded.stage,
                     kind = excluded.kind,
@@ -163,7 +176,7 @@ class SqliteStore:
 
     def load_run(self, run_id: str) -> TerraformRun | None:
         with self._connection() as connection:
-            row = connection.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            row = connection.execute("SELECT * FROM runs WHERE id = %s", (run_id,)).fetchone()
         if row is None:
             return None
         return self._row_to_run(row)
@@ -185,11 +198,11 @@ class SqliteStore:
         run_ids_to_delete = [run.id for run in runs_to_delete]
         with self._connection() as connection:
             connection.executemany(
-                "DELETE FROM run_logs WHERE run_id = ?",
+                "DELETE FROM run_logs WHERE run_id = %s",
                 [(run_id,) for run_id in run_ids_to_delete],
             )
             connection.executemany(
-                "DELETE FROM runs WHERE id = ?",
+                "DELETE FROM runs WHERE id = %s",
                 [(run_id,) for run_id in run_ids_to_delete],
             )
 
@@ -210,14 +223,14 @@ class SqliteStore:
                 handle.write(f"{line}\n")
         with self._connection() as connection:
             connection.executemany(
-                "INSERT INTO run_logs (run_id, line) VALUES (?, ?)",
+                "INSERT INTO run_logs (run_id, line) VALUES (%s, %s)",
                 [(run_id, line) for line in cleaned_lines],
             )
 
     def read_logs(self, run_id: str) -> list[str]:
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT line FROM run_logs WHERE run_id = ? ORDER BY id ASC",
+                "SELECT line FROM run_logs WHERE run_id = %s ORDER BY id ASC",
                 (run_id,),
             ).fetchall()
         return [str(row["line"]) for row in rows]
@@ -229,7 +242,7 @@ class SqliteStore:
 
     def latest_outputs(self) -> dict[str, Any] | None:
         combined: dict[str, Any] = {}
-        for stage in [RunStage.core, RunStage.platform, RunStage.policies]:
+        for stage in [RunStage.core, RunStage.platform, RunStage.applications]:
             run = self._latest_effective_apply(stage)
             if run and run.outputs:
                 combined.update(run.outputs)
@@ -245,7 +258,7 @@ class SqliteStore:
                 return run
         return None
 
-    def _row_to_run(self, row: sqlite3.Row) -> TerraformRun:
+    def _row_to_run(self, row: dict[str, Any]) -> TerraformRun:
         plan_summary = None
         if row["plan_summary_json"]:
             plan_summary = PlanSummary.model_validate(json.loads(str(row["plan_summary_json"])))
@@ -254,13 +267,13 @@ class SqliteStore:
 
         return TerraformRun(
             id=str(row["id"]),
-            stage=str(row["stage"]) if row["stage"] else "core",
+            stage="platform" if str(row["stage"]) == "policies" else str(row["stage"] or "core"),
             kind=str(row["kind"]),
             status=str(row["status"]),
-            created_at=str(row["created_at"]),
-            updated_at=str(row["updated_at"]),
-            started_at=str(row["started_at"]) if row["started_at"] else None,
-            completed_at=str(row["completed_at"]) if row["completed_at"] else None,
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
             command=json.loads(str(row["command_json"])),
             plan_path=str(row["plan_path"]) if row["plan_path"] else None,
             log_path=str(row["log_path"]) if row["log_path"] else None,

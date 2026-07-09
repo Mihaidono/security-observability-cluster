@@ -11,7 +11,7 @@ The `core` stage now owns only the AWS and EKS foundation for the lab.
 - ECR repositories for the backend and frontend images
 - EKS access entries and cluster-admin policy associations for configured IAM principals
 
-The `core` stage does not create namespaces, Helm releases, workloads, or policy CRDs anymore. Those live in the `platform` and `policies` stages.
+The `core` stage does not create namespaces, Helm releases, workloads, or policy CRDs anymore. Those live in the `platform` and `applications` stages.
 
 ## Inputs
 
@@ -68,7 +68,7 @@ use_lockfile = true
 - The backend always runs `terraform init -reconfigure -backend-config=backend.hcl` before executing this stage.
 - Applies are executed from saved plan files, not fresh `terraform apply -auto-approve`.
 - This stage should finish before planning `platform`.
-- The operator UI also blocks `platform` and `policies` while core is not effectively applied, and it visually blocks `core` destroy while downstream stages still exist.
+- The operator UI blocks `platform` while core is not effectively applied, and it visually blocks `core` destroy while downstream stages still exist.
 
 ## Direct Terraform Usage
 
@@ -112,7 +112,7 @@ terraform apply -var-file=../terraform.tfvars
 | ---- | ----------- | ---- | ------- | :------: |
 | analysis_subjects | Accepted for compatibility with the shared tfvars payload. The core stage no longer manages ward namespaces directly. | `map(any)` | `{}` | no |
 | backend_ecr_repository_name | Name of the ECR repository that stores backend container images. | `string` | `"isolens-backend"` | no |
-| cluster_admin_principal_arns | IAM principal ARNs granted EKS cluster-admin access through access entries so the later platform and policies stages can manage in-cluster resources safely. | `list(string)` | `[]` | no |
+| cluster_admin_principal_arns | IAM principal ARNs granted EKS cluster-admin access through access entries so the later platform and applications stages can manage in-cluster resources safely. | `list(string)` | `[]` | no |
 | cluster_log_retention_in_days | Retention period, in days, for the EKS control-plane CloudWatch log group. | `number` | `90` | no |
 | cluster_name | Name of the EKS cluster created by the core stage. | `string` | `"forensic-lab"` | no |
 | ecr_image_tag_mutability | Tag mutability policy for the ECR repositories. Keep MUTABLE while the CI flow publishes the latest tag. | `string` | `"MUTABLE"` | no |
