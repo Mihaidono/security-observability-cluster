@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+      LOCAL_IMAGE_REF: localbuild/backend:${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,12 +33,29 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
-      - name: Build And Push Backend Image
+      - name: Set Up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Local Backend Image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.LOCAL_IMAGE_REF }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan Backend Image
+        uses: ./.github/actions/container-scan
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE_REF }}
+          skip-files: /usr/local/bin/terraform
+
+      - name: Push Backend Image
         uses: ./.github/actions/ecr-build-push
         with:
-          aws-region: ${{ env.AWS_REGION }}
           ecr-repository: ${{ vars.BACKEND_ECR_REPOSITORY }}
-          docker-context: .
-          dockerfile: backend/Dockerfile
           image-name: backend
-          scan-skip-files: /usr/local/bin/terraform
+          local-image-ref: ${{ env.LOCAL_IMAGE_REF }}
