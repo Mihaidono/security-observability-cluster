@@ -1,0 +1,44 @@
+name: Pre-commit
+description: Run repository pre-commit hooks with Terraform, TFLint, and Prettier prerequisites installed.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_wrapper: false
+
+    - name: Setup TFLint
+      uses: terraform-linters/setup-tflint@v6
+      with:
+        cache: true
+
+    - name: Install Node dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Install pre-commit
+      shell: bash
+      run: pip install pre-commit
+
+    - name: Init TFLint plugins
+      shell: bash
+      run: tflint --init --config=tooling/tflint.hcl
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+
+    - name: Run pre-commit
+      shell: bash
+      run: pre-commit run --all-files --show-diff-on-failure

@@ -1,5 +1,11 @@
 # tflint-ignore-file: terraform_unused_declarations
 
+variable "kubernetes_version" {
+  description = "Accepted for compatibility with the shared tfvars payload."
+  type        = string
+  default     = "1.35"
+}
+
 variable "cluster_log_retention_in_days" {
   description = "Accepted for compatibility with the shared tfvars payload."
   type        = number
@@ -44,8 +50,8 @@ variable "node_group_scaling" {
   }
 }
 
-variable "ward_applications" {
-  description = "Accepted for compatibility with the shared tfvars payload. Workloads moved to the applications root."
-  type        = any
-  default     = []
+variable "enable_ingress_nginx" {
+  description = "Accepted for compatibility with the shared tfvars payload."
+  type        = bool
+  default     = false
 }

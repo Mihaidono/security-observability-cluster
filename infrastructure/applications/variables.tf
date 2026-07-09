@@ -11,21 +11,15 @@ variable "environment" {
 }
 
 variable "region" {
-  description = "AWS region of the existing EKS cluster targeted by the platform stage."
+  description = "AWS region of the existing EKS cluster targeted by the applications stage."
   type        = string
   default     = "eu-north-1"
 }
 
 variable "cluster_name" {
-  description = "Name of the existing EKS cluster targeted by the platform stage."
+  description = "Name of the existing EKS cluster targeted by the applications stage."
   type        = string
   default     = "forensic-lab"
-}
-
-variable "kubernetes_version" {
-  description = "Cluster Kubernetes version used to label namespaces with the matching PSA version."
-  type        = string
-  default     = "1.35"
 }
 
 variable "cluster_admin_principal_arns" {
@@ -44,27 +38,10 @@ variable "cluster_admin_principal_arns" {
   }
 }
 
-variable "enable_ingress_nginx" {
-  description = "Whether the shared nginx ingress controller should be installed by the platform layer."
-  type        = bool
-  default     = false
-}
-
 variable "analysis_subjects" {
-  description = "Ward namespace definitions. Each entry creates a namespace, ward metadata ConfigMap, ResourceQuota, LimitRange, and baseline NetworkPolicies."
-  type = map(object({
-    tier        = string
-    description = string
-    labels      = optional(map(string), {})
-    annotations = optional(map(string), {})
-    resource_quota = optional(object({
-      pods            = optional(string, "10")
-      requests_cpu    = optional(string, "2")
-      requests_memory = optional(string, "4Gi")
-      limits_cpu      = optional(string, "4")
-      limits_memory   = optional(string, "8Gi")
-    }), {})
-  }))
+  description = "Ward namespace definitions used to validate application placement."
+  type        = map(any)
+  default     = {}
 
   validation {
     condition = alltrue([
@@ -73,4 +50,10 @@ variable "analysis_subjects" {
     ])
     error_message = "Each analysis_subjects key must be a valid Kubernetes namespace name."
   }
+}
+
+variable "ward_applications" {
+  description = "Application definitions rendered into Deployments plus optional Services, Ingresses, generated ConfigMaps, volumes, and app-specific NetworkPolicies."
+  type        = list(any)
+  default     = []
 }

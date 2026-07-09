@@ -3,7 +3,8 @@ variable "kubernetes_version" {
   type        = string
 }
 
-variable "ward_applications" {
-  description = "Validated ward application definitions from the root module."
-  type        = list(any)
+variable "enable_ingress_nginx" {
+  description = "Whether the shared nginx ingress controller should be installed by the platform layer."
+  type        = bool
+  default     = false
 }

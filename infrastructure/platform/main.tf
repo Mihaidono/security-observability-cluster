@@ -11,8 +11,8 @@ resource "time_sleep" "cluster_access_ready" {
 module "addons" {
   source = "../modules/platform-addons"
 
-  kubernetes_version = var.kubernetes_version
-  ward_applications  = var.ward_applications
+  kubernetes_version   = var.kubernetes_version
+  enable_ingress_nginx = var.enable_ingress_nginx
 
   depends_on = [time_sleep.cluster_access_ready]
 }
@@ -24,16 +24,4 @@ module "subjects" {
   kubernetes_version = var.kubernetes_version
 
   depends_on = [time_sleep.cluster_access_ready]
-}
-
-module "workloads" {
-  source = "../modules/ward-workloads"
-
-  analysis_subject_names = toset(keys(var.analysis_subjects))
-  ward_applications      = var.ward_applications
-
-  depends_on = [
-    module.addons,
-    module.subjects,
-  ]
 }

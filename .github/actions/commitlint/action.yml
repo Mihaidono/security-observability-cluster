@@ -1,0 +1,10 @@
+name: Commitlint
+description: Lint pull request commit messages with the repository commitlint config.
+
+runs:
+  using: composite
+  steps:
+    - name: Lint Commit Messages
+      uses: wagoid/commitlint-github-action@v6
+      with:
+        configFile: tooling/commitlint.config.mjs

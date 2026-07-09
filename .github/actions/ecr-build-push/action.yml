@@ -1,0 +1,78 @@
+name: Build And Push To ECR
+description: Build a Docker image and push it to Amazon ECR using GitHub OIDC.
+
+inputs:
+  aws-region:
+    description: AWS region for ECR and role assumption.
+    required: true
+  ecr-repository:
+    description: Existing ECR repository name.
+    required: true
+  docker-context:
+    description: Docker build context.
+    required: true
+  dockerfile:
+    description: Path to the Dockerfile.
+    required: true
+  image-name:
+    description: Logical image name used in workflow summaries.
+    required: true
+  scan-severity:
+    description: Comma-separated Trivy severity list that fails the workflow.
+    required: false
+    default: HIGH,CRITICAL
+
+runs:
+  using: composite
+  steps:
+    - name: Set Up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Local Image
+      uses: docker/build-push-action@v7
+      with:
+        context: ${{ inputs.docker-context }}
+        file: ${{ inputs.dockerfile }}
+        push: false
+        load: true
+        tags: localbuild/${{ inputs.image-name }}:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Scan Container Image
+      uses: ./.github/actions/container-scan
+      with:
+        image-ref: localbuild/${{ inputs.image-name }}:${{ github.sha }}
+        severity: ${{ inputs.scan-severity }}
+
+    - name: Login To Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Tag And Push Image
+      shell: bash
+      run: |
+        set -euo pipefail
+        local_image="localbuild/${{ inputs.image-name }}:${{ github.sha }}"
+        remote_base="${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr-repository }}"
+
+        docker tag "$local_image" "$remote_base:${{ github.sha }}"
+        docker tag "$local_image" "$remote_base:latest"
+
+        docker push "$remote_base:${{ github.sha }}"
+        docker push "$remote_base:latest"
+
+    - name: Job Summary
+      shell: bash
+      run: |
+        {
+          echo "## Image published"
+          echo
+          echo "- Image: \`${{ inputs.image-name }}\`"
+          echo "- Repository: \`${{ inputs.ecr-repository }}\`"
+          echo "- Container scan: passed"
+          echo "- Blocking severities: \`${{ inputs.scan-severity }}\`"
+          echo "- Tags:"
+          echo "  - \`${{ github.sha }}\`"
+          echo "  - \`latest\`"
+        } >> "$GITHUB_STEP_SUMMARY"

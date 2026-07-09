@@ -1,0 +1,42 @@
+name: Publish Frontend Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - ".dockerignore"
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-image-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      - name: Build And Push Frontend Image
+        uses: ./.github/actions/ecr-build-push
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          ecr-repository: ${{ vars.FRONTEND_ECR_REPOSITORY }}
+          docker-context: .
+          dockerfile: frontend/Dockerfile
+          image-name: frontend

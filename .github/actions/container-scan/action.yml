@@ -1,0 +1,28 @@
+name: Container Scan
+description: Scan a local container image with Trivy and fail on configured severities.
+
+inputs:
+  image-ref:
+    description: Local image reference to scan.
+    required: true
+  severity:
+    description: Comma-separated Trivy severity list.
+    required: false
+    default: HIGH,CRITICAL
+  ignore-unfixed:
+    description: Ignore vulnerabilities without fixes.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Run Trivy Vulnerability Scanner
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        format: table
+        exit-code: "1"
+        ignore-unfixed: ${{ inputs.ignore-unfixed }}
+        vuln-type: os,library
+        severity: ${{ inputs.severity }}

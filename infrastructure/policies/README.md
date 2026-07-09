@@ -114,3 +114,8 @@ When using the backend control plane, Terraform instead receives:
 ```text
 -var-file ../frontend-managed.auto.tfvars.json
 ```
+
+## Terraform Reference
+
+<!-- BEGIN_TF_DOCS -->
+<!-- END_TF_DOCS -->

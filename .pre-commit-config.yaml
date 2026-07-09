@@ -1,0 +1,90 @@
+minimum_pre_commit_version: "4.0.0"
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+default_stages:
+  - pre-commit
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+        args:
+          - --unsafe
+      - id: check-json
+      - id: check-toml
+      - id: mixed-line-ending
+        args:
+          - --fix=lf
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.108.0
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+        args:
+          - --hook-config=--retry-once-with-cleanup=true
+      - id: terraform_tflint
+  - repo: https://github.com/terraform-docs/terraform-docs
+    rev: v0.24.0
+    hooks:
+      - id: terraform-docs-go
+        name: terraform-docs-bootstrap
+        args:
+          - --config=tooling/terraform-docs.yml
+          - infrastructure/bootstrap
+        files: ^infrastructure/bootstrap/.*\.tf$
+      - id: terraform-docs-go
+        name: terraform-docs-applications
+        args:
+          - --config=tooling/terraform-docs.yml
+          - infrastructure/applications
+        files: ^infrastructure/applications/.*\.tf$
+      - id: terraform-docs-go
+        name: terraform-docs-core
+        args:
+          - --config=tooling/terraform-docs.yml
+          - infrastructure/core
+        files: ^infrastructure/core/.*\.tf$
+      - id: terraform-docs-go
+        name: terraform-docs-platform
+        args:
+          - --config=tooling/terraform-docs.yml
+          - infrastructure/platform
+        files: ^infrastructure/platform/.*\.tf$
+      - id: terraform-docs-go
+        name: terraform-docs-policies
+        args:
+          - --config=tooling/terraform-docs.yml
+          - infrastructure/policies
+        files: ^infrastructure/policies/.*\.tf$
+      - id: terraform-docs-go
+        name: terraform-docs-modules
+        args:
+          - --config=tooling/terraform-docs-modules.yml
+          - infrastructure/modules
+        files: ^infrastructure/modules/[^/]+/.*\.tf$
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        files: ^backend/.*\.py$
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        entry: npx prettier --write
+        language: system
+        files: >-
+          ^frontend/.*\.(css|html|js|json|jsx|md|mdx|scss|ts|tsx|yaml|yml)$
+      - id: commitlint
+        name: commitlint
+        entry: commitlint --config tooling/commitlint.config.mjs --edit
+        language: node
+        additional_dependencies:
+          - "@commitlint/cli@20.1.0"
+          - "@commitlint/config-conventional@20.0.0"
+        stages:
+          - commit-msg

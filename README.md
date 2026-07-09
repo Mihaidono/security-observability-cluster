@@ -4,8 +4,9 @@ Isolens is a Terraform-driven EKS lab with a small control plane:
 
 - `backend/` runs a FastAPI service that stores editable config, queues Terraform runs, and streams run events.
 - `frontend/` is a Vite + React operator UI for editing ward/application config and driving staged Terraform actions.
-- `infrastructure/core/` creates the AWS and EKS foundation.
-- `infrastructure/platform/` creates the in-cluster add-ons, namespaces, and workloads after core is live.
+- `infrastructure/core/` creates the AWS foundation, ECR repositories, and EKS cluster.
+- `infrastructure/platform/` creates the in-cluster add-ons and namespace bootstrap after core is live.
+- `infrastructure/applications/` creates workloads after the shared platform layer is live.
 - `infrastructure/policies/` applies the Kyverno and Tetragon manifest layer after platform is live.
 
 This document reflects the code that exists in the repository today, not the long-term intent.
@@ -16,6 +17,7 @@ The current implementation provisions or manages:
 
 - AWS VPC and EKS through the `terraform-aws-modules/vpc/aws` and `terraform-aws-modules/eks/aws` modules
 - EKS access entries for configured admin IAM principals
+- ECR repositories for backend and frontend container images
 - Cilium with Hubble enabled, chained on top of the AWS VPC CNI plugin
 - Tetragon
 - Kyverno
@@ -37,7 +39,9 @@ Two important reality checks:
 - [frontend/README.md](frontend/README.md): UI structure, runtime behavior, local development
 - [infrastructure/core/README.md](infrastructure/core/README.md): core-stage resources, inputs, outputs, caveats
 - [infrastructure/platform/README.md](infrastructure/platform/README.md): platform-stage resources, inputs, outputs, and provider behavior
+- `infrastructure/applications/`: workload-only Terraform root with its own state boundary
 - [infrastructure/policies/README.md](infrastructure/policies/README.md): policy-stage resources, prerequisites, inputs, outputs
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md): commit convention, local hooks, PR quality gates, and release automation
 - [TESTING_AND_USAGE.md](TESTING_AND_USAGE.md): local bring-up, smoke tests, and operator workflow
 
 ## Terraform Stages

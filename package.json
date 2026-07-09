@@ -1,0 +1,24 @@
+{
+  "name": "isolens-release-tooling",
+  "private": true,
+  "version": "0.0.0-development",
+  "scripts": {
+    "commitlint": "commitlint --config tooling/commitlint.config.mjs --from=HEAD~1 --to=HEAD",
+    "commitlint:edit": "commitlint --config tooling/commitlint.config.mjs --edit",
+    "format:check": "prettier --check .",
+    "format:write": "prettier --write .",
+    "release": "semantic-release --extends ./tooling/releaserc.json",
+    "release:dry-run": "semantic-release --extends ./tooling/releaserc.json --dry-run"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^11.0.6",
+    "@semantic-release/release-notes-generator": "^14.1.0",
+    "prettier": "^3.6.2",
+    "semantic-release": "^24.2.7"
+  }
+}

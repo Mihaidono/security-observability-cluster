@@ -14,6 +14,17 @@ output "core_backend_config_snippet" {
   }
 }
 
+output "platform_backend_config_snippet" {
+  description = "Backend configuration values that match infrastructure/platform/backend.hcl."
+  value = {
+    bucket       = aws_s3_bucket.terraform_state.bucket
+    region       = var.region
+    encrypt      = true
+    key          = "dev/platform/terraform.tfstate"
+    use_lockfile = true
+  }
+}
+
 output "policies_backend_config_snippet" {
   description = "Backend configuration values that match infrastructure/policies/backend.hcl."
   value = {
@@ -21,6 +32,17 @@ output "policies_backend_config_snippet" {
     region       = var.region
     encrypt      = true
     key          = "dev/policies/terraform.tfstate"
+    use_lockfile = true
+  }
+}
+
+output "applications_backend_config_snippet" {
+  description = "Backend configuration values that match infrastructure/applications/backend.hcl."
+  value = {
+    bucket       = aws_s3_bucket.terraform_state.bucket
+    region       = var.region
+    encrypt      = true
+    key          = "dev/applications/terraform.tfstate"
     use_lockfile = true
   }
 }
