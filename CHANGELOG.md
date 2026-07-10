@@ -1,3 +1,9 @@
+## [0.6.1](https://github.com/Mihaidono/security-observability-cluster/compare/v0.6.0...v0.6.1) (2026-07-10)
+
+### Bug Fixes
+
+* **docker:** trivy issues addressed ([949689b](https://github.com/Mihaidono/security-observability-cluster/commit/949689b960bcbe1afb988de2c31df94e22941e83))
+
 ## [0.6.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.5.0...v0.6.0) (2026-07-10)
 
 ### Features
