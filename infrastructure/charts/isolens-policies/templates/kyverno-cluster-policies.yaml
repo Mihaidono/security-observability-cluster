@@ -1,0 +1,53 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-ward-subject-label
+spec:
+  background: true
+  rules:
+    - name: pods-in-wards-must-carry-subject-label
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchExpressions:
+                  - key: analysis-tier
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        message: Pods deployed into ward namespaces must declare the isolens.io/subject label.
+        pattern:
+          metadata:
+            labels:
+              isolens.io/subject: "?*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag-in-wards
+spec:
+  background: true
+  rules:
+    - name: disallow-latest-image-tags
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchExpressions:
+                  - key: analysis-tier
+                    operator: Exists
+      validate:
+        failureAction: Enforce
+        message: Ward workloads must pin container images and may not use the latest tag.
+        foreach:
+          - list: request.object.spec.containers
+            deny:
+              conditions:
+                any:
+                  - key: "{{ `{{ contains(element.image, ':latest') }}` }}"
+                    operator: Equals
+                    value: true

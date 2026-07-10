@@ -1,8 +1,8 @@
 output "kyverno_cluster_policies" {
   description = "Kyverno ClusterPolicy objects managed by the policies module."
   value = [
-    kubernetes_manifest.kyverno_require_subject_label.manifest.metadata.name,
-    kubernetes_manifest.kyverno_disallow_latest_tag.manifest.metadata.name,
+    "require-ward-subject-label",
+    "disallow-latest-tag-in-wards",
   ]
 }
 

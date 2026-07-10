@@ -1,149 +1,18 @@
-resource "kubernetes_manifest" "kyverno_require_subject_label" {
-  manifest = {
-    apiVersion = "kyverno.io/v1"
-    kind       = "ClusterPolicy"
-    metadata = {
-      name = "require-ward-subject-label"
-    }
-    spec = {
-      background = true
-      rules = [
-        {
-          name = "pods-in-wards-must-carry-subject-label"
-          match = {
-            any = [
-              {
-                resources = {
-                  kinds = ["Pod"]
-                  namespaceSelector = {
-                    matchExpressions = [
-                      {
-                        key      = "analysis-tier"
-                        operator = "Exists"
-                      }
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-          validate = {
-            failureAction = "Enforce"
-            message       = "Pods deployed into ward namespaces must declare the isolens.io/subject label."
-            pattern = {
-              metadata = {
-                labels = {
-                  "isolens.io/subject" = "?*"
-                }
-              }
-            }
-          }
-        }
-      ]
-    }
-  }
-}
+resource "helm_release" "policy_manifests" {
+  name             = "isolens-policies"
+  chart            = "${path.root}/../charts/isolens-policies"
+  namespace        = "kube-system"
+  create_namespace = false
+  wait             = true
+  timeout          = 600
+  atomic           = true
+  cleanup_on_fail  = true
 
-resource "kubernetes_manifest" "kyverno_disallow_latest_tag" {
-  manifest = {
-    apiVersion = "kyverno.io/v1"
-    kind       = "ClusterPolicy"
-    metadata = {
-      name = "disallow-latest-tag-in-wards"
-    }
-    spec = {
-      background = true
-      rules = [
-        {
-          name = "disallow-latest-image-tags"
-          match = {
-            any = [
-              {
-                resources = {
-                  kinds = ["Pod"]
-                  namespaceSelector = {
-                    matchExpressions = [
-                      {
-                        key      = "analysis-tier"
-                        operator = "Exists"
-                      }
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-          validate = {
-            failureAction = "Enforce"
-            message       = "Ward workloads must pin container images and may not use the latest tag."
-            foreach = [
-              {
-                list = "request.object.spec.containers"
-                deny = {
-                  conditions = {
-                    any = [
-                      {
-                        key      = "{{ contains(element.image, ':latest') }}"
-                        operator = "Equals"
-                        value    = true
-                      }
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-        }
-      ]
-    }
-  }
-}
-
-resource "kubernetes_manifest" "tetragon_suspicious_exec" {
-  for_each = var.analysis_subjects
-
-  manifest = {
-    apiVersion = "cilium.io/v1alpha1"
-    kind       = "TracingPolicyNamespaced"
-    metadata = {
-      name      = "suspicious-exec"
-      namespace = each.key
-    }
-    spec = {
-      kprobes = [
-        {
-          call    = "sys_execve"
-          syscall = true
-          selectors = [
-            {
-              matchBinaries = [
-                {
-                  operator = "In"
-                  values   = local.suspicious_network_binaries
-                }
-              ]
-              matchActions = [
-                {
-                  action = "Post"
-                }
-              ]
-            },
-            {
-              matchBinaries = [
-                {
-                  operator = "In"
-                  values   = local.suspicious_shell_binaries
-                }
-              ]
-              matchActions = [
-                {
-                  action = "Post"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }
-  }
+  values = [
+    yamlencode({
+      analysisSubjects          = sort(keys(var.analysis_subjects))
+      suspiciousNetworkBinaries = local.suspicious_network_binaries
+      suspiciousShellBinaries   = local.suspicious_shell_binaries
+    })
+  ]
 }
