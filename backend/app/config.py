@@ -6,6 +6,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .models import RunStage
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -17,11 +19,21 @@ class Settings:
     state_dir: Path
     runs_dir: Path
     database_url: str
-    managed_tfvars_path: Path
+    managed_config_path: Path
+    core_tfvars_path: Path
+    platform_tfvars_path: Path
+    applications_tfvars_path: Path
     default_config_path: Path
     terraform_bin: str
     cors_origins: list[str]
     api_token: str
+
+    def tfvars_path_for_stage(self, stage: RunStage) -> Path:
+        if stage == RunStage.core:
+            return self.core_tfvars_path
+        if stage == RunStage.platform:
+            return self.platform_tfvars_path
+        return self.applications_tfvars_path
 
 
 def get_settings() -> Settings:
@@ -35,7 +47,10 @@ def get_settings() -> Settings:
     state_dir = backend_root / "state"
     runs_dir = state_dir / "runs"
     state_dir.mkdir(parents=True, exist_ok=True)
-    managed_tfvars_path = infrastructure_root / "frontend-managed.auto.tfvars.json"
+    managed_config_path = state_dir / "managed-config.json"
+    core_tfvars_path = terraform_core_root / "managed.auto.tfvars.json"
+    platform_tfvars_path = terraform_platform_root / "managed.auto.tfvars.json"
+    applications_tfvars_path = terraform_applications_root / "managed.auto.tfvars.json"
     default_config_path = backend_root / "app" / "default_managed_config.json"
 
     cors_origins = [
@@ -56,7 +71,10 @@ def get_settings() -> Settings:
             "ISOLENS_DATABASE_URL",
             "postgresql://isolens:isolens-dev-password-change-me@localhost:5432/isolens",
         ),
-        managed_tfvars_path=managed_tfvars_path,
+        managed_config_path=managed_config_path,
+        core_tfvars_path=core_tfvars_path,
+        platform_tfvars_path=platform_tfvars_path,
+        applications_tfvars_path=applications_tfvars_path,
         default_config_path=default_config_path,
         terraform_bin=os.getenv("TERRAFORM_BIN", "terraform"),
         cors_origins=cors_origins,

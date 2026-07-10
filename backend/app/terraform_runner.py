@@ -104,7 +104,7 @@ class TerraformRunner:
             "-out",
             str(run_dir / "planned.tfplan"),
             "-var-file",
-            str(self.settings.managed_tfvars_path),
+            str(self.settings.tfvars_path_for_stage(stage)),
         ]
         run = TerraformRun(
             id=run_id,
@@ -191,7 +191,7 @@ class TerraformRunner:
             "-input=false",
             "-no-color",
             "-var-file",
-            str(self.settings.managed_tfvars_path),
+            str(self.settings.tfvars_path_for_stage(stage)),
         ]
         run = TerraformRun(
             id=destroy_run_id,
@@ -422,7 +422,7 @@ class TerraformRunner:
             "-out",
             str(plan_file),
             "-var-file",
-            str(self.settings.managed_tfvars_path),
+            str(self.settings.tfvars_path_for_stage(run.stage)),
         ]
         run.command = command
         await self._persist_run(run)
@@ -578,7 +578,7 @@ class TerraformRunner:
             "-input=false",
             "-no-color",
             "-var-file",
-            str(self.settings.managed_tfvars_path),
+            str(self.settings.tfvars_path_for_stage(run.stage)),
         ]
         run.command = command
         await self._persist_run(run)

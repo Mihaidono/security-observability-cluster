@@ -110,7 +110,6 @@ terraform apply -var-file=../terraform.tfvars
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| analysis_subjects | Accepted for compatibility with the shared tfvars payload. The core stage no longer manages ward namespaces directly. | `map(any)` | `{}` | no |
 | backend_ecr_repository_name | Name of the ECR repository that stores backend container images. | `string` | `"isolens-backend"` | no |
 | cluster_admin_principal_arns | IAM principal ARNs granted EKS cluster-admin access through access entries so the later platform and applications stages can manage in-cluster resources safely. | `list(string)` | `[]` | no |
 | cluster_log_retention_in_days | Retention period, in days, for the EKS control-plane CloudWatch log group. | `number` | `90` | no |
@@ -128,7 +127,6 @@ terraform apply -var-file=../terraform.tfvars
 | public_subnets | Public subnet CIDRs for load balancers and NAT. | `list(string)` | <pre>[<br/>  "10.0.101.0/24",<br/>  "10.0.102.0/24"<br/>]</pre> | no |
 | region | AWS region where the core stage creates the VPC, EKS cluster, and stage-owned AWS resources. | `string` | `"eu-north-1"` | no |
 | vpc_cidr | CIDR block for the lab VPC. | `string` | `"10.0.0.0/16"` | no |
-| ward_applications | Accepted for compatibility with the shared tfvars payload. The core stage no longer manages in-cluster workloads directly. | `any` | `[]` | no |
 
 ## Outputs
 

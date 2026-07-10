@@ -162,14 +162,18 @@ Cancellation is supported, but canceling `apply` or `destroy` can still leave pa
 The operator UI edits the JSON-backed config model, not raw `.tfvars` text.
 
 - source template: `backend/app/default_managed_config.json`
-- persisted managed config: `infrastructure/frontend-managed.auto.tfvars.json`
-- Terraform runs use `-var-file infrastructure/frontend-managed.auto.tfvars.json`
+- persisted managed config: `backend/state/managed-config.json`
+- generated per-root tfvars:
+  - `infrastructure/core/managed.auto.tfvars.json`
+  - `infrastructure/platform/managed.auto.tfvars.json`
+  - `infrastructure/applications/managed.auto.tfvars.json`
+- Terraform runs use the stage-matching generated `managed.auto.tfvars.json`
 
 The shared handwritten example file at `infrastructure/terraform.tfvars` remains useful for direct Terraform usage and reference data, but the backend itself operates on the managed JSON file.
 
 That managed JSON file now explicitly carries `cluster_log_retention_in_days`, so the backend/frontend/Terraform path preserves the EKS control-plane log-retention setting instead of depending on an implicit default.
 
-The same managed file also carries the full ward and workload inventory. Scenario loading is still implemented as managed config changes; selecting a scenario replaces the current ward's `ward_applications` with the bundle defined by that scenario.
+That canonical managed config also carries the full ward and workload inventory. Scenario loading is still implemented as managed config changes; selecting a scenario replaces the current ward's `ward_applications` with the bundle defined by that scenario.
 
 ## Current Caveats
 

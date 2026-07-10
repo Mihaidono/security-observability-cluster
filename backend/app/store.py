@@ -106,16 +106,37 @@ class PostgresStore:
         return TerraformConfig.model_validate_json(self.settings.default_config_path.read_text())
 
     def load_config(self) -> TerraformConfig:
-        path = self.settings.managed_tfvars_path
+        path = self.settings.managed_config_path
         if not path.exists():
+            legacy_path = self.settings.infrastructure_root / "frontend-managed.auto.tfvars.json"
+            if legacy_path.exists():
+                config = TerraformConfig.model_validate_json(legacy_path.read_text())
+                self.save_config(config)
+                return config
             default_config = self.load_default_config()
             self.save_config(default_config)
             return default_config
-        return TerraformConfig.model_validate_json(path.read_text())
+        config = TerraformConfig.model_validate_json(path.read_text())
+        if not all(
+            stage_path.exists()
+            for stage_path in [
+                self.settings.core_tfvars_path,
+                self.settings.platform_tfvars_path,
+                self.settings.applications_tfvars_path,
+            ]
+        ):
+            self.save_config(config)
+        return config
 
     def save_config(self, config: TerraformConfig) -> None:
         payload = json.dumps(config.model_dump(mode="json"), indent=2)
-        self.settings.managed_tfvars_path.write_text(f"{payload}\n")
+        self.settings.managed_config_path.write_text(f"{payload}\n")
+
+        self.settings.core_tfvars_path.write_text(f"{json.dumps(core_tfvars_payload(config), indent=2)}\n")
+        self.settings.platform_tfvars_path.write_text(f"{json.dumps(platform_tfvars_payload(config), indent=2)}\n")
+        self.settings.applications_tfvars_path.write_text(
+            f"{json.dumps(applications_tfvars_payload(config), indent=2)}\n"
+        )
 
     def reset_config(self) -> TerraformConfig:
         config = self.load_default_config()
@@ -257,6 +278,39 @@ class PostgresStore:
             if run.kind == RunKind.apply and run.status == RunStatus.applied and run.outputs is not None:
                 return run
         return None
+
+
+def core_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
+    return {
+        "project_name": config.project_name,
+        "environment": config.environment,
+        "cluster_name": config.cluster_name,
+        "kubernetes_version": config.kubernetes_version,
+        "cluster_log_retention_in_days": config.cluster_log_retention_in_days,
+        "cluster_admin_principal_arns": config.cluster_admin_principal_arns,
+    }
+
+
+def platform_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
+    return {
+        "project_name": config.project_name,
+        "environment": config.environment,
+        "cluster_name": config.cluster_name,
+        "kubernetes_version": config.kubernetes_version,
+        "cluster_admin_principal_arns": config.cluster_admin_principal_arns,
+        "analysis_subjects": config.analysis_subjects,
+    }
+
+
+def applications_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
+    return {
+        "project_name": config.project_name,
+        "environment": config.environment,
+        "cluster_name": config.cluster_name,
+        "cluster_admin_principal_arns": config.cluster_admin_principal_arns,
+        "analysis_subjects": config.analysis_subjects,
+        "ward_applications": config.ward_applications,
+    }
 
     def _row_to_run(self, row: dict[str, Any]) -> TerraformRun:
         plan_summary = None

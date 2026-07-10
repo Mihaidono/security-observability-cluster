@@ -13,7 +13,11 @@ The managed config model now includes `cluster_log_retention_in_days`, so the ba
 At startup the backend resolves paths relative to the repo root:
 
 - default config template: `backend/app/default_managed_config.json`
-- managed config file: `infrastructure/frontend-managed.auto.tfvars.json`
+- managed config file: `backend/state/managed-config.json`
+- generated per-root tfvars:
+  - `infrastructure/core/managed.auto.tfvars.json`
+  - `infrastructure/platform/managed.auto.tfvars.json`
+  - `infrastructure/applications/managed.auto.tfvars.json`
 - Terraform roots:
   - `infrastructure/core`
   - `infrastructure/platform`
@@ -21,7 +25,7 @@ At startup the backend resolves paths relative to the repo root:
 - PostgreSQL database: configured by `ISOLENS_DATABASE_URL`
 - per-run artifacts and logs: `backend/state/runs/<run_id>/`
 
-If the managed config file does not exist yet, the backend seeds it from the default JSON template.
+If the managed config file does not exist yet, the backend seeds it from the default JSON template and regenerates all three stage-local tfvars files. A legacy `infrastructure/frontend-managed.auto.tfvars.json` file is also migrated automatically on first load.
 
 ## Authentication
 
@@ -45,8 +49,8 @@ The backend does not apply Terraform directly from browser input. The flow is:
 
 1. the frontend edits a JSON config model
 2. `PUT /api/config` persists that model
-3. backend run endpoints invoke Terraform from the stage directory with:
-   `-var-file infrastructure/frontend-managed.auto.tfvars.json`
+3. backend run endpoints invoke Terraform from the stage directory with the matching generated file:
+   `-var-file infrastructure/<stage>/managed.auto.tfvars.json`
 
 Before each plan/apply/destroy run, the backend performs:
 
