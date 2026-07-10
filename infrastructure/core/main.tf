@@ -7,51 +7,6 @@ resource "aws_cloudwatch_log_group" "eks_cluster" {
   }
 }
 
-locals {
-  ecr_repositories = {
-    backend  = var.backend_ecr_repository_name
-    frontend = var.frontend_ecr_repository_name
-  }
-}
-
-resource "aws_ecr_repository" "application_images" {
-  for_each = local.ecr_repositories
-
-  name                 = each.value
-  image_tag_mutability = var.ecr_image_tag_mutability
-
-  image_scanning_configuration {
-    scan_on_push = var.ecr_scan_on_push
-  }
-
-  encryption_configuration {
-    encryption_type = "AES256"
-  }
-}
-
-resource "aws_ecr_lifecycle_policy" "application_images" {
-  for_each = aws_ecr_repository.application_images
-
-  repository = each.value.name
-  policy = jsonencode({
-    rules = [
-      {
-        rulePriority = 1
-        description  = "Expire untagged images after the configured retention period."
-        selection = {
-          tagStatus   = "untagged"
-          countType   = "sinceImagePushed"
-          countUnit   = "days"
-          countNumber = var.ecr_untagged_image_retention_days
-        }
-        action = {
-          type = "expire"
-        }
-      }
-    ]
-  })
-}
-
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "5.21.0"

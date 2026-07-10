@@ -35,3 +35,23 @@ output "applications_backend_config_snippet" {
     use_lockfile = true
   }
 }
+
+output "backend_ecr_repository_name" {
+  description = "Name of the ECR repository that stores backend container images."
+  value       = aws_ecr_repository.application_images["backend"].name
+}
+
+output "backend_ecr_repository_url" {
+  description = "URL of the ECR repository that stores backend container images."
+  value       = aws_ecr_repository.application_images["backend"].repository_url
+}
+
+output "frontend_ecr_repository_name" {
+  description = "Name of the ECR repository that stores frontend container images."
+  value       = aws_ecr_repository.application_images["frontend"].name
+}
+
+output "frontend_ecr_repository_url" {
+  description = "URL of the ECR repository that stores frontend container images."
+  value       = aws_ecr_repository.application_images["frontend"].repository_url
+}

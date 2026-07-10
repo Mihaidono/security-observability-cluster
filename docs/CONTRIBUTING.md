@@ -137,7 +137,7 @@ Required repository configuration:
 
 Operational notes:
 
-- the ECR repositories must already exist
+- the ECR repositories should be created by the `bootstrap` Terraform root before the image workflows are used
 - these workflows are push-based, not PR-based
 - path filters are used so unrelated changes do not rebuild images
 - the container scan currently fails on `HIGH,CRITICAL`

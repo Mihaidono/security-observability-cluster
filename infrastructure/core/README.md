@@ -1,6 +1,6 @@
 # Core Terraform Stage
 
-The `core` stage now owns only the AWS and EKS foundation for the lab.
+The `core` stage owns the AWS network and EKS foundation for the lab.
 
 ## What This Stage Creates
 
@@ -8,7 +8,6 @@ The `core` stage now owns only the AWS and EKS foundation for the lab.
 - EKS cluster via `terraform-aws-modules/eks/aws`
 - one managed node group
 - an explicit CloudWatch log group for EKS control-plane logs
-- ECR repositories for the backend and frontend images
 - EKS access entries and cluster-admin policy associations for configured IAM principals
 
 The `core` stage does not create namespaces, Helm releases, workloads, or policy CRDs anymore. Those live in the `platform` and `applications` stages.
@@ -29,14 +28,6 @@ This stage actively uses:
 - `node_instance_types`
 - `node_group_scaling`
 - `cluster_admin_principal_arns`
-- `backend_ecr_repository_name`
-- `frontend_ecr_repository_name`
-- `ecr_image_tag_mutability`
-- `ecr_scan_on_push`
-- `ecr_untagged_image_retention_days`
-
-The shared config still passes `analysis_subjects` and `ward_applications`, but the root accepts them only for compatibility.
-
 ## Outputs
 
 Current outputs include:
@@ -45,10 +36,6 @@ Current outputs include:
 - `cluster_endpoint`
 - `cluster_security_group_id`
 - `cluster_log_group_name`
-- `backend_ecr_repository_name`
-- `backend_ecr_repository_url`
-- `frontend_ecr_repository_name`
-- `frontend_ecr_repository_url`
 - `update_kubeconfig_command`
 
 ## Backend and State
@@ -101,8 +88,6 @@ terraform apply -var-file=../terraform.tfvars
 | Name | Type |
 | ---- | ---- |
 | [aws_cloudwatch_log_group.eks_cluster](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/cloudwatch_log_group) | resource |
-| [aws_ecr_lifecycle_policy.application_images](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/ecr_lifecycle_policy) | resource |
-| [aws_ecr_repository.application_images](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/ecr_repository) | resource |
 | [aws_eks_access_entry.cluster_admins](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/eks_access_entry) | resource |
 | [aws_eks_access_policy_association.cluster_admins](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/eks_access_policy_association) | resource |
 
@@ -110,15 +95,10 @@ terraform apply -var-file=../terraform.tfvars
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| backend_ecr_repository_name | Name of the ECR repository that stores backend container images. | `string` | `"isolens-backend"` | no |
 | cluster_admin_principal_arns | IAM principal ARNs granted EKS cluster-admin access through access entries so the later platform and applications stages can manage in-cluster resources safely. | `list(string)` | `[]` | no |
 | cluster_log_retention_in_days | Retention period, in days, for the EKS control-plane CloudWatch log group. | `number` | `90` | no |
 | cluster_name | Name of the EKS cluster created by the core stage. | `string` | `"forensic-lab"` | no |
-| ecr_image_tag_mutability | Tag mutability policy for the ECR repositories. Keep MUTABLE while the CI flow publishes the latest tag. | `string` | `"MUTABLE"` | no |
-| ecr_scan_on_push | Whether ECR basic image scanning runs automatically when images are pushed. | `bool` | `true` | no |
-| ecr_untagged_image_retention_days | Number of days to retain untagged images in the backend and frontend ECR repositories. | `number` | `7` | no |
 | environment | Environment name used for tags and naming. | `string` | `"lab"` | no |
-| frontend_ecr_repository_name | Name of the ECR repository that stores frontend container images. | `string` | `"isolens-frontend"` | no |
 | kubernetes_version | Kubernetes minor version requested for the EKS control plane. | `string` | `"1.35"` | no |
 | node_group_scaling | Managed node group scaling configuration. | <pre>object({<br/>    min_size     = number<br/>    max_size     = number<br/>    desired_size = number<br/>  })</pre> | <pre>{<br/>  "desired_size": 2,<br/>  "max_size": 5,<br/>  "min_size": 2<br/>}</pre> | no |
 | node_instance_types | Worker node instance types. | `list(string)` | <pre>[<br/>  "t3.xlarge"<br/>]</pre> | no |
@@ -132,13 +112,9 @@ terraform apply -var-file=../terraform.tfvars
 
 | Name | Description |
 | ---- | ----------- |
-| backend_ecr_repository_name | Name of the ECR repository that stores backend container images. |
-| backend_ecr_repository_url | URL of the ECR repository that stores backend container images. |
 | cluster_endpoint | EKS API server endpoint. |
 | cluster_log_group_name | CloudWatch log group receiving EKS control-plane logs. |
 | cluster_name | Name of the provisioned EKS cluster. |
 | cluster_security_group_id | Security group attached to the EKS control plane. |
-| frontend_ecr_repository_name | Name of the ECR repository that stores frontend container images. |
-| frontend_ecr_repository_url | URL of the ECR repository that stores frontend container images. |
 | update_kubeconfig_command | Command to merge this cluster into the local kubeconfig. |
 <!-- END_TF_DOCS -->

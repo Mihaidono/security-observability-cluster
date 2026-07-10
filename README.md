@@ -4,7 +4,8 @@ Isolens is a Terraform-driven EKS lab with a small control plane:
 
 - `backend/` runs a FastAPI service that stores editable config, queues Terraform runs, and streams run events.
 - `frontend/` is a Vite + React operator UI for editing ward/application config and driving staged Terraform actions.
-- `infrastructure/core/` creates the AWS foundation, ECR repositories, and EKS cluster.
+- `infrastructure/bootstrap/` creates the remote-state bucket and shared ECR repositories.
+- `infrastructure/core/` creates the AWS foundation and EKS cluster.
 - `infrastructure/platform/` creates the in-cluster add-ons, policy layer, control-plane namespace, and PostgreSQL service after core is live.
 - `infrastructure/applications/` creates workloads after the shared platform layer is live.
 
@@ -47,7 +48,7 @@ Two important reality checks:
 The Terraform is intentionally split:
 
 1. `bootstrap`
-   Creates the S3 bucket used by the remote state backends.
+   Creates the S3 bucket used by the remote state backends and the shared ECR repositories.
 
 2. `core`
    Owns AWS infrastructure, the EKS cluster, and cluster-admin access bootstrap.
