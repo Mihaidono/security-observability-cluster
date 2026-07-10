@@ -33,6 +33,21 @@ output "control_plane_namespace" {
   value       = module.control_plane.namespace
 }
 
+output "control_plane_backend_service_name" {
+  description = "ClusterIP Service name for the control-plane backend."
+  value       = module.control_plane.backend_service_name
+}
+
+output "control_plane_backend_service_fqdn" {
+  description = "Cluster-local DNS name for the control-plane backend service."
+  value       = module.control_plane.backend_service_fqdn
+}
+
+output "control_plane_frontend_service_name" {
+  description = "Service name for the control-plane frontend."
+  value       = module.control_plane.frontend_service_name
+}
+
 output "postgresql_service_fqdn" {
   description = "Cluster-local DNS name for the PostgreSQL service used by the control plane."
   value       = module.postgresql.service_fqdn

@@ -38,8 +38,9 @@ WORKDIR /app/backend
 
 COPY --from=builder /opt/venv /opt/venv
 COPY backend/app /app/backend/app
+COPY infrastructure /app/infrastructure
 
-RUN chown -R backend:backend /app/backend /opt/venv /home/backend
+RUN chown -R backend:backend /app/backend /app/infrastructure /opt/venv /home/backend
 
 USER backend
 

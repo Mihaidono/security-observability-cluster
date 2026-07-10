@@ -162,6 +162,21 @@ http://127.0.0.1:12000
 | analysis_subjects | Ward namespace definitions. Each entry creates a namespace, ward metadata ConfigMap, ResourceQuota, LimitRange, and baseline NetworkPolicies. | <pre>map(object({<br/>    tier        = string<br/>    description = string<br/>    labels      = optional(map(string), {})<br/>    annotations = optional(map(string), {})<br/>    resource_quota = optional(object({<br/>      pods            = optional(string, "10")<br/>      requests_cpu    = optional(string, "2")<br/>      requests_memory = optional(string, "4Gi")<br/>      limits_cpu      = optional(string, "4")<br/>      limits_memory   = optional(string, "8Gi")<br/>    }), {})<br/>  }))</pre> | n/a | yes |
 | cluster_admin_principal_arns | IAM principal ARNs granted cluster-admin access in the core stage. Used here to keep the post-core readiness wait tied to access configuration changes. | `list(string)` | `[]` | no |
 | cluster_name | Name of the existing EKS cluster targeted by the platform stage. | `string` | `"forensic-lab"` | no |
+| control_plane_backend_api_token | Bearer token required by the control-plane backend API. | `string` | `"dev-token"` | no |
+| control_plane_backend_container_port | Container port for the control-plane backend workload. | `number` | `8000` | no |
+| control_plane_backend_image | Container image for the control-plane backend workload. | `string` | `"401262697743.dkr.ecr.eu-north-1.amazonaws.com/isolens-backend:latest"` | no |
+| control_plane_backend_image_pull_policy | Image pull policy for the control-plane backend workload. | `string` | `"IfNotPresent"` | no |
+| control_plane_backend_replicas | Replica count for the control-plane backend workload. | `number` | `1` | no |
+| control_plane_backend_resources | Resource requests and limits for the control-plane backend container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
+| control_plane_backend_service_name | Service name for the control-plane backend workload. | `string` | `"isolens-backend"` | no |
+| control_plane_backend_service_port | Service port for the control-plane backend workload. | `number` | `8000` | no |
+| control_plane_frontend_container_port | Container port for the control-plane frontend workload. | `number` | `8080` | no |
+| control_plane_frontend_image | Container image for the control-plane frontend workload. | `string` | `"401262697743.dkr.ecr.eu-north-1.amazonaws.com/isolens-frontend:latest"` | no |
+| control_plane_frontend_image_pull_policy | Image pull policy for the control-plane frontend workload. | `string` | `"IfNotPresent"` | no |
+| control_plane_frontend_replicas | Replica count for the control-plane frontend workload. | `number` | `1` | no |
+| control_plane_frontend_resources | Resource requests and limits for the control-plane frontend container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "500m",<br/>  "limits_memory": "256Mi",<br/>  "requests_cpu": "100m",<br/>  "requests_memory": "128Mi"<br/>}</pre> | no |
+| control_plane_frontend_service_name | Service name for the control-plane frontend workload. | `string` | `"isolens-frontend"` | no |
+| control_plane_frontend_service_port | Service port for the control-plane frontend workload. | `number` | `80` | no |
 | control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. | `string` | `"isolens-system"` | no |
 | control_plane_namespace_annotations | Additional annotations applied to the control-plane namespace. | `map(string)` | `{}` | no |
 | control_plane_namespace_labels | Additional labels applied to the control-plane namespace. | `map(string)` | `{}` | no |
@@ -184,6 +199,9 @@ http://127.0.0.1:12000
 
 | Name | Description |
 | ---- | ----------- |
+| control_plane_backend_service_fqdn | Cluster-local DNS name for the control-plane backend service. |
+| control_plane_backend_service_name | ClusterIP Service name for the control-plane backend. |
+| control_plane_frontend_service_name | Service name for the control-plane frontend. |
 | control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. |
 | ingress_controller_namespace | Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled. |
 | kyverno_cluster_policies | Kyverno ClusterPolicy objects managed by the platform stage. |

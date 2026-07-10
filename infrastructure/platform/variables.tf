@@ -68,6 +68,117 @@ variable "control_plane_namespace_annotations" {
   default     = {}
 }
 
+variable "control_plane_backend_image" {
+  description = "Container image for the control-plane backend workload."
+  type        = string
+  default     = "401262697743.dkr.ecr.eu-north-1.amazonaws.com/isolens-backend:latest"
+}
+
+variable "control_plane_backend_image_pull_policy" {
+  description = "Image pull policy for the control-plane backend workload."
+  type        = string
+  default     = "IfNotPresent"
+}
+
+variable "control_plane_backend_replicas" {
+  description = "Replica count for the control-plane backend workload."
+  type        = number
+  default     = 1
+}
+
+variable "control_plane_backend_service_name" {
+  description = "Service name for the control-plane backend workload."
+  type        = string
+  default     = "isolens-backend"
+}
+
+variable "control_plane_backend_service_port" {
+  description = "Service port for the control-plane backend workload."
+  type        = number
+  default     = 8000
+}
+
+variable "control_plane_backend_container_port" {
+  description = "Container port for the control-plane backend workload."
+  type        = number
+  default     = 8000
+}
+
+variable "control_plane_backend_api_token" {
+  description = "Bearer token required by the control-plane backend API."
+  type        = string
+  sensitive   = true
+  default     = "dev-token"
+}
+
+variable "control_plane_backend_resources" {
+  description = "Resource requests and limits for the control-plane backend container."
+  type = object({
+    requests_cpu    = string
+    requests_memory = string
+    limits_cpu      = string
+    limits_memory   = string
+  })
+  default = {
+    requests_cpu    = "250m"
+    requests_memory = "512Mi"
+    limits_cpu      = "1000m"
+    limits_memory   = "1Gi"
+  }
+}
+
+variable "control_plane_frontend_image" {
+  description = "Container image for the control-plane frontend workload."
+  type        = string
+  default     = "401262697743.dkr.ecr.eu-north-1.amazonaws.com/isolens-frontend:latest"
+}
+
+variable "control_plane_frontend_image_pull_policy" {
+  description = "Image pull policy for the control-plane frontend workload."
+  type        = string
+  default     = "IfNotPresent"
+}
+
+variable "control_plane_frontend_replicas" {
+  description = "Replica count for the control-plane frontend workload."
+  type        = number
+  default     = 1
+}
+
+variable "control_plane_frontend_service_name" {
+  description = "Service name for the control-plane frontend workload."
+  type        = string
+  default     = "isolens-frontend"
+}
+
+variable "control_plane_frontend_service_port" {
+  description = "Service port for the control-plane frontend workload."
+  type        = number
+  default     = 80
+}
+
+variable "control_plane_frontend_container_port" {
+  description = "Container port for the control-plane frontend workload."
+  type        = number
+  default     = 8080
+}
+
+variable "control_plane_frontend_resources" {
+  description = "Resource requests and limits for the control-plane frontend container."
+  type = object({
+    requests_cpu    = string
+    requests_memory = string
+    limits_cpu      = string
+    limits_memory   = string
+  })
+  default = {
+    requests_cpu    = "100m"
+    requests_memory = "128Mi"
+    limits_cpu      = "500m"
+    limits_memory   = "256Mi"
+  }
+}
+
 variable "postgresql_name" {
   description = "Base name used for PostgreSQL resources in the control-plane namespace."
   type        = string

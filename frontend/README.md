@@ -165,7 +165,8 @@ Dockerfiles are intentionally split:
   - runs the Vite dev server with bind-mounted source
 - `frontend/Dockerfile.prod`
   - production image used by CI/CD publishing
-  - builds the static frontend and serves it with NGINX
+  - builds the static frontend and serves it through an NGINX reverse proxy
+  - proxies `/api` and WebSocket backend traffic so only the frontend needs public exposure
 
 ## Build
 
@@ -179,6 +180,13 @@ Production container build:
 ```bash
 docker build -f frontend/Dockerfile.prod .
 ```
+
+Production runtime environment:
+
+- `BACKEND_HOST`
+  - defaults to `backend`
+- `BACKEND_PORT`
+  - defaults to `8000`
 
 ## Current Limitations
 
