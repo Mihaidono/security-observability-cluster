@@ -17,5 +17,12 @@ locals {
     "app.kubernetes.io/managed-by" = "terraform"
   }
 
+  runner_labels = {
+    "app.kubernetes.io/name"       = var.runner_name
+    "app.kubernetes.io/component"  = "runner"
+    "app.kubernetes.io/part-of"    = "isolens"
+    "app.kubernetes.io/managed-by" = "terraform"
+  }
+
   backend_service_fqdn = "${var.backend_service_name}.${var.namespace}.svc.cluster.local"
 }

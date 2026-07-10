@@ -133,3 +133,31 @@ variable "frontend_resources" {
     limits_memory   = "256Mi"
   }
 }
+
+variable "runner_name" {
+  description = "Deployment name for the Terraform runner workload."
+  type        = string
+  default     = "isolens-runner"
+}
+
+variable "runner_replicas" {
+  description = "Replica count for the Terraform runner workload."
+  type        = number
+  default     = 2
+}
+
+variable "runner_resources" {
+  description = "Resource requests and limits for the Terraform runner container."
+  type = object({
+    requests_cpu    = string
+    requests_memory = string
+    limits_cpu      = string
+    limits_memory   = string
+  })
+  default = {
+    requests_cpu    = "250m"
+    requests_memory = "512Mi"
+    limits_cpu      = "1000m"
+    limits_memory   = "1Gi"
+  }
+}

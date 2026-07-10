@@ -17,3 +17,8 @@ output "frontend_service_name" {
   description = "Service name for the control-plane frontend."
   value       = kubernetes_service_v1.frontend.metadata[0].name
 }
+
+output "runner_name" {
+  description = "Deployment name for the Terraform runner workload."
+  value       = kubernetes_deployment_v1.runner.metadata[0].name
+}

@@ -179,6 +179,34 @@ variable "control_plane_frontend_resources" {
   }
 }
 
+variable "control_plane_runner_name" {
+  description = "Deployment name for the control-plane Terraform runner."
+  type        = string
+  default     = "isolens-runner"
+}
+
+variable "control_plane_runner_replicas" {
+  description = "Replica count for the control-plane Terraform runner."
+  type        = number
+  default     = 1
+}
+
+variable "control_plane_runner_resources" {
+  description = "Resource requests and limits for the control-plane Terraform runner container."
+  type = object({
+    requests_cpu    = string
+    requests_memory = string
+    limits_cpu      = string
+    limits_memory   = string
+  })
+  default = {
+    requests_cpu    = "250m"
+    requests_memory = "512Mi"
+    limits_cpu      = "1000m"
+    limits_memory   = "1Gi"
+  }
+}
+
 variable "postgresql_name" {
   description = "Base name used for PostgreSQL resources in the control-plane namespace."
   type        = string

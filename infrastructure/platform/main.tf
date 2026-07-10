@@ -29,19 +29,21 @@ module "subjects" {
 module "control_plane" {
   source = "../modules/control-plane"
 
-  namespace                  = var.control_plane_namespace
-  kubernetes_version         = var.kubernetes_version
-  labels                     = var.control_plane_namespace_labels
-  annotations                = var.control_plane_namespace_annotations
-  backend_image              = var.control_plane_backend_image
-  backend_image_pull_policy  = var.control_plane_backend_image_pull_policy
-  backend_replicas           = var.control_plane_backend_replicas
-  backend_service_name       = var.control_plane_backend_service_name
-  backend_service_port       = var.control_plane_backend_service_port
-  backend_container_port     = var.control_plane_backend_container_port
-  backend_api_token          = var.control_plane_backend_api_token
-  backend_database_url       = "postgresql://${var.postgresql_username}:${var.postgresql_password}@${var.postgresql_name}.${var.control_plane_namespace}.svc.cluster.local:${var.postgresql_service_port}/${var.postgresql_database_name}"
-  backend_resources          = var.control_plane_backend_resources
+  namespace          = var.control_plane_namespace
+  kubernetes_version = var.kubernetes_version
+  labels             = var.control_plane_namespace_labels
+  annotations        = var.control_plane_namespace_annotations
+
+  backend_image             = var.control_plane_backend_image
+  backend_image_pull_policy = var.control_plane_backend_image_pull_policy
+  backend_replicas          = var.control_plane_backend_replicas
+  backend_service_name      = var.control_plane_backend_service_name
+  backend_service_port      = var.control_plane_backend_service_port
+  backend_container_port    = var.control_plane_backend_container_port
+  backend_api_token         = var.control_plane_backend_api_token
+  backend_database_url      = "postgresql://${var.postgresql_username}:${var.postgresql_password}@${var.postgresql_name}.${var.control_plane_namespace}.svc.cluster.local:${var.postgresql_service_port}/${var.postgresql_database_name}"
+  backend_resources         = var.control_plane_backend_resources
+
   frontend_image             = var.control_plane_frontend_image
   frontend_image_pull_policy = var.control_plane_frontend_image_pull_policy
   frontend_replicas          = var.control_plane_frontend_replicas
@@ -49,6 +51,10 @@ module "control_plane" {
   frontend_service_port      = var.control_plane_frontend_service_port
   frontend_container_port    = var.control_plane_frontend_container_port
   frontend_resources         = var.control_plane_frontend_resources
+
+  runner_name      = var.control_plane_runner_name
+  runner_replicas  = var.control_plane_runner_replicas
+  runner_resources = var.control_plane_runner_resources
 
   depends_on = [time_sleep.cluster_access_ready]
 }

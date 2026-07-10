@@ -23,6 +23,7 @@ from .models import (
     TerraformRun,
     UnlockStateResponse,
 )
+from .run_messages import canceled_run_message, interrupted_run_message
 from .store import PostgresStore, normalize_log_lines, strip_ansi
 
 
@@ -43,7 +44,7 @@ class CommandFailedError(RuntimeError):
 
 
 class TerraformRunner:
-    def __init__(self, settings: Settings, store: PostgresStore, broker: RunEventBroker) -> None:
+    def __init__(self, settings: Settings, store: PostgresStore, broker: RunEventBroker | None = None) -> None:
         self.settings = settings
         self.store = store
         self.broker = broker
@@ -72,6 +73,31 @@ class TerraformRunner:
         await self._reconcile_incomplete_runs()
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker_loop())
+
+    async def execute_claimed_run(self, run: TerraformRun, worker_id: str) -> None:
+        self._active_run_id = run.id
+        try:
+            latest = self.store.load_run(run.id)
+            if latest is None:
+                return
+            if self.store.is_cancel_requested(run.id) and latest.status == RunStatus.queued:
+                latest.status = RunStatus.canceled
+                latest.completed_at = utc_now()
+                latest.updated_at = utc_now()
+                latest.queue_position = None
+                latest.error = canceled_run_message(latest.kind)
+                await self._persist_run(latest)
+                return
+
+            if latest.kind == RunKind.plan:
+                await self._execute_plan(latest)
+            elif latest.kind == RunKind.apply:
+                await self._execute_apply(latest)
+            else:
+                await self._execute_destroy(latest)
+        finally:
+            self.store.clear_claim(run.id, worker_id)
+            self._active_run_id = None
 
     async def stop(self) -> None:
         self._stopping = True
@@ -207,7 +233,7 @@ class TerraformRunner:
         return run
 
     async def unlock_state(self, stage: RunStage) -> UnlockStateResponse:
-        if self._active_run_id is not None or self._queue_order:
+        if self.store.has_nonterminal_runs():
             raise HTTPException(
                 status_code=409,
                 detail="Cannot unlock state while another run is active or queued. Wait for the queue to drain first.",
@@ -612,12 +638,16 @@ class TerraformRunner:
         await self._publish_run(run.id)
 
     async def _publish_run(self, run_id: str) -> None:
+        if self.broker is None:
+            return
         run = self.store.load_run(run_id)
         if run is None:
             return
         await self.broker.publish(run_id, {"type": "run.updated", "run": run.model_dump(mode="json")})
 
     async def _publish_logs(self, run_id: str, lines: list[str]) -> None:
+        if self.broker is None:
+            return
         if not lines:
             return
         cleaned_lines = normalize_log_lines(lines)
@@ -817,7 +847,7 @@ class TerraformRunner:
         return any(run.kind == RunKind.apply and run.source_run_id == plan_run_id for run in self.store.list_runs())
 
     def _raise_if_canceled(self, run_id: str) -> None:
-        if self._stopping or run_id in self._cancel_requested:
+        if self._stopping or run_id in self._cancel_requested or self.store.is_cancel_requested(run_id):
             raise RunCanceledError("Run canceled by user.")
 
     def _plan_dependency_for_stage(self, stage: RunStage) -> RunStage | None:
@@ -1121,15 +1151,3 @@ def build_command_error_message(command: list[str], exit_code: int, recent_lines
         )
 
     return f"{' '.join(command)} failed with exit code {exit_code}"
-
-
-def canceled_run_message(kind: RunKind) -> str:
-    if kind in {RunKind.apply, RunKind.destroy}:
-        return "Run canceled by user. Terraform may have already changed remote infrastructure or state. Create a fresh plan before continuing."
-    return "Run canceled by user."
-
-
-def interrupted_run_message(kind: RunKind) -> str:
-    if kind in {RunKind.apply, RunKind.destroy}:
-        return "Run was interrupted by a backend restart or worker stop. Terraform may have partially changed remote infrastructure or state. Create a fresh plan before continuing."
-    return "Run was interrupted by a backend restart or worker stop."

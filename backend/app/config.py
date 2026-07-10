@@ -27,6 +27,9 @@ class Settings:
     terraform_bin: str
     cors_origins: list[str]
     api_token: str
+    worker_poll_interval_seconds: float
+    worker_heartbeat_interval_seconds: float
+    worker_heartbeat_ttl_seconds: int
 
     def tfvars_path_for_stage(self, stage: RunStage) -> Path:
         if stage == RunStage.core:
@@ -79,4 +82,7 @@ def get_settings() -> Settings:
         terraform_bin=os.getenv("TERRAFORM_BIN", "terraform"),
         cors_origins=cors_origins,
         api_token=os.getenv("ISOLENS_API_TOKEN", "dev-token"),
+        worker_poll_interval_seconds=float(os.getenv("ISOLENS_WORKER_POLL_INTERVAL_SECONDS", "2")),
+        worker_heartbeat_interval_seconds=float(os.getenv("ISOLENS_WORKER_HEARTBEAT_INTERVAL_SECONDS", "5")),
+        worker_heartbeat_ttl_seconds=int(os.getenv("ISOLENS_WORKER_HEARTBEAT_TTL_SECONDS", "20")),
     )

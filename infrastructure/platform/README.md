@@ -180,6 +180,9 @@ http://127.0.0.1:12000
 | control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. | `string` | `"isolens-system"` | no |
 | control_plane_namespace_annotations | Additional annotations applied to the control-plane namespace. | `map(string)` | `{}` | no |
 | control_plane_namespace_labels | Additional labels applied to the control-plane namespace. | `map(string)` | `{}` | no |
+| control_plane_runner_name | Deployment name for the control-plane Terraform runner. | `string` | `"isolens-runner"` | no |
+| control_plane_runner_replicas | Replica count for the control-plane Terraform runner. | `number` | `1` | no |
+| control_plane_runner_resources | Resource requests and limits for the control-plane Terraform runner container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |
 | environment | Environment name used for tags and naming. | `string` | `"lab"` | no |
 | kubernetes_version | Cluster Kubernetes version used to label namespaces with the matching PSA version. | `string` | `"1.35"` | no |
@@ -203,6 +206,7 @@ http://127.0.0.1:12000
 | control_plane_backend_service_name | ClusterIP Service name for the control-plane backend. |
 | control_plane_frontend_service_name | Service name for the control-plane frontend. |
 | control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. |
+| control_plane_runner_name | Deployment name for the control-plane Terraform runner. |
 | ingress_controller_namespace | Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled. |
 | kyverno_cluster_policies | Kyverno ClusterPolicy objects managed by the platform stage. |
 | kyverno_namespace | Namespace containing the Kyverno policy engine. |

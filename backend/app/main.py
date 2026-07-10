@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 
 from fastapi import (
     Depends,
@@ -16,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import require_api_token, require_websocket_token
 from .config import Settings, get_settings
-from .events import RunEventBroker
 from .models import (
     HealthResponse,
     OutputsResponse,
@@ -28,14 +26,15 @@ from .models import (
     TerraformRun,
     UnlockStateResponse,
 )
+from .run_service import RunService
 from .store import PostgresStore
 from .terraform_runner import TerraformRunner
 
 
 settings = get_settings()
 store = PostgresStore(settings)
-broker = RunEventBroker()
-runner = TerraformRunner(settings, store, broker)
+run_service = RunService(settings, store)
+unlock_runner = TerraformRunner(settings, store)
 
 
 def auth_dependency(
@@ -44,19 +43,9 @@ def auth_dependency(
     require_api_token(settings=settings, authorization=authorization)
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    await runner.start()
-    try:
-        yield
-    finally:
-        await runner.stop()
-
-
 app = FastAPI(
     title="Isolens Control Plane",
     version="0.1.0",
-    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -73,10 +62,11 @@ app.add_middleware(
     dependencies=[Depends(auth_dependency)],
 )
 async def health() -> HealthResponse:
-    worker_running = runner.worker_running
+    run_service.reconcile_stale_workers()
+    worker_running, active_run_id = run_service.worker_snapshot()
     return HealthResponse(
         status="ok" if worker_running else "degraded",
-        active_run_id=runner.active_run_id,
+        active_run_id=active_run_id,
         worker_running=worker_running,
         managed_tfvars_present=all(
             path.exists()
@@ -87,7 +77,7 @@ async def health() -> HealthResponse:
                 settings.applications_tfvars_path,
             ]
         ),
-        queue_depth=runner.queue_depth,
+        queue_depth=run_service.queue_depth(),
         auth_enabled=True,
         stages=[RunStage.core, RunStage.platform, RunStage.applications],
     )
@@ -156,7 +146,7 @@ async def get_run_logs(run_id: str) -> RunLogsResponse:
     dependencies=[Depends(auth_dependency)],
 )
 async def prune_runs(keep: int = Query(default=10, ge=0, le=200)) -> RunPruneResponse:
-    if runner.active_run_id is not None or runner.queue_depth > 0:
+    if run_service.has_nonterminal_runs():
         raise HTTPException(
             status_code=409,
             detail="Cannot prune run history while another run is active or queued.",
@@ -176,7 +166,7 @@ async def prune_runs(keep: int = Query(default=10, ge=0, le=200)) -> RunPruneRes
     dependencies=[Depends(auth_dependency)],
 )
 async def start_plan(stage: RunStage) -> TerraformRun:
-    return await runner.start_plan(stage)
+    return await run_service.start_plan(stage)
 
 
 @app.post(
@@ -185,7 +175,7 @@ async def start_plan(stage: RunStage) -> TerraformRun:
     dependencies=[Depends(auth_dependency)],
 )
 async def start_apply(run_id: str) -> TerraformRun:
-    return await runner.start_apply(run_id)
+    return await run_service.start_apply(run_id)
 
 
 @app.post(
@@ -194,7 +184,7 @@ async def start_apply(run_id: str) -> TerraformRun:
     dependencies=[Depends(auth_dependency)],
 )
 async def start_destroy(stage: RunStage) -> TerraformRun:
-    return await runner.start_destroy(stage)
+    return await run_service.start_destroy(stage)
 
 
 @app.post(
@@ -203,7 +193,7 @@ async def start_destroy(stage: RunStage) -> TerraformRun:
     dependencies=[Depends(auth_dependency)],
 )
 async def unlock_state(stage: RunStage) -> UnlockStateResponse:
-    return await runner.unlock_state(stage)
+    return await unlock_runner.unlock_state(stage)
 
 
 @app.post(
@@ -212,7 +202,7 @@ async def unlock_state(stage: RunStage) -> UnlockStateResponse:
     dependencies=[Depends(auth_dependency)],
 )
 async def cancel_run(run_id: str) -> TerraformRun:
-    return await runner.cancel_run(run_id)
+    return await run_service.cancel_run(run_id)
 
 
 @app.get(
@@ -240,21 +230,32 @@ async def run_events(run_id: str, websocket: WebSocket) -> None:
         await websocket.close(code=4404, reason="Run not found")
         return
 
-    queue = broker.subscribe(run_id)
     await websocket.accept()
+    logs = store.read_logs(run_id)
     await websocket.send_json(
         {
             "type": "run.snapshot",
             "run": run.model_dump(mode="json"),
-            "logs": store.read_logs(run_id),
+            "logs": logs,
         }
     )
 
+    last_updated_at = run.updated_at
+    log_offset = len(logs)
     try:
         while True:
-            event = await queue.get()
-            await websocket.send_json(event)
-    except (WebSocketDisconnect, asyncio.CancelledError):
+            await asyncio.sleep(1)
+            latest_run = store.load_run(run_id)
+            if latest_run is None:
+                await websocket.close(code=4404, reason="Run not found")
+                return
+            if latest_run.updated_at != last_updated_at:
+                last_updated_at = latest_run.updated_at
+                await websocket.send_json({"type": "run.updated", "run": latest_run.model_dump(mode="json")})
+
+            new_logs = store.read_logs_after(run_id, log_offset)
+            if new_logs:
+                log_offset += len(new_logs)
+                await websocket.send_json({"type": "run.logs", "lines": new_logs})
+    except (WebSocketDisconnect, asyncio.CancelledError, RuntimeError):
         pass
-    finally:
-        broker.unsubscribe(run_id, queue)
