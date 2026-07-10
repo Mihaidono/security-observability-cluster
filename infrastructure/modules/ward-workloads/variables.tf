@@ -5,5 +5,15 @@ variable "analysis_subject_names" {
 
 variable "ward_applications" {
   description = "Validated ward application definitions from the root module."
-  type        = list(any)
+  type        = any
+
+  validation {
+    condition = can([
+      for app in var.ward_applications : {
+        name      = app.name
+        namespace = app.namespace
+      }
+    ])
+    error_message = "ward_applications must be a list of objects that at least define name and namespace."
+  }
 }

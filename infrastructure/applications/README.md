@@ -35,7 +35,7 @@ Owns the JSON-driven workload layer applied after the shared cluster platform is
 | environment | Environment name used for tags and naming. | `string` | `"lab"` | no |
 | project_name | Logical project name used for tagging and naming. | `string` | `"isolens"` | no |
 | region | AWS region of the existing EKS cluster targeted by the applications stage. | `string` | `"eu-north-1"` | no |
-| ward_applications | Application definitions rendered into Deployments plus optional Services, Ingresses, generated ConfigMaps, volumes, and app-specific NetworkPolicies. | `list(any)` | `[]` | no |
+| ward_applications | Application definitions rendered into Deployments plus optional Services, Ingresses, generated ConfigMaps, volumes, and app-specific NetworkPolicies. | `any` | `[]` | no |
 
 ## Outputs
 

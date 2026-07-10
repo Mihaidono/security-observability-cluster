@@ -282,34 +282,34 @@ class PostgresStore:
 
 def core_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
     return {
-        "project_name": config.project_name,
-        "environment": config.environment,
-        "cluster_name": config.cluster_name,
-        "kubernetes_version": config.kubernetes_version,
-        "cluster_log_retention_in_days": config.cluster_log_retention_in_days,
-        "cluster_admin_principal_arns": config.cluster_admin_principal_arns,
+        "project_name": config.core.project_name,
+        "environment": config.core.environment,
+        "cluster_name": config.core.cluster_name,
+        "kubernetes_version": config.core.kubernetes_version,
+        "cluster_log_retention_in_days": config.core.cluster_log_retention_in_days,
+        "cluster_admin_principal_arns": config.core.cluster_admin_principal_arns,
     }
 
 
 def platform_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
     return {
-        "project_name": config.project_name,
-        "environment": config.environment,
-        "cluster_name": config.cluster_name,
-        "kubernetes_version": config.kubernetes_version,
-        "cluster_admin_principal_arns": config.cluster_admin_principal_arns,
-        "analysis_subjects": config.analysis_subjects,
+        "project_name": config.core.project_name,
+        "environment": config.core.environment,
+        "cluster_name": config.core.cluster_name,
+        "kubernetes_version": config.core.kubernetes_version,
+        "cluster_admin_principal_arns": config.core.cluster_admin_principal_arns,
+        "analysis_subjects": config.platform.analysis_subjects,
     }
 
 
 def applications_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
     return {
-        "project_name": config.project_name,
-        "environment": config.environment,
-        "cluster_name": config.cluster_name,
-        "cluster_admin_principal_arns": config.cluster_admin_principal_arns,
-        "analysis_subjects": config.analysis_subjects,
-        "ward_applications": config.ward_applications,
+        "project_name": config.core.project_name,
+        "environment": config.core.environment,
+        "cluster_name": config.core.cluster_name,
+        "cluster_admin_principal_arns": config.core.cluster_admin_principal_arns,
+        "analysis_subjects": config.platform.analysis_subjects,
+        "ward_applications": config.applications.ward_applications,
     }
 
     def _row_to_run(self, row: dict[str, Any]) -> TerraformRun:

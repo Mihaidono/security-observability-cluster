@@ -2812,34 +2812,43 @@ export default function App() {
   const workspaceScrollRef = useRef<HTMLDivElement | null>(null);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
   const copiedLogsHintTimerRef = useRef<number | null>(null);
+  const coreConfig = config?.core ?? null;
+  const platformConfig = config?.platform ?? null;
+  const applicationsConfig = config?.applications ?? null;
 
   const subjectKeys = useMemo(
-    () => Object.keys(config?.analysis_subjects ?? {}),
-    [config?.analysis_subjects],
+    () => Object.keys(platformConfig?.analysis_subjects ?? {}),
+    [platformConfig?.analysis_subjects],
   );
   const selectedSubject = useMemo(() => {
-    if (!config || !selectedSubjectKey) return null;
-    return config.analysis_subjects[selectedSubjectKey] ?? null;
-  }, [config, selectedSubjectKey]);
+    if (!platformConfig || !selectedSubjectKey) return null;
+    return platformConfig.analysis_subjects[selectedSubjectKey] ?? null;
+  }, [platformConfig, selectedSubjectKey]);
   const appsForSelectedSubject = useMemo(
     () =>
-      (config?.ward_applications ?? [])
+      (applicationsConfig?.ward_applications ?? [])
         .map((application, index) => ({ application, index }))
         .filter(
           ({ application }) => application.namespace === selectedSubjectKey,
         ),
-    [config?.ward_applications, selectedSubjectKey],
+    [applicationsConfig?.ward_applications, selectedSubjectKey],
   );
   const selectedApp = useMemo(() => {
-    if (!config) return null;
+    if (!applicationsConfig) return null;
 
-    const current = config.ward_applications[selectedAppIndex] ?? null;
+    const current =
+      applicationsConfig.ward_applications[selectedAppIndex] ?? null;
     if (current && current.namespace === selectedSubjectKey) {
       return current;
     }
 
     return appsForSelectedSubject[0]?.application ?? null;
-  }, [appsForSelectedSubject, config, selectedAppIndex, selectedSubjectKey]);
+  }, [
+    applicationsConfig,
+    appsForSelectedSubject,
+    selectedAppIndex,
+    selectedSubjectKey,
+  ]);
   const activeScenarioBundles = useMemo<ActiveScenarioBundle[]>(() => {
     const bundles = new Map<string, ActiveScenarioBundle>();
 
@@ -2907,10 +2916,10 @@ export default function App() {
   );
   const hasAdminAccess = useMemo(
     () =>
-      (config?.cluster_admin_principal_arns ?? []).some(
+      (coreConfig?.cluster_admin_principal_arns ?? []).some(
         (arn) => arn.trim() !== "",
       ),
-    [config?.cluster_admin_principal_arns],
+    [coreConfig?.cluster_admin_principal_arns],
   );
   const sourcePlanRun = useMemo(() => {
     if (!selectedRun?.source_run_id) return null;
@@ -2933,25 +2942,25 @@ export default function App() {
   const apiTokenValue = getApiToken();
   const totalAppsWithIngress = useMemo(
     () =>
-      config?.ward_applications.filter(
+      applicationsConfig?.ward_applications.filter(
         (application) => application.ingress?.enabled,
       ).length ?? 0,
-    [config?.ward_applications],
+    [applicationsConfig?.ward_applications],
   );
   const totalAppsWithService = useMemo(
     () =>
-      config?.ward_applications.filter(
+      applicationsConfig?.ward_applications.filter(
         (application) => application.service?.enabled !== false,
       ).length ?? 0,
-    [config?.ward_applications],
+    [applicationsConfig?.ward_applications],
   );
   const totalContainers = useMemo(
     () =>
-      config?.ward_applications.reduce(
+      applicationsConfig?.ward_applications.reduce(
         (count, application) => count + (application.containers?.length ?? 0),
         0,
       ) ?? 0,
-    [config?.ward_applications],
+    [applicationsConfig?.ward_applications],
   );
   const groupedSelectedRunLogs = useMemo(
     () => groupRunLogLines(selectedRunLogs),
@@ -2959,9 +2968,10 @@ export default function App() {
   );
   const configuredAdminArnsCount = useMemo(
     () =>
-      config?.cluster_admin_principal_arns.filter((arn) => arn.trim() !== "")
-        .length ?? 0,
-    [config?.cluster_admin_principal_arns],
+      coreConfig?.cluster_admin_principal_arns.filter(
+        (arn) => arn.trim() !== "",
+      ).length ?? 0,
+    [coreConfig?.cluster_admin_principal_arns],
   );
   const adminAccessDisabledReason = !hasAdminAccess
     ? "Add at least one IAM principal ARN in Settings -> Admin Access before running this action."
@@ -3179,14 +3189,16 @@ export default function App() {
   useEffect(() => {
     if (!config || !selectedSubjectKey) return;
 
-    const current = config.ward_applications[selectedAppIndex] ?? null;
+    const current =
+      config.applications.ward_applications[selectedAppIndex] ?? null;
     if (current && current.namespace === selectedSubjectKey) {
       return;
     }
 
-    const firstMatchingAppIndex = config.ward_applications.findIndex(
-      (application) => application.namespace === selectedSubjectKey,
-    );
+    const firstMatchingAppIndex =
+      config.applications.ward_applications.findIndex(
+        (application) => application.namespace === selectedSubjectKey,
+      );
     if (
       firstMatchingAppIndex >= 0 &&
       firstMatchingAppIndex !== selectedAppIndex
@@ -3205,10 +3217,11 @@ export default function App() {
       setConfig(loadedConfig);
       setRuns(sortRuns(runResponse.items));
       const firstSubjectKey =
-        Object.keys(loadedConfig.analysis_subjects)[0] ?? "";
-      const firstAppIndex = loadedConfig.ward_applications.findIndex(
-        (application) => application.namespace === firstSubjectKey,
-      );
+        Object.keys(loadedConfig.platform.analysis_subjects)[0] ?? "";
+      const firstAppIndex =
+        loadedConfig.applications.ward_applications.findIndex(
+          (application) => application.namespace === firstSubjectKey,
+        );
       setSelectedSubjectKey(firstSubjectKey);
       setSelectedAppIndex(firstAppIndex >= 0 ? firstAppIndex : 0);
       setStatusMessage(
@@ -3260,11 +3273,15 @@ export default function App() {
     if (!selectedSubjectKey) return;
     updateConfig((current) => ({
       ...current,
-      analysis_subjects: {
-        ...current.analysis_subjects,
-        [selectedSubjectKey]: mutator(
-          current.analysis_subjects[selectedSubjectKey] ?? emptySubject(),
-        ),
+      platform: {
+        ...current.platform,
+        analysis_subjects: {
+          ...current.platform.analysis_subjects,
+          [selectedSubjectKey]: mutator(
+            current.platform.analysis_subjects[selectedSubjectKey] ??
+              emptySubject(),
+          ),
+        },
       },
     }));
   }
@@ -3274,8 +3291,8 @@ export default function App() {
   ) {
     updateConfig((current) => {
       const next = structuredClone(current);
-      next.ward_applications[selectedAppIndex] = mutator(
-        next.ward_applications[selectedAppIndex] ??
+      next.applications.ward_applications[selectedAppIndex] = mutator(
+        next.applications.ward_applications[selectedAppIndex] ??
           emptyAppTemplate(selectedSubjectKey || "ward-template-app"),
       );
       return next;
@@ -3325,21 +3342,22 @@ export default function App() {
       !config ||
       trimmed === "" ||
       trimmed === currentKey ||
-      config.analysis_subjects[trimmed]
+      config.platform.analysis_subjects[trimmed]
     ) {
       return;
     }
 
     updateConfig((current) => {
       const next = structuredClone(current);
-      const subject = next.analysis_subjects[currentKey];
-      delete next.analysis_subjects[currentKey];
-      next.analysis_subjects[trimmed] = subject;
-      next.ward_applications = next.ward_applications.map((application) =>
-        application.namespace === currentKey
-          ? { ...application, namespace: trimmed }
-          : application,
-      );
+      const subject = next.platform.analysis_subjects[currentKey];
+      delete next.platform.analysis_subjects[currentKey];
+      next.platform.analysis_subjects[trimmed] = subject;
+      next.applications.ward_applications =
+        next.applications.ward_applications.map((application) =>
+          application.namespace === currentKey
+            ? { ...application, namespace: trimmed }
+            : application,
+        );
       return next;
     });
     setSelectedSubjectKey(trimmed);
@@ -3350,9 +3368,12 @@ export default function App() {
     const nextKey = uniqueName("ward-new-subject", subjectKeys);
     updateConfig((current) => ({
       ...current,
-      analysis_subjects: {
-        ...current.analysis_subjects,
-        [nextKey]: emptySubject(),
+      platform: {
+        ...current.platform,
+        analysis_subjects: {
+          ...current.platform.analysis_subjects,
+          [nextKey]: emptySubject(),
+        },
       },
     }));
     setSelectedSubjectKey(nextKey);
@@ -3362,21 +3383,25 @@ export default function App() {
     if (!config || subjectKeys.length <= 1 || !selectedSubjectKey) return;
     updateConfig((current) => {
       const next = structuredClone(current);
-      delete next.analysis_subjects[selectedSubjectKey];
-      next.ward_applications = next.ward_applications.filter(
-        (application) => application.namespace !== selectedSubjectKey,
-      );
-      if (next.ward_applications.length === 0) {
+      delete next.platform.analysis_subjects[selectedSubjectKey];
+      next.applications.ward_applications =
+        next.applications.ward_applications.filter(
+          (application) => application.namespace !== selectedSubjectKey,
+        );
+      if (next.applications.ward_applications.length === 0) {
         const fallbackNamespace =
-          Object.keys(next.analysis_subjects)[0] ?? "ward-template-app";
+          Object.keys(next.platform.analysis_subjects)[0] ??
+          "ward-template-app";
         const fallbackApp = makeInternalPythonApiApp(fallbackNamespace);
         fallbackApp.name = kubeSafeName(
           uniqueName(
             fallbackApp.name,
-            next.ward_applications.map((application) => application.name),
+            next.applications.ward_applications.map(
+              (application) => application.name,
+            ),
           ),
         );
-        next.ward_applications.push(fallbackApp);
+        next.applications.ward_applications.push(fallbackApp);
       }
       return next;
     });
@@ -3390,7 +3415,7 @@ export default function App() {
   function selectSubject(subjectKey: string) {
     setSelectedSubjectKey(subjectKey);
     const firstAppIndex =
-      config?.ward_applications.findIndex(
+      config?.applications.ward_applications.findIndex(
         (application) => application.namespace === subjectKey,
       ) ?? -1;
     if (firstAppIndex >= 0) {
@@ -3406,14 +3431,22 @@ export default function App() {
     template.name = kubeSafeName(
       uniqueName(
         template.name,
-        config.ward_applications.map((application) => application.name),
+        config.applications.ward_applications.map(
+          (application) => application.name,
+        ),
       ),
     );
     updateConfig((current) => ({
       ...current,
-      ward_applications: [...current.ward_applications, template],
+      applications: {
+        ...current.applications,
+        ward_applications: [
+          ...current.applications.ward_applications,
+          template,
+        ],
+      },
     }));
-    setSelectedAppIndex(config.ward_applications.length);
+    setSelectedAppIndex(config.applications.ward_applications.length);
   }
 
   function addAppTemplate(templateId: AppTemplateId) {
@@ -3430,7 +3463,7 @@ export default function App() {
     app.name = kubeSafeName(
       uniqueName(
         app.name,
-        config.ward_applications.map((existing) => existing.name),
+        config.applications.ward_applications.map((existing) => existing.name),
       ),
     );
     if (app.ingress?.enabled) {
@@ -3439,10 +3472,13 @@ export default function App() {
 
     updateConfig((current) => ({
       ...current,
-      ward_applications: [...current.ward_applications, app],
+      applications: {
+        ...current.applications,
+        ward_applications: [...current.applications.ward_applications, app],
+      },
     }));
     setSelectedSubjectKey(namespace);
-    setSelectedAppIndex(config.ward_applications.length);
+    setSelectedAppIndex(config.applications.ward_applications.length);
     setStatusMessage(
       templateId === "public-python-api"
         ? `Added public API template to ${namespace}.`
@@ -3459,7 +3495,7 @@ export default function App() {
     const namespace =
       selectedSubjectKey || subjectKeys[0] || "ward-template-app";
     const blueprint = scenarioBlueprints[blueprintId];
-    const keptApplications = config.ward_applications.filter(
+    const keptApplications = config.applications.ward_applications.filter(
       (application) => application.namespace !== namespace,
     );
     const bundleId = nextScenarioBundleId(blueprintId, keptApplications);
@@ -3482,12 +3518,15 @@ export default function App() {
 
     updateConfig((current) => ({
       ...current,
-      ward_applications: [
-        ...current.ward_applications.filter(
-          (application) => application.namespace !== namespace,
-        ),
-        ...scenarioApps,
-      ],
+      applications: {
+        ...current.applications,
+        ward_applications: [
+          ...current.applications.ward_applications.filter(
+            (application) => application.namespace !== namespace,
+          ),
+          ...scenarioApps,
+        ],
+      },
     }));
     setSelectedSubjectKey(namespace);
     setSelectedAppIndex(keptApplications.length);
@@ -3498,10 +3537,10 @@ export default function App() {
   }
 
   function removeSelectedApp() {
-    if (!config || config.ward_applications.length <= 1) return;
+    if (!config || config.applications.ward_applications.length <= 1) return;
     updateConfig((current) => {
       const next = structuredClone(current);
-      next.ward_applications.splice(selectedAppIndex, 1);
+      next.applications.ward_applications.splice(selectedAppIndex, 1);
       return next;
     });
     setSelectedAppIndex((currentIndex) => Math.max(0, currentIndex - 1));
@@ -3510,28 +3549,39 @@ export default function App() {
   function addClusterAdminArn() {
     updateConfig((current) => ({
       ...current,
-      cluster_admin_principal_arns: [
-        ...current.cluster_admin_principal_arns,
-        "",
-      ],
+      core: {
+        ...current.core,
+        cluster_admin_principal_arns: [
+          ...current.core.cluster_admin_principal_arns,
+          "",
+        ],
+      },
     }));
   }
 
   function updateClusterAdminArn(index: number, value: string) {
     updateConfig((current) => ({
       ...current,
-      cluster_admin_principal_arns: current.cluster_admin_principal_arns.map(
-        (item, itemIndex) => (itemIndex === index ? value : item),
-      ),
+      core: {
+        ...current.core,
+        cluster_admin_principal_arns:
+          current.core.cluster_admin_principal_arns.map((item, itemIndex) =>
+            itemIndex === index ? value : item,
+          ),
+      },
     }));
   }
 
   function removeClusterAdminArn(index: number) {
     updateConfig((current) => ({
       ...current,
-      cluster_admin_principal_arns: current.cluster_admin_principal_arns.filter(
-        (_, itemIndex) => itemIndex !== index,
-      ),
+      core: {
+        ...current.core,
+        cluster_admin_principal_arns:
+          current.core.cluster_admin_principal_arns.filter(
+            (_, itemIndex) => itemIndex !== index,
+          ),
+      },
     }));
   }
 
@@ -3541,52 +3591,62 @@ export default function App() {
     try {
       const normalized: TerraformConfig = {
         ...config,
-        analysis_subjects: Object.fromEntries(
-          Object.entries(config.analysis_subjects).map(([key, subject]) => [
-            key,
-            {
-              ...subject,
-              labels: compactRecord(subject.labels),
-            },
-          ]),
-        ),
-        ward_applications: config.ward_applications.map((application) => ({
-          ...application,
-          pod_labels: compactRecord(application.pod_labels),
-          service: application.service
-            ? {
-                ...application.service,
-                annotations: compactRecord(application.service.annotations),
-              }
-            : undefined,
-          ingress: application.ingress
-            ? {
-                ...application.ingress,
-                annotations: compactRecord(application.ingress.annotations),
-              }
-            : undefined,
-          config_map: application.config_map
-            ? {
-                ...application.config_map,
-                data: compactRecord(application.config_map.data),
-              }
-            : undefined,
-          containers: (application.containers ?? []).map((container) => ({
-            ...container,
-            env: compactRecord(container.env),
-            volume_mounts:
-              container.volume_mounts?.filter(
-                (mount) => mount.name.trim() && mount.mount_path.trim(),
-              ) ?? [],
-          })),
-          volumes: (application.volumes ?? []).filter(
-            (volume) => volume.name.trim() !== "",
+        platform: {
+          ...config.platform,
+          analysis_subjects: Object.fromEntries(
+            Object.entries(config.platform.analysis_subjects).map(
+              ([key, subject]) => [
+                key,
+                {
+                  ...subject,
+                  labels: compactRecord(subject.labels),
+                },
+              ],
+            ),
           ),
-          network_policy: {
-            ingress: application.network_policy?.ingress ?? [],
-            egress: application.network_policy?.egress ?? [],
-          },
-        })),
+        },
+        applications: {
+          ...config.applications,
+          ward_applications: config.applications.ward_applications.map(
+            (application) => ({
+              ...application,
+              pod_labels: compactRecord(application.pod_labels),
+              service: application.service
+                ? {
+                    ...application.service,
+                    annotations: compactRecord(application.service.annotations),
+                  }
+                : undefined,
+              ingress: application.ingress
+                ? {
+                    ...application.ingress,
+                    annotations: compactRecord(application.ingress.annotations),
+                  }
+                : undefined,
+              config_map: application.config_map
+                ? {
+                    ...application.config_map,
+                    data: compactRecord(application.config_map.data),
+                  }
+                : undefined,
+              containers: (application.containers ?? []).map((container) => ({
+                ...container,
+                env: compactRecord(container.env),
+                volume_mounts:
+                  container.volume_mounts?.filter(
+                    (mount) => mount.name.trim() && mount.mount_path.trim(),
+                  ) ?? [],
+              })),
+              volumes: (application.volumes ?? []).filter(
+                (volume) => volume.name.trim() !== "",
+              ),
+              network_policy: {
+                ingress: application.network_policy?.ingress ?? [],
+                egress: application.network_policy?.egress ?? [],
+              },
+            }),
+          ),
+        },
       };
 
       const saved = await api.saveConfig(normalized);
@@ -3607,8 +3667,9 @@ export default function App() {
     try {
       const reset = await api.resetConfig();
       setConfig(reset);
-      const firstSubjectKey = Object.keys(reset.analysis_subjects)[0] ?? "";
-      const firstAppIndex = reset.ward_applications.findIndex(
+      const firstSubjectKey =
+        Object.keys(reset.platform.analysis_subjects)[0] ?? "";
+      const firstAppIndex = reset.applications.ward_applications.findIndex(
         (application) => application.namespace === firstSubjectKey,
       );
       setSelectedSubjectKey(firstSubjectKey);
@@ -3880,7 +3941,7 @@ export default function App() {
                 />
                 <MetricTile
                   label="Applications"
-                  value={config.ward_applications.length}
+                  value={config.applications.ward_applications.length}
                 />
                 <MetricTile label="Containers" value={totalContainers} />
               </div>
@@ -4048,7 +4109,9 @@ export default function App() {
                             />
                             <MetricTile
                               label="Applications"
-                              value={config.ward_applications.length}
+                              value={
+                                config.applications.ward_applications.length
+                              }
                             />
                             <MetricTile
                               label="Service-backed"
@@ -4134,7 +4197,9 @@ export default function App() {
                               />
                               <MetricTile
                                 label="Apps Planned"
-                                value={config.ward_applications.length}
+                                value={
+                                  config.applications.ward_applications.length
+                                }
                               />
                             </div>
                             <div className="mt-5 flex flex-wrap gap-2">
@@ -4247,7 +4312,9 @@ export default function App() {
                               />
                               <MetricTile
                                 label="Apps"
-                                value={config.ward_applications.length}
+                                value={
+                                  config.applications.ward_applications.length
+                                }
                               />
                               <MetricTile
                                 label="Services"
@@ -4368,7 +4435,9 @@ export default function App() {
                             <div className="mt-4 grid gap-3 md:grid-cols-3">
                               <MetricTile
                                 label="Apps"
-                                value={config.ward_applications.length}
+                                value={
+                                  config.applications.ward_applications.length
+                                }
                               />
                               <MetricTile
                                 label="Services"
@@ -4643,13 +4712,14 @@ export default function App() {
                                   <div>
                                     <p className="font-medium">{subjectKey}</p>
                                     <p className="mt-2 text-xs uppercase tracking-[0.2em] text-neutral-500">
-                                      {config.analysis_subjects[subjectKey]
-                                        ?.tier ?? "ward"}
+                                      {config.platform.analysis_subjects[
+                                        subjectKey
+                                      ]?.tier ?? "ward"}
                                     </p>
                                   </div>
                                   <Badge>
                                     {
-                                      config.ward_applications.filter(
+                                      config.applications.ward_applications.filter(
                                         (application) =>
                                           application.namespace === subjectKey,
                                       ).length
@@ -4696,7 +4766,10 @@ export default function App() {
                                 className="w-full"
                                 variant="danger"
                                 onClick={removeSelectedApp}
-                                disabled={config.ward_applications.length <= 1}
+                                disabled={
+                                  config.applications.ward_applications
+                                    .length <= 1
+                                }
                               >
                                 Remove selected app
                               </Button>
@@ -5557,23 +5630,23 @@ export default function App() {
                         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                           <ReadOnlyField
                             label="Project"
-                            value={config.project_name}
+                            value={config.core.project_name}
                           />
                           <ReadOnlyField
                             label="Environment"
-                            value={config.environment}
+                            value={config.core.environment}
                           />
                           <ReadOnlyField
                             label="Cluster name"
-                            value={config.cluster_name}
+                            value={config.core.cluster_name}
                           />
                           <ReadOnlyField
                             label="Kubernetes version"
-                            value={config.kubernetes_version}
+                            value={config.core.kubernetes_version}
                           />
                           <ReadOnlyField
                             label="Control plane log retention"
-                            value={`${config.cluster_log_retention_in_days} days`}
+                            value={`${config.core.cluster_log_retention_in_days} days`}
                           />
                         </div>
                       </CardContent>
@@ -5586,7 +5659,8 @@ export default function App() {
                       <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
                         <div className="flex items-center justify-between gap-3">
                           <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                            ARNs ({config.cluster_admin_principal_arns.length})
+                            ARNs (
+                            {config.core.cluster_admin_principal_arns.length})
                           </p>
                           <Button
                             variant="ghost"
@@ -5599,7 +5673,7 @@ export default function App() {
                         </div>
                         <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
                           <div className="grid gap-2">
-                            {config.cluster_admin_principal_arns.map(
+                            {config.core.cluster_admin_principal_arns.map(
                               (arn, index) => (
                                 <div
                                   key={`admin-arn-${index}`}

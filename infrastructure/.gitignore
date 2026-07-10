@@ -12,3 +12,6 @@ override.tf.json
 *_override.tf.json
 backend.hcl
 frontend-managed.auto.tfvars.json
+core/managed.auto.tfvars.json
+platform/managed.auto.tfvars.json
+applications/managed.auto.tfvars.json

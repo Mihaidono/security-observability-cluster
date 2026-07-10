@@ -31,7 +31,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | analysis_subject_names | Set of valid ward namespace names used to guard application placement. | `set(string)` | n/a | yes |
-| ward_applications | Validated ward application definitions from the root module. | `list(any)` | n/a | yes |
+| ward_applications | Validated ward application definitions from the root module. | `any` | n/a | yes |
 
 ## Outputs
 

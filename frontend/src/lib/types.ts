@@ -135,18 +135,30 @@ export interface WardApplication {
   network_policy?: NetworkPolicyConfig;
 }
 
-export interface TerraformConfig {
+export interface CoreConfig {
   project_name: string;
   environment: string;
   cluster_name: string;
   kubernetes_version: string;
   cluster_log_retention_in_days: number;
   cluster_admin_principal_arns: string[];
+}
+
+export interface PlatformConfig {
   analysis_subjects: Record<string, AnalysisSubject>;
+}
+
+export interface ApplicationsConfig {
   ward_applications: WardApplication[];
 }
 
-export type RunStage = "core" | "platform";
+export interface TerraformConfig {
+  core: CoreConfig;
+  platform: PlatformConfig;
+  applications: ApplicationsConfig;
+}
+
+export type RunStage = "core" | "platform" | "applications";
 
 export interface PlanSummary {
   create: number;

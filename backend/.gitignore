@@ -1,6 +1,7 @@
 .venv/
 .env
 state/
+state/managed-config.json
 **/__pycache__/
 *.pyc
 *.egg-info/

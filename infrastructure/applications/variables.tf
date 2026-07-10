@@ -54,6 +54,16 @@ variable "analysis_subjects" {
 
 variable "ward_applications" {
   description = "Application definitions rendered into Deployments plus optional Services, Ingresses, generated ConfigMaps, volumes, and app-specific NetworkPolicies."
-  type        = list(any)
+  type        = any
   default     = []
+
+  validation {
+    condition = can([
+      for app in var.ward_applications : {
+        name      = app.name
+        namespace = app.namespace
+      }
+    ])
+    error_message = "ward_applications must be a list of objects that at least define name and namespace."
+  }
 }

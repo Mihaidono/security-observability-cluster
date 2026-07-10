@@ -887,7 +887,7 @@ class TerraformRunner:
 
     def _require_cluster_admin_access(self) -> None:
         config = self.store.load_config()
-        admin_arns = [arn.strip() for arn in config.cluster_admin_principal_arns if arn.strip()]
+        admin_arns = [arn.strip() for arn in config.core.cluster_admin_principal_arns if arn.strip()]
         if admin_arns:
             return
 
