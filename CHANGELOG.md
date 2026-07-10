@@ -1,3 +1,9 @@
+## [0.4.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.3.0...v0.4.0) (2026-07-10)
+
+### Features
+
+* **infra:** separated variables per root module ([97aaf42](https://github.com/Mihaidono/security-observability-cluster/commit/97aaf427bd793c53b08f4946f167e1d482220025))
+
 ## [0.3.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.2.0...v0.3.0) (2026-07-09)
 
 ### Features
