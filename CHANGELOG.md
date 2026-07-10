@@ -1,3 +1,9 @@
+## [0.6.2](https://github.com/Mihaidono/security-observability-cluster/compare/v0.6.1...v0.6.2) (2026-07-10)
+
+### Bug Fixes
+
+* **platform:** policies are now a chart to solve dependency issue in tf apply ([e9503c4](https://github.com/Mihaidono/security-observability-cluster/commit/e9503c42126641e0e01fd12f045fe096003fbe52))
+
 ## [0.6.1](https://github.com/Mihaidono/security-observability-cluster/compare/v0.6.0...v0.6.1) (2026-07-10)
 
 ### Bug Fixes
