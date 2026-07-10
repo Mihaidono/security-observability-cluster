@@ -1,3 +1,9 @@
+## [0.4.1](https://github.com/Mihaidono/security-observability-cluster/compare/v0.4.0...v0.4.1) (2026-07-10)
+
+### Bug Fixes
+
+* **infra:** moved ecr from core to bootstrap because of price and re-applies ([49b9fcf](https://github.com/Mihaidono/security-observability-cluster/commit/49b9fcfee1475163ed509be725f70d4376c14965))
+
 ## [0.4.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.3.0...v0.4.0) (2026-07-10)
 
 ### Features
