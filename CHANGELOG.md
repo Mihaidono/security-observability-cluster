@@ -1,3 +1,10 @@
+## [0.6.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.5.0...v0.6.0) (2026-07-10)
+
+### Features
+
+* **backend:** split backend logic and deploy separate tf runner service ([d9480bf](https://github.com/Mihaidono/security-observability-cluster/commit/d9480bf0729663aa929663cb3069a2407e847dca))
+* **docker:** fe reverse proxy, changed images, added control plane in cluster ([8f15d57](https://github.com/Mihaidono/security-observability-cluster/commit/8f15d57bd26d85c16d3a3b77b2ef6f0215123b40))
+
 ## [0.5.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.4.1...v0.5.0) (2026-07-10)
 
 ### Features
