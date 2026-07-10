@@ -1,3 +1,9 @@
+## [0.5.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.4.1...v0.5.0) (2026-07-10)
+
+### Features
+
+* **docker:** split dockerfile into dev and prod variants ([2e1b5b9](https://github.com/Mihaidono/security-observability-cluster/commit/2e1b5b90f7ec35bd0e2dd5cfd4bcc7c95fbbc72a))
+
 ## [0.4.1](https://github.com/Mihaidono/security-observability-cluster/compare/v0.4.0...v0.4.1) (2026-07-10)
 
 ### Bug Fixes
