@@ -40,7 +40,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: backend/Dockerfile
+          file: backend/Dockerfile.prod
           push: false
           load: true
           tags: ${{ env.LOCAL_IMAGE_REF }}

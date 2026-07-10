@@ -179,6 +179,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Or use the repo-level Docker Compose setup from the root README.
 
+Container images are intentionally split:
+
+- `backend/Dockerfile`
+  - local development image used by Docker Compose
+  - optimized for bind mounts and iterative local work
+- `backend/Dockerfile.prod`
+  - production image used by CI/CD publishing
+  - installs the backend as a regular package and keeps only the runtime tooling needed for Terraform execution
+
 ## Current Limitations
 
 - The backend is intentionally single-worker and only executes one Terraform run at a time.

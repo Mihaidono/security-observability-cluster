@@ -158,11 +158,26 @@ Environment variables commonly used during local development:
 
 Or use the repo-level Docker Compose setup.
 
+Dockerfiles are intentionally split:
+
+- `frontend/Dockerfile`
+  - local development image used by Docker Compose
+  - runs the Vite dev server with bind-mounted source
+- `frontend/Dockerfile.prod`
+  - production image used by CI/CD publishing
+  - builds the static frontend and serves it with NGINX
+
 ## Build
 
 ```bash
 cd frontend
 npm run build
+```
+
+Production container build:
+
+```bash
+docker build -f frontend/Dockerfile.prod .
 ```
 
 ## Current Limitations
