@@ -1,6 +1,0 @@
-apiVersion: v2
-name: isolens-policies
-description: Isolens policy manifests applied after platform add-ons are ready.
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

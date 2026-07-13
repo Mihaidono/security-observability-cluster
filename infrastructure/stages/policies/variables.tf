@@ -1,0 +1,53 @@
+variable "project_name" {
+  description = "Logical project name used for tagging and naming."
+  type        = string
+  default     = "isolens"
+}
+
+variable "environment" {
+  description = "Environment name used for tags and naming."
+  type        = string
+  default     = "lab"
+}
+
+variable "region" {
+  description = "AWS region of the existing EKS cluster targeted by the policies stage."
+  type        = string
+  default     = "eu-north-1"
+}
+
+variable "cluster_name" {
+  description = "Name of the existing EKS cluster targeted by the policies stage."
+  type        = string
+  default     = "forensic-lab"
+}
+
+variable "cluster_admin_principal_arns" {
+  description = "IAM principal ARNs granted cluster-admin access in the core stage. Used here to keep the readiness wait tied to access configuration changes."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = length(var.cluster_admin_principal_arns) == length(toset(var.cluster_admin_principal_arns))
+    error_message = "cluster_admin_principal_arns must not contain duplicate entries."
+  }
+
+  validation {
+    condition     = alltrue([for arn in var.cluster_admin_principal_arns : can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:(role|user)/.+$", arn))])
+    error_message = "cluster_admin_principal_arns must contain IAM role or user ARNs."
+  }
+}
+
+variable "analysis_subjects" {
+  description = "Ward namespace definitions that receive Kyverno and Tetragon policy resources."
+  type        = map(any)
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.analysis_subjects) :
+      can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", name)) && length(name) <= 63
+    ])
+    error_message = "Each analysis_subjects key must be a valid Kubernetes namespace name."
+  }
+}

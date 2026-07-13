@@ -14,7 +14,6 @@ repos:
       - id: check-yaml
         args:
           - --unsafe
-        exclude: ^infrastructure/charts/.*/templates/.*\.ya?ml$
       - id: check-json
       - id: check-toml
       - id: mixed-line-ending
@@ -35,26 +34,32 @@ repos:
         name: terraform-docs-bootstrap
         args:
           - --config=tooling/terraform-docs.yml
-          - infrastructure/bootstrap
-        files: ^infrastructure/bootstrap/.*\.tf$
+          - infrastructure/stages/bootstrap
+        files: ^infrastructure/stages/bootstrap/.*\.tf$
       - id: terraform-docs-go
         name: terraform-docs-applications
         args:
           - --config=tooling/terraform-docs.yml
-          - infrastructure/applications
-        files: ^infrastructure/applications/.*\.tf$
+          - infrastructure/stages/applications
+        files: ^infrastructure/stages/applications/.*\.tf$
       - id: terraform-docs-go
         name: terraform-docs-core
         args:
           - --config=tooling/terraform-docs.yml
-          - infrastructure/core
-        files: ^infrastructure/core/.*\.tf$
+          - infrastructure/stages/core
+        files: ^infrastructure/stages/core/.*\.tf$
       - id: terraform-docs-go
         name: terraform-docs-platform
         args:
           - --config=tooling/terraform-docs.yml
-          - infrastructure/platform
-        files: ^infrastructure/platform/.*\.tf$
+          - infrastructure/stages/platform
+        files: ^infrastructure/stages/platform/.*\.tf$
+      - id: terraform-docs-go
+        name: terraform-docs-policies
+        args:
+          - --config=tooling/terraform-docs.yml
+          - infrastructure/stages/policies
+        files: ^infrastructure/stages/policies/.*\.tf$
       - id: terraform-docs-go
         name: terraform-docs-modules
         args:

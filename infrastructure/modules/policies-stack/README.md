@@ -8,7 +8,7 @@ Applies the Kyverno and Tetragon policy resources used by the policy layer.
 | Name | Version |
 | ---- | ------- |
 | terraform | >= 1.7.0 |
-| helm | 2.17.0 |
+| kubernetes | 2.37.1 |
 
 ## Modules
 
@@ -18,7 +18,9 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
-| [helm_release.policy_manifests](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
+| [kubernetes_manifest.kyverno_disallow_latest_tag](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
+| [kubernetes_manifest.kyverno_require_subject_label](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
+| [kubernetes_manifest.tetragon_suspicious_exec](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
 
 ## Inputs
 

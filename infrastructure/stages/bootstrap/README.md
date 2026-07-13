@@ -36,7 +36,7 @@ No modules.
 | ecr_scan_on_push | Whether ECR basic image scanning runs automatically when images are pushed. | `bool` | `true` | no |
 | ecr_untagged_image_retention_days | Number of days to retain untagged images in the backend and frontend ECR repositories. | `number` | `7` | no |
 | environment | Environment identifier used for naming. | `string` | `"dev"` | no |
-| force_destroy | Whether the state bucket can be destroyed even when non-empty. | `bool` | `false` | no |
+| force_destroy | Whether the state bucket can be destroyed even when non-empty. | `bool` | `true` | no |
 | frontend_ecr_repository_name | Name of the ECR repository that stores frontend container images. | `string` | `"isolens-frontend"` | no |
 | project_name | Project name used for bucket naming and tags. | `string` | `"isolens"` | no |
 | region | AWS region where state storage resources will be created. | `string` | `"eu-north-1"` | no |
@@ -46,12 +46,13 @@ No modules.
 
 | Name | Description |
 | ---- | ----------- |
-| applications_backend_config_snippet | Backend configuration values that match infrastructure/applications/backend.hcl. |
+| applications_backend_config_snippet | Backend configuration values that match infrastructure/stages/applications/backend.hcl. |
 | backend_ecr_repository_name | Name of the ECR repository that stores backend container images. |
 | backend_ecr_repository_url | URL of the ECR repository that stores backend container images. |
-| core_backend_config_snippet | Backend configuration values that match infrastructure/core/backend.hcl. |
+| core_backend_config_snippet | Backend configuration values that match infrastructure/stages/core/backend.hcl. |
 | frontend_ecr_repository_name | Name of the ECR repository that stores frontend container images. |
 | frontend_ecr_repository_url | URL of the ECR repository that stores frontend container images. |
-| platform_backend_config_snippet | Backend configuration values that match infrastructure/platform/backend.hcl. |
+| platform_backend_config_snippet | Backend configuration values that match infrastructure/stages/platform/backend.hcl. |
+| policies_backend_config_snippet | Backend configuration values that match infrastructure/stages/policies/backend.hcl. |
 | state_bucket_name | S3 bucket storing Terraform state. |
 <!-- END_TF_DOCS -->

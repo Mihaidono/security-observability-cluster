@@ -829,6 +829,8 @@ class TerraformRunner:
             return self.settings.terraform_core_root
         if stage == RunStage.platform:
             return self.settings.terraform_platform_root
+        if stage == RunStage.policies:
+            return self.settings.terraform_policies_root
         return self.settings.terraform_applications_root
 
     def _find_recent_lock_for_stage(self, stage: RunStage) -> tuple[TerraformRun, StateLockInfo] | None:
@@ -853,14 +855,18 @@ class TerraformRunner:
     def _plan_dependency_for_stage(self, stage: RunStage) -> RunStage | None:
         if stage == RunStage.platform:
             return RunStage.core
-        if stage == RunStage.applications:
+        if stage == RunStage.policies:
             return RunStage.platform
+        if stage == RunStage.applications:
+            return RunStage.policies
         return None
 
     def _destroy_blockers_for_stage(self, stage: RunStage) -> list[RunStage]:
         if stage == RunStage.core:
-            return [RunStage.applications, RunStage.platform]
+            return [RunStage.applications, RunStage.policies, RunStage.platform]
         if stage == RunStage.platform:
+            return [RunStage.applications, RunStage.policies]
+        if stage == RunStage.policies:
             return [RunStage.applications]
         return []
 

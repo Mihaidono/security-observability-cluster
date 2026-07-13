@@ -158,7 +158,7 @@ export interface TerraformConfig {
   applications: ApplicationsConfig;
 }
 
-export type RunStage = "core" | "platform" | "applications";
+export type RunStage = "core" | "platform" | "policies" | "applications";
 
 export interface PlanSummary {
   create: number;

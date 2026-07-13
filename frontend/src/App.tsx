@@ -2491,6 +2491,7 @@ function statusTone(
 function stageLabel(stage: RunStage): string {
   if (stage === "core") return "Core";
   if (stage === "platform") return "Platform";
+  if (stage === "policies") return "Policies";
   return "Applications";
 }
 
@@ -2898,6 +2899,10 @@ export default function App() {
     () => runs.find((run) => run.stage === "platform") ?? null,
     [runs],
   );
+  const latestPoliciesRun = useMemo(
+    () => runs.find((run) => run.stage === "policies") ?? null,
+    [runs],
+  );
   const latestApplicationsRun = useMemo(
     () => runs.find((run) => run.stage === "applications") ?? null,
     [runs],
@@ -2908,6 +2913,10 @@ export default function App() {
   );
   const hasAppliedPlatformRun = useMemo(
     () => stageIsEffectivelyApplied(runs, "platform"),
+    [runs],
+  );
+  const hasAppliedPoliciesRun = useMemo(
+    () => stageIsEffectivelyApplied(runs, "policies"),
     [runs],
   );
   const hasAppliedApplicationsRun = useMemo(
@@ -2979,16 +2988,26 @@ export default function App() {
   const platformLockedReason = !hasAppliedCoreRun
     ? "Apply core first to unlock the platform stage."
     : undefined;
-  const applicationsLockedReason = !hasAppliedPlatformRun
-    ? "Apply platform first to unlock the applications stage."
+  const policiesLockedReason = !hasAppliedPlatformRun
+    ? "Apply platform first to unlock the policies stage."
+    : undefined;
+  const applicationsLockedReason = !hasAppliedPoliciesRun
+    ? "Apply policies first to unlock the applications stage."
     : undefined;
   const coreDestroyBlockedReason = hasAppliedApplicationsRun
     ? "Destroy the applications stage first. The applications stage still owns resources that depend on core."
-    : hasAppliedPlatformRun
-      ? "Destroy the platform stage first. The platform stage still owns resources that depend on core."
-      : undefined;
+    : hasAppliedPoliciesRun
+      ? "Destroy the policies stage first. The policies stage still owns resources that depend on core."
+      : hasAppliedPlatformRun
+        ? "Destroy the platform stage first. The platform stage still owns resources that depend on core."
+        : undefined;
   const platformDestroyBlockedReason = hasAppliedApplicationsRun
     ? "Destroy the applications stage first. The applications stage still owns resources that depend on platform."
+    : hasAppliedPoliciesRun
+      ? "Destroy the policies stage first. The policies stage still owns resources that depend on platform."
+      : undefined;
+  const policiesDestroyBlockedReason = hasAppliedApplicationsRun
+    ? "Destroy the applications stage first. The applications stage still owns resources that depend on policies."
     : undefined;
   const coreActionDisabledReason = adminAccessDisabledReason;
   const coreDestroyActionDisabledReason =
@@ -2999,21 +3018,33 @@ export default function App() {
     adminAccessDisabledReason ??
     platformLockedReason ??
     platformDestroyBlockedReason;
+  const policiesActionDisabledReason =
+    adminAccessDisabledReason ?? policiesLockedReason;
+  const policiesDestroyActionDisabledReason =
+    adminAccessDisabledReason ??
+    policiesLockedReason ??
+    policiesDestroyBlockedReason;
   const applicationsActionDisabledReason =
     adminAccessDisabledReason ?? applicationsLockedReason;
   const platformStageLocked = !hasAppliedCoreRun;
-  const applicationsStageLocked = !hasAppliedPlatformRun;
+  const policiesStageLocked = !hasAppliedPlatformRun;
+  const applicationsStageLocked = !hasAppliedPoliciesRun;
   const platformStageNotice = platformStageLocked
-    ? "Platform stays unavailable until core has been applied successfully. Once the cluster exists, you can plan and apply namespaces, add-ons, control-plane services, and policies."
+    ? "Platform stays unavailable until core has been applied successfully. Once the cluster exists, you can plan and apply namespaces, add-ons, and control-plane services."
+    : null;
+  const policiesStageNotice = policiesStageLocked
+    ? "Policies stay unavailable until platform has been applied successfully. Apply the shared in-cluster services and CRDs first, then layer the Kyverno and Tetragon custom resources on top."
     : null;
   const applicationsStageNotice = applicationsStageLocked
-    ? "Applications stay unavailable until platform has been applied successfully. Apply the shared in-cluster services and policy layer first, then deploy workloads."
+    ? "Applications stay unavailable until policies have been applied successfully. Apply the shared in-cluster services and policy layer first, then deploy workloads."
     : null;
   const coreDestroyNotice = hasAppliedApplicationsRun
-    ? "Destroy order is applications, then platform, then core. Applications is still applied right now, so core destroy remains locked."
-    : hasAppliedPlatformRun
-      ? "Destroy order is platform, then core. Platform is still applied right now, so core destroy remains locked."
-      : null;
+    ? "Destroy order is applications, then policies, then platform, then core. Applications is still applied right now, so core destroy remains locked."
+    : hasAppliedPoliciesRun
+      ? "Destroy order is policies, then platform, then core. Policies is still applied right now, so core destroy remains locked."
+      : hasAppliedPlatformRun
+        ? "Destroy order is platform, then core. Platform is still applied right now, so core destroy remains locked."
+        : null;
   const hubblePortForwardCommand =
     "kubectl -n kube-system port-forward svc/hubble-ui 12000:80";
   const hubbleLocalUrl = "http://127.0.0.1:12000";
@@ -4095,10 +4126,10 @@ export default function App() {
                             </h2>
                             <p className="max-w-3xl text-sm leading-7 text-neutral-400">
                               Start with core, move into platform once the
-                              cluster is real. Platform now carries the
-                              in-cluster services, policy layer, and operator
-                              dependencies needed before you drill into assets
-                              or logs.
+                              cluster is real. Platform carries the shared
+                              in-cluster services, then policies layers the
+                              custom resources on top before you drill into
+                              assets or logs.
                             </p>
                           </div>
 
@@ -4250,6 +4281,7 @@ export default function App() {
                                       isBusy ||
                                       !hasAdminAccess ||
                                       hasAppliedPlatformRun ||
+                                      hasAppliedPoliciesRun ||
                                       hasAppliedApplicationsRun
                                     }
                                   >
@@ -4280,8 +4312,8 @@ export default function App() {
                                 </p>
                                 <p className="mt-2 text-sm leading-6 text-neutral-400">
                                   Namespaces, Helm add-ons, control-plane
-                                  services, policy resources, and the
-                                  operator-facing outputs for the live lab.
+                                  services, CRDs, and the operator-facing
+                                  outputs for the live lab.
                                 </p>
                               </div>
                               <div className="shrink-0 self-start">
@@ -4376,6 +4408,7 @@ export default function App() {
                                       isBusy ||
                                       !hasAdminAccess ||
                                       platformStageLocked ||
+                                      hasAppliedPoliciesRun ||
                                       hasAppliedApplicationsRun
                                     }
                                   >
@@ -4387,6 +4420,126 @@ export default function App() {
                                 variant="ghost"
                                 onClick={() => void unlockState("platform")}
                                 disabled={isBusy || platformStageLocked}
+                              >
+                                Unlock state
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div
+                            className={classNames(
+                              "rounded-[1.8rem] border border-border/80 bg-muted/55 p-5",
+                              policiesStageLocked && "border-dashed opacity-75",
+                            )}
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-lg font-semibold">
+                                  Policies
+                                </p>
+                                <p className="mt-2 text-sm leading-6 text-neutral-400">
+                                  Kyverno and Tetragon custom resources applied
+                                  after platform installs the required CRDs.
+                                </p>
+                              </div>
+                              <div className="shrink-0 self-start">
+                                <Badge>
+                                  {latestPoliciesRun
+                                    ? latestPoliciesRun.status
+                                    : "idle"}
+                                </Badge>
+                              </div>
+                            </div>
+                            {policiesStageNotice ? (
+                              <div className="mt-4">
+                                <StageNotice
+                                  title="Stage Locked"
+                                  body={policiesStageNotice}
+                                />
+                              </div>
+                            ) : null}
+                            <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
+                              {hasAppliedPlatformRun
+                                ? "Platform applied, policies stage unlocked"
+                                : "Apply platform first to unlock this stage"}
+                            </p>
+                            <div className="mt-4 grid gap-3 md:grid-cols-3">
+                              <MetricTile
+                                label="Wards"
+                                value={subjectKeys.length}
+                              />
+                              <MetricTile label="Cluster Policies" value={2} />
+                              <MetricTile
+                                label="Tracing Namespaces"
+                                value={subjectKeys.length}
+                              />
+                            </div>
+                            <div className="mt-5 flex flex-wrap gap-2">
+                              <StageAction
+                                disabledReason={policiesActionDisabledReason}
+                              >
+                                <Button
+                                  onClick={() => void startPlan("policies")}
+                                  disabled={
+                                    isBusy ||
+                                    !hasAdminAccess ||
+                                    !hasAppliedPlatformRun
+                                  }
+                                >
+                                  Plan policies
+                                </Button>
+                              </StageAction>
+                              <StageAction
+                                disabledReason={policiesActionDisabledReason}
+                              >
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => void startApply("policies")}
+                                  disabled={
+                                    isBusy ||
+                                    !hasAdminAccess ||
+                                    !hasAppliedPlatformRun ||
+                                    !canQueueApplyFromPlan("policies")
+                                  }
+                                >
+                                  Apply policies
+                                </Button>
+                              </StageAction>
+                              <div data-destroy-arm>
+                                <StageAction
+                                  disabledReason={
+                                    policiesDestroyActionDisabledReason
+                                  }
+                                >
+                                  <Button
+                                    variant={
+                                      armedDestroyStage === "policies"
+                                        ? "danger"
+                                        : "ghost"
+                                    }
+                                    className={
+                                      armedDestroyStage === "policies"
+                                        ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]"
+                                        : ""
+                                    }
+                                    onClick={() =>
+                                      void startDestroy("policies")
+                                    }
+                                    disabled={
+                                      isBusy ||
+                                      !hasAdminAccess ||
+                                      policiesStageLocked ||
+                                      hasAppliedApplicationsRun
+                                    }
+                                  >
+                                    Destroy policies
+                                  </Button>
+                                </StageAction>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                onClick={() => void unlockState("policies")}
+                                disabled={isBusy || policiesStageLocked}
                               >
                                 Unlock state
                               </Button>
@@ -4429,7 +4582,9 @@ export default function App() {
                             ) : null}
                             <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
                               {hasAppliedPlatformRun
-                                ? "Platform applied, applications stage unlocked"
+                                ? hasAppliedPoliciesRun
+                                  ? "Policies applied, applications stage unlocked"
+                                  : "Apply policies first to unlock this stage"
                                 : "Apply platform first to unlock this stage"}
                             </p>
                             <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -4459,7 +4614,7 @@ export default function App() {
                                   disabled={
                                     isBusy ||
                                     !hasAdminAccess ||
-                                    !hasAppliedPlatformRun
+                                    !hasAppliedPoliciesRun
                                   }
                                 >
                                   Plan applications
@@ -4478,7 +4633,7 @@ export default function App() {
                                   disabled={
                                     isBusy ||
                                     !hasAdminAccess ||
-                                    !hasAppliedPlatformRun ||
+                                    !hasAppliedPoliciesRun ||
                                     !canQueueApplyFromPlan("applications")
                                   }
                                 >
@@ -4508,7 +4663,7 @@ export default function App() {
                                     disabled={
                                       isBusy ||
                                       !hasAdminAccess ||
-                                      !hasAppliedPlatformRun
+                                      !hasAppliedPoliciesRun
                                     }
                                   >
                                     Destroy applications

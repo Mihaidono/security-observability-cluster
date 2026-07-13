@@ -5,14 +5,14 @@ resource "time_sleep" "cluster_access_ready" {
     cluster_name             = var.cluster_name
     cluster_endpoint         = data.aws_eks_cluster.this.endpoint
     cluster_admin_principals = join(",", sort(var.cluster_admin_principal_arns))
+    subject_count            = tostring(length(var.analysis_subjects))
   }
 }
 
-module "workloads" {
-  source = "../modules/ward-workloads"
+module "policy_manifests" {
+  source = "../../modules/policies-stack"
 
-  analysis_subject_names = toset(keys(var.analysis_subjects))
-  ward_applications      = var.ward_applications
+  analysis_subjects = var.analysis_subjects
 
   depends_on = [time_sleep.cluster_access_ready]
 }

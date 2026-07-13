@@ -15,17 +15,19 @@ At startup the backend resolves paths relative to the repo root:
 - default config template: `backend/app/default_managed_config.json`
 - managed config file: `backend/state/managed-config.json`
 - generated per-root tfvars:
-  - `infrastructure/core/managed.auto.tfvars.json`
-  - `infrastructure/platform/managed.auto.tfvars.json`
-  - `infrastructure/applications/managed.auto.tfvars.json`
+  - `infrastructure/stages/core/managed.auto.tfvars.json`
+  - `infrastructure/stages/platform/managed.auto.tfvars.json`
+  - `infrastructure/stages/policies/managed.auto.tfvars.json`
+  - `infrastructure/stages/applications/managed.auto.tfvars.json`
 - Terraform roots:
-  - `infrastructure/core`
-  - `infrastructure/platform`
-  - `infrastructure/applications`
+  - `infrastructure/stages/core`
+  - `infrastructure/stages/platform`
+  - `infrastructure/stages/policies`
+  - `infrastructure/stages/applications`
 - PostgreSQL database: configured by `ISOLENS_DATABASE_URL`
 - per-run artifacts and logs: `backend/state/runs/<run_id>/`
 
-If the managed config file does not exist yet, the backend seeds it from the default JSON template and regenerates all three stage-local tfvars files. A legacy `infrastructure/frontend-managed.auto.tfvars.json` file is also migrated automatically on first load.
+If the managed config file does not exist yet, the backend seeds it from the default JSON template and regenerates the four stage-local tfvars files. A legacy `infrastructure/frontend-managed.auto.tfvars.json` file is still migrated automatically on first load if it exists from an older repo layout.
 
 ## Authentication
 
@@ -50,7 +52,7 @@ The backend does not apply Terraform directly from browser input. The flow is:
 1. the frontend edits a JSON config model
 2. `PUT /api/config` persists that model
 3. backend run endpoints invoke Terraform from the stage directory with the matching generated file:
-   `-var-file infrastructure/<stage>/managed.auto.tfvars.json`
+   `-var-file infrastructure/stages/<stage>/managed.auto.tfvars.json`
 
 Before each plan/apply/destroy run, the backend performs:
 
@@ -72,6 +74,7 @@ Supported stages:
 
 - `core`
 - `platform`
+- `policies`
 - `applications`
 
 Run statuses:
@@ -91,11 +94,13 @@ Important guardrails implemented in `app/terraform_runner.py`:
 
 - at least one non-empty cluster admin ARN is required before plan/apply/destroy
 - `platform` plan/apply is blocked until there is a successful `core` apply
-- `applications` plan/apply is blocked until there is a successful `platform` apply
+- `policies` plan/apply is blocked until there is a successful `platform` apply
+- `applications` plan/apply is blocked until there is a successful `policies` apply
 - `apply` can be created from the latest plan while that source plan is `queued`, `running`, or `planned`, but it only executes if the plan finishes successfully as `planned`
 - each saved plan is single-use once an apply attempt exists
-- `platform` destroy is blocked while the latest applications-stage apply is still active
-- `core` destroy is blocked while the latest platform-stage apply is still active
+- `policies` destroy is blocked while the latest applications-stage apply is still active
+- `platform` destroy is blocked while the latest policies-stage or applications-stage apply is still active
+- `core` destroy is blocked while the latest platform-stage, policies-stage, or applications-stage apply is still active
 - stale queued/running runs are reconciled on backend startup
 
 ## Cancellation Semantics
@@ -127,7 +132,7 @@ terraform output -json
 
 and stores the output payload on that run.
 
-`GET /api/outputs` combines the latest effective applied outputs from `core`, `platform`, and `applications`, while ignoring stages that have already been destroyed.
+`GET /api/outputs` combines the latest effective applied outputs from `core`, `platform`, `policies`, and `applications`, while ignoring stages that have already been destroyed.
 
 ## HTTP API
 

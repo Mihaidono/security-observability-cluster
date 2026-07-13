@@ -71,6 +71,7 @@ resource "aws_ecr_repository" "application_images" {
   for_each = local.ecr_repositories
 
   name                 = each.value
+  force_delete         = true
   image_tag_mutability = var.ecr_image_tag_mutability
 
   image_scanning_configuration {

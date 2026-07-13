@@ -16,7 +16,7 @@ Owns the JSON-driven workload layer applied after the shared cluster platform is
 
 | Name | Source | Version |
 | ---- | ------ | ------- |
-| workloads | ../modules/ward-workloads | n/a |
+| workloads | ../../modules/ward-workloads | n/a |
 
 ## Resources
 

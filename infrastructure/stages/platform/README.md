@@ -30,7 +30,6 @@ Platform also creates:
 
 - a dedicated namespace for the Isolens backend and frontend
 - an in-cluster PostgreSQL StatefulSet, Service, Secret, PVC, and namespace-local NetworkPolicy
-- the Kyverno and Tetragon manifest layer after the add-ons and subject namespaces are ready
 
 ## Prerequisites
 
@@ -44,7 +43,7 @@ This stage expects:
 
 - The current platform design uses the Cilium-supported AWS VPC CNI chaining mode on EKS rather than Cilium ENI IPAM mode.
 - This keeps the EKS `aws-node` daemonset responsible for pod IP allocation and baseline node networking while still letting Cilium provide policy enforcement, Hubble, and the foundation for Tetragon.
-- Policy creation waits for the add-on layer, ward namespaces, and control-plane services so in-cluster dependencies are applied in a safe order.
+- Kyverno and Tetragon CRDs are installed here, while the custom policy resources themselves are applied later by the dedicated `policies` stage.
 
 ## Inputs
 
@@ -104,10 +103,10 @@ use_lockfile = true
 ## Direct Terraform Usage
 
 ```bash
-cd infrastructure/platform
+cd infrastructure/stages/platform
 terraform init -reconfigure -backend-config=backend.hcl
-terraform plan -var-file=../terraform.tfvars
-terraform apply -var-file=../terraform.tfvars
+terraform plan
+terraform apply
 ```
 
 ## Current Hubble Access Model
@@ -141,18 +140,16 @@ http://127.0.0.1:12000
 
 | Name | Source | Version |
 | ---- | ------ | ------- |
-| addons | ../modules/platform-addons | n/a |
-| control_plane | ../modules/control-plane | n/a |
-| policy_manifests | ../modules/policies-stack | n/a |
-| postgresql | ../modules/platform-postgresql | n/a |
-| subjects | ../modules/ward-subjects | n/a |
+| addons | ../../modules/platform-addons | n/a |
+| control_plane | ../../modules/control-plane | n/a |
+| postgresql | ../../modules/platform-postgresql | n/a |
+| subjects | ../../modules/ward-subjects | n/a |
 
 ## Resources
 
 | Name | Type |
 | ---- | ---- |
 | [time_sleep.cluster_access_ready](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
-| [time_sleep.platform_services_ready](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
 | [aws_eks_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/eks_cluster) | data source |
 
 ## Inputs
@@ -208,7 +205,6 @@ http://127.0.0.1:12000
 | control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. |
 | control_plane_runner_name | Deployment name for the control-plane Terraform runner. |
 | ingress_controller_namespace | Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled. |
-| kyverno_cluster_policies | Kyverno ClusterPolicy objects managed by the platform stage. |
 | kyverno_namespace | Namespace containing the Kyverno policy engine. |
 | monitoring_namespace | Namespace containing the observability stack. |
 | monitoring_release_name | Helm release name used for the monitoring agent stack. |
@@ -216,7 +212,6 @@ http://127.0.0.1:12000
 | postgresql_secret_name | Secret containing the PostgreSQL connection credentials. |
 | postgresql_service_fqdn | Cluster-local DNS name for the PostgreSQL service used by the control plane. |
 | postgresql_username | Application username provisioned for the control plane database. |
-| tetragon_policy_namespaces | Namespaces that receive Tetragon tracing policies. |
 | update_kubeconfig_command | Command to merge this cluster into the local kubeconfig. |
 | ward_namespaces | Ward namespaces created for analysis subjects. |
 <!-- END_TF_DOCS -->

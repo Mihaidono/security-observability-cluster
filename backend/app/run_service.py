@@ -183,14 +183,18 @@ class RunService:
     def _plan_dependency_for_stage(self, stage: RunStage) -> RunStage | None:
         if stage == RunStage.platform:
             return RunStage.core
-        if stage == RunStage.applications:
+        if stage == RunStage.policies:
             return RunStage.platform
+        if stage == RunStage.applications:
+            return RunStage.policies
         return None
 
     def _destroy_blockers_for_stage(self, stage: RunStage) -> list[RunStage]:
         if stage == RunStage.core:
-            return [RunStage.applications, RunStage.platform]
+            return [RunStage.applications, RunStage.policies, RunStage.platform]
         if stage == RunStage.platform:
+            return [RunStage.applications, RunStage.policies]
+        if stage == RunStage.policies:
             return [RunStage.applications]
         return []
 

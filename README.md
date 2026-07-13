@@ -4,10 +4,11 @@ Isolens is a Terraform-driven EKS lab with a small control plane:
 
 - `backend/` runs a FastAPI service that stores editable config, queues Terraform runs, and streams run events.
 - `frontend/` is a Vite + React operator UI for editing ward/application config and driving staged Terraform actions.
-- `infrastructure/bootstrap/` creates the remote-state bucket and shared ECR repositories.
-- `infrastructure/core/` creates the AWS foundation and EKS cluster.
-- `infrastructure/platform/` creates the in-cluster add-ons, policy layer, control-plane namespace, and PostgreSQL service after core is live.
-- `infrastructure/applications/` creates workloads after the shared platform layer is live.
+- `infrastructure/stages/bootstrap/` creates the remote-state bucket and shared ECR repositories.
+- `infrastructure/stages/core/` creates the AWS foundation and EKS cluster.
+- `infrastructure/stages/platform/` creates the in-cluster add-ons, ward namespaces, control-plane namespace, and PostgreSQL service after core is live.
+- `infrastructure/stages/policies/` creates the Kyverno and Tetragon custom resources after platform is live.
+- `infrastructure/stages/applications/` creates workloads after the shared platform layer is live.
 
 This document reflects the code that exists in the repository today, not the long-term intent.
 
@@ -37,9 +38,10 @@ Two important reality checks:
 
 - [backend/README.md](backend/README.md): API, auth, run lifecycle, persistence, environment variables
 - [frontend/README.md](frontend/README.md): UI structure, runtime behavior, local development
-- [infrastructure/core/README.md](infrastructure/core/README.md): core-stage resources, inputs, outputs, caveats
-- [infrastructure/platform/README.md](infrastructure/platform/README.md): platform-stage resources, inputs, outputs, and provider behavior
-- `infrastructure/applications/`: workload-only Terraform root with its own state boundary
+- [infrastructure/stages/core/README.md](infrastructure/stages/core/README.md): core-stage resources, inputs, outputs, caveats
+- [infrastructure/stages/platform/README.md](infrastructure/stages/platform/README.md): platform-stage resources, inputs, outputs, and provider behavior
+- [infrastructure/stages/policies/README.md](infrastructure/stages/policies/README.md): policy-stage resources, inputs, outputs, and ordering
+- `infrastructure/stages/applications/`: workload-only Terraform root with its own state boundary
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md): commit convention, local hooks, PR quality gates, and release automation
 - [TESTING_AND_USAGE.md](TESTING_AND_USAGE.md): local bring-up, smoke tests, and operator workflow
 
@@ -54,9 +56,12 @@ The Terraform is intentionally split:
    Owns AWS infrastructure, the EKS cluster, and cluster-admin access bootstrap.
 
 3. `platform`
-   Owns Helm add-ons, ward namespaces, the policy layer, the control-plane namespace, PostgreSQL, and most operator-facing outputs.
+   Owns Helm add-ons, ward namespaces, the control-plane namespace, PostgreSQL, and most operator-facing outputs.
 
-4. `applications`
+4. `policies`
+   Owns Kyverno and Tetragon custom resources after the platform layer has installed the required CRDs.
+
+5. `applications`
    Owns workload deployments, Services, Ingresses, and app-specific network policies.
 
 ## Operator Workflow
@@ -84,7 +89,7 @@ Every active scenario also generates a `Scenario Playbook` in the UI. Those play
 ### 1. Bootstrap remote state
 
 ```bash
-cd infrastructure/bootstrap
+cd infrastructure/stages/bootstrap
 terraform init
 terraform apply
 ```
@@ -93,6 +98,7 @@ The committed backend configs currently point at:
 
 - `s3://isolens-lab/dev/core/terraform.tfstate`
 - `s3://isolens-lab/dev/platform/terraform.tfstate`
+- `s3://isolens-lab/dev/policies/terraform.tfstate`
 - `s3://isolens-lab/dev/applications/terraform.tfstate`
 
 ### 2. Configure backend credentials
@@ -133,14 +139,17 @@ The backend and UI enforce the intended order:
 3. apply the saved `core` plan
 4. plan `platform`
 5. apply the saved `platform` plan
-6. plan `applications`
-7. apply the saved `applications` plan
+6. plan `policies`
+7. apply the saved `policies` plan
+8. plan `applications`
+9. apply the saved `applications` plan
 
 Destroy order goes the other direction:
 
 1. destroy `applications`
-2. destroy `platform`
-3. destroy `core`
+2. destroy `policies`
+3. destroy `platform`
+4. destroy `core`
 
 ## Backend Guardrails
 
@@ -165,12 +174,11 @@ The operator UI edits the JSON-backed config model, not raw `.tfvars` text.
 - source template: `backend/app/default_managed_config.json`
 - persisted managed config: `backend/state/managed-config.json`
 - generated per-root tfvars:
-  - `infrastructure/core/managed.auto.tfvars.json`
-  - `infrastructure/platform/managed.auto.tfvars.json`
-  - `infrastructure/applications/managed.auto.tfvars.json`
+  - `infrastructure/stages/core/managed.auto.tfvars.json`
+  - `infrastructure/stages/platform/managed.auto.tfvars.json`
+  - `infrastructure/stages/policies/managed.auto.tfvars.json`
+  - `infrastructure/stages/applications/managed.auto.tfvars.json`
 - Terraform runs use the stage-matching generated `managed.auto.tfvars.json`
-
-The shared handwritten example file at `infrastructure/terraform.tfvars` remains useful for direct Terraform usage and reference data, but the backend itself operates on the managed JSON file.
 
 That managed JSON file now explicitly carries `cluster_log_retention_in_days`, so the backend/frontend/Terraform path preserves the EKS control-plane log-retention setting instead of depending on an implicit default.
 

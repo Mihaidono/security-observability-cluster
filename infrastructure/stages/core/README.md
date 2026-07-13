@@ -10,7 +10,7 @@ The `core` stage owns the AWS network and EKS foundation for the lab.
 - an explicit CloudWatch log group for EKS control-plane logs
 - EKS access entries and cluster-admin policy associations for configured IAM principals
 
-The `core` stage does not create namespaces, Helm releases, workloads, or policy CRDs anymore. Those live in the `platform` and `applications` stages.
+The `core` stage does not create namespaces, Helm releases, workloads, or policy CRDs anymore. Those live in the `platform`, `policies`, and `applications` stages.
 
 ## Inputs
 
@@ -60,10 +60,10 @@ use_lockfile = true
 ## Direct Terraform Usage
 
 ```bash
-cd infrastructure/core
+cd infrastructure/stages/core
 terraform init -reconfigure -backend-config=backend.hcl
-terraform plan -var-file=../terraform.tfvars
-terraform apply -var-file=../terraform.tfvars
+terraform plan
+terraform apply
 ```
 
 ## Terraform Reference

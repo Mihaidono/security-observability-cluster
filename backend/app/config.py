@@ -13,8 +13,10 @@ from .models import RunStage
 class Settings:
     project_root: Path
     infrastructure_root: Path
+    terraform_stages_root: Path
     terraform_core_root: Path
     terraform_platform_root: Path
+    terraform_policies_root: Path
     terraform_applications_root: Path
     state_dir: Path
     runs_dir: Path
@@ -22,6 +24,7 @@ class Settings:
     managed_config_path: Path
     core_tfvars_path: Path
     platform_tfvars_path: Path
+    policies_tfvars_path: Path
     applications_tfvars_path: Path
     default_config_path: Path
     terraform_bin: str
@@ -36,6 +39,8 @@ class Settings:
             return self.core_tfvars_path
         if stage == RunStage.platform:
             return self.platform_tfvars_path
+        if stage == RunStage.policies:
+            return self.policies_tfvars_path
         return self.applications_tfvars_path
 
 
@@ -44,15 +49,18 @@ def get_settings() -> Settings:
     backend_root = project_root / "backend"
     load_dotenv(backend_root / ".env")
     infrastructure_root = project_root / "infrastructure"
-    terraform_core_root = infrastructure_root / "core"
-    terraform_platform_root = infrastructure_root / "platform"
-    terraform_applications_root = infrastructure_root / "applications"
+    terraform_stages_root = infrastructure_root / "stages"
+    terraform_core_root = terraform_stages_root / "core"
+    terraform_platform_root = terraform_stages_root / "platform"
+    terraform_policies_root = terraform_stages_root / "policies"
+    terraform_applications_root = terraform_stages_root / "applications"
     state_dir = backend_root / "state"
     runs_dir = state_dir / "runs"
     state_dir.mkdir(parents=True, exist_ok=True)
     managed_config_path = state_dir / "managed-config.json"
     core_tfvars_path = terraform_core_root / "managed.auto.tfvars.json"
     platform_tfvars_path = terraform_platform_root / "managed.auto.tfvars.json"
+    policies_tfvars_path = terraform_policies_root / "managed.auto.tfvars.json"
     applications_tfvars_path = terraform_applications_root / "managed.auto.tfvars.json"
     default_config_path = backend_root / "app" / "default_managed_config.json"
 
@@ -65,8 +73,10 @@ def get_settings() -> Settings:
     return Settings(
         project_root=project_root,
         infrastructure_root=infrastructure_root,
+        terraform_stages_root=terraform_stages_root,
         terraform_core_root=terraform_core_root,
         terraform_platform_root=terraform_platform_root,
+        terraform_policies_root=terraform_policies_root,
         terraform_applications_root=terraform_applications_root,
         state_dir=state_dir,
         runs_dir=runs_dir,
@@ -77,6 +87,7 @@ def get_settings() -> Settings:
         managed_config_path=managed_config_path,
         core_tfvars_path=core_tfvars_path,
         platform_tfvars_path=platform_tfvars_path,
+        policies_tfvars_path=policies_tfvars_path,
         applications_tfvars_path=applications_tfvars_path,
         default_config_path=default_config_path,
         terraform_bin=os.getenv("TERRAFORM_BIN", "terraform"),

@@ -28,6 +28,7 @@ class ApplicationsConfig(BaseModel):
 class RunStage(str, Enum):
     core = "core"
     platform = "platform"
+    policies = "policies"
     applications = "applications"
 
 
@@ -121,7 +122,9 @@ class HealthResponse(BaseModel):
     managed_tfvars_present: bool
     queue_depth: int = 0
     auth_enabled: bool = True
-    stages: list[RunStage] = Field(default_factory=lambda: [RunStage.core, RunStage.platform, RunStage.applications])
+    stages: list[RunStage] = Field(
+        default_factory=lambda: [RunStage.core, RunStage.platform, RunStage.policies, RunStage.applications]
+    )
 
 
 class TerraformConfig(BaseModel):

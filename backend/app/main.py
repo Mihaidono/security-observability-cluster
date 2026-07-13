@@ -74,12 +74,13 @@ async def health() -> HealthResponse:
                 settings.managed_config_path,
                 settings.core_tfvars_path,
                 settings.platform_tfvars_path,
+                settings.policies_tfvars_path,
                 settings.applications_tfvars_path,
             ]
         ),
         queue_depth=run_service.queue_depth(),
         auth_enabled=True,
-        stages=[RunStage.core, RunStage.platform, RunStage.applications],
+        stages=[RunStage.core, RunStage.platform, RunStage.policies, RunStage.applications],
     )
 
 

@@ -9,7 +9,7 @@ resource "time_sleep" "cluster_access_ready" {
 }
 
 module "addons" {
-  source = "../modules/platform-addons"
+  source = "../../modules/platform-addons"
 
   kubernetes_version   = var.kubernetes_version
   enable_ingress_nginx = var.enable_ingress_nginx
@@ -18,7 +18,7 @@ module "addons" {
 }
 
 module "subjects" {
-  source = "../modules/ward-subjects"
+  source = "../../modules/ward-subjects"
 
   analysis_subjects  = var.analysis_subjects
   kubernetes_version = var.kubernetes_version
@@ -27,7 +27,7 @@ module "subjects" {
 }
 
 module "control_plane" {
-  source = "../modules/control-plane"
+  source = "../../modules/control-plane"
 
   namespace          = var.control_plane_namespace
   kubernetes_version = var.kubernetes_version
@@ -60,7 +60,7 @@ module "control_plane" {
 }
 
 module "postgresql" {
-  source = "../modules/platform-postgresql"
+  source = "../../modules/platform-postgresql"
 
   namespace          = module.control_plane.namespace
   name               = var.postgresql_name
@@ -74,31 +74,4 @@ module "postgresql" {
   resources          = var.postgresql_resources
 
   depends_on = [module.control_plane]
-}
-
-resource "time_sleep" "platform_services_ready" {
-  create_duration = "30s"
-
-  triggers = {
-    cilium_release          = module.addons.monitoring_release_name
-    kyverno_namespace       = module.addons.kyverno_namespace
-    control_plane           = module.control_plane.namespace
-    postgresql_service_fqdn = module.postgresql.service_fqdn
-    subject_count           = tostring(length(var.analysis_subjects))
-  }
-
-  depends_on = [
-    module.addons,
-    module.subjects,
-    module.control_plane,
-    module.postgresql,
-  ]
-}
-
-module "policy_manifests" {
-  source = "../modules/policies-stack"
-
-  analysis_subjects = var.analysis_subjects
-
-  depends_on = [time_sleep.platform_services_ready]
 }

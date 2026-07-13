@@ -25,7 +25,7 @@ variable "state_bucket_name" {
 variable "force_destroy" {
   description = "Whether the state bucket can be destroyed even when non-empty."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "backend_ecr_repository_name" {

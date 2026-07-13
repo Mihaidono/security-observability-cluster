@@ -118,8 +118,6 @@ class PostgresStore:
             if "claimed_by" not in columns:
                 connection.execute("ALTER TABLE runs ADD COLUMN claimed_by TEXT")
 
-            connection.execute("UPDATE runs SET stage = 'platform' WHERE stage = 'policies'")
-
     def load_default_config(self) -> TerraformConfig:
         return TerraformConfig.model_validate_json(self.settings.default_config_path.read_text())
 
@@ -140,6 +138,7 @@ class PostgresStore:
             for stage_path in [
                 self.settings.core_tfvars_path,
                 self.settings.platform_tfvars_path,
+                self.settings.policies_tfvars_path,
                 self.settings.applications_tfvars_path,
             ]
         ):
@@ -151,6 +150,7 @@ class PostgresStore:
         self.settings.managed_config_path.write_text(f"{payload}\n")
         self.settings.core_tfvars_path.write_text(f"{json.dumps(core_tfvars_payload(config), indent=2)}\n")
         self.settings.platform_tfvars_path.write_text(f"{json.dumps(platform_tfvars_payload(config), indent=2)}\n")
+        self.settings.policies_tfvars_path.write_text(f"{json.dumps(policies_tfvars_payload(config), indent=2)}\n")
         self.settings.applications_tfvars_path.write_text(
             f"{json.dumps(applications_tfvars_payload(config), indent=2)}\n"
         )
@@ -477,7 +477,7 @@ class PostgresStore:
 
     def latest_outputs(self) -> dict[str, Any] | None:
         combined: dict[str, Any] = {}
-        for stage in [RunStage.core, RunStage.platform, RunStage.applications]:
+        for stage in [RunStage.core, RunStage.platform, RunStage.policies, RunStage.applications]:
             run = self._latest_effective_apply(stage)
             if run and run.outputs:
                 combined.update(run.outputs)
@@ -502,7 +502,7 @@ class PostgresStore:
 
         return TerraformRun(
             id=str(row["id"]),
-            stage="platform" if str(row["stage"]) == "policies" else str(row["stage"] or "core"),
+            stage=str(row["stage"] or "core"),
             kind=str(row["kind"]),
             status=str(row["status"]),
             created_at=row["created_at"],
@@ -550,4 +550,14 @@ def applications_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
         "cluster_admin_principal_arns": config.core.cluster_admin_principal_arns,
         "analysis_subjects": config.platform.analysis_subjects,
         "ward_applications": config.applications.ward_applications,
+    }
+
+
+def policies_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
+    return {
+        "project_name": config.core.project_name,
+        "environment": config.core.environment,
+        "cluster_name": config.core.cluster_name,
+        "cluster_admin_principal_arns": config.core.cluster_admin_principal_arns,
+        "analysis_subjects": config.platform.analysis_subjects,
     }
