@@ -1,3 +1,9 @@
+## [0.6.3](https://github.com/Mihaidono/security-observability-cluster/compare/v0.6.2...v0.6.3) (2026-07-13)
+
+### Bug Fixes
+
+* **repo:** structured infra folder, brought back separated policies stage ([1cf2b02](https://github.com/Mihaidono/security-observability-cluster/commit/1cf2b022006c2dced3822a67d04789ba3051fcd2))
+
 ## [0.6.2](https://github.com/Mihaidono/security-observability-cluster/compare/v0.6.1...v0.6.2) (2026-07-10)
 
 ### Bug Fixes
