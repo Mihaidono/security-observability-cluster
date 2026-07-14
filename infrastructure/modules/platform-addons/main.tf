@@ -15,6 +15,16 @@ resource "helm_release" "cilium" {
   }
 
   set {
+    name  = "k8sServiceHost"
+    value = trimprefix(var.cluster_endpoint, "https://")
+  }
+
+  set {
+    name  = "k8sServicePort"
+    value = "443"
+  }
+
+  set {
     name  = "eni.enabled"
     value = "true"
   }
@@ -160,6 +170,23 @@ resource "helm_release" "cilium" {
   }
 }
 
+resource "aws_eks_addon" "coredns" {
+  cluster_name = var.cluster_name
+  addon_name   = "coredns"
+
+  preserve                    = true
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+
+  timeouts {
+    create = "20m"
+    update = "20m"
+    delete = "20m"
+  }
+
+  depends_on = [helm_release.cilium]
+}
+
 resource "helm_release" "tetragon" {
   name            = "tetragon"
   repository      = "https://helm.cilium.io/"
@@ -171,7 +198,10 @@ resource "helm_release" "tetragon" {
   atomic          = true
   cleanup_on_fail = true
 
-  depends_on = [helm_release.cilium]
+  depends_on = [
+    helm_release.cilium,
+    aws_eks_addon.coredns,
+  ]
 }
 
 resource "kubernetes_namespace_v1" "kyverno" {
@@ -198,6 +228,7 @@ resource "helm_release" "kyverno" {
 
   depends_on = [
     helm_release.cilium,
+    aws_eks_addon.coredns,
     kubernetes_namespace_v1.kyverno,
   ]
 }
@@ -231,6 +262,7 @@ resource "helm_release" "monitoring_agent" {
 
   depends_on = [
     helm_release.cilium,
+    aws_eks_addon.coredns,
     kubernetes_namespace_v1.monitoring,
   ]
 }
@@ -273,6 +305,7 @@ resource "helm_release" "ingress_nginx" {
 
   depends_on = [
     helm_release.cilium,
+    aws_eks_addon.coredns,
     kubernetes_namespace_v1.ingress_nginx,
   ]
 }

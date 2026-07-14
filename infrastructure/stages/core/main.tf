@@ -45,7 +45,6 @@ module "eks" {
   bootstrap_self_managed_addons = false
 
   cluster_addons = {
-    coredns = {}
     vpc-cni = {
       before_compute = true
     }

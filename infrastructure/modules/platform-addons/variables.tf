@@ -8,6 +8,11 @@ variable "cluster_name" {
   type        = string
 }
 
+variable "cluster_endpoint" {
+  description = "HTTPS endpoint of the EKS API server used by Cilium during kube-proxy-free bootstrap."
+  type        = string
+}
+
 variable "cluster_vpc_cidr" {
   description = "IPv4 CIDR block of the cluster VPC used for Cilium native routing."
   type        = string

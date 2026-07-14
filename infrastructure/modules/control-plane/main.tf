@@ -105,6 +105,8 @@ resource "kubernetes_deployment_v1" "backend" {
             allow_privilege_escalation = false
             read_only_root_filesystem  = false
             run_as_non_root            = true
+            run_as_user                = 1000
+            run_as_group               = 1000
 
             capabilities {
               drop = ["ALL"]
@@ -342,6 +344,8 @@ resource "kubernetes_deployment_v1" "runner" {
             allow_privilege_escalation = false
             read_only_root_filesystem  = false
             run_as_non_root            = true
+            run_as_user                = 1000
+            run_as_group               = 1000
 
             capabilities {
               drop = ["ALL"]

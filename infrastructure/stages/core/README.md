@@ -7,12 +7,12 @@ The `core` stage owns the AWS network and EKS foundation for the lab.
 - VPC via `terraform-aws-modules/vpc/aws`
 - EKS cluster via `terraform-aws-modules/eks/aws`
 - one managed node group
-- explicit EKS add-on ownership for `coredns` and `vpc-cni`
+- explicit EKS add-on ownership for `vpc-cni`
 - a `node.cilium.io/agent-not-ready=true:NoExecute` taint on the managed node group so workloads do not start before Cilium is ready
 - an explicit CloudWatch log group for EKS control-plane logs
 - EKS access entries and cluster-admin policy associations for configured IAM principals
 
-The `core` stage does not create namespaces, Helm releases, workloads, or policy CRDs anymore. Those live in the `platform`, `policies`, and `applications` stages.
+The `core` stage does not create namespaces, Helm releases, CoreDNS, workloads, or policy CRDs anymore. Those live in the `platform`, `policies`, and `applications` stages.
 
 ## Inputs
 

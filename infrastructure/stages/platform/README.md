@@ -7,6 +7,7 @@ The `platform` stage owns everything that runs inside the already-created EKS cl
 ### Platform add-ons
 
 - Cilium with Hubble enabled as the primary EKS CNI using AWS ENI IPAM
+- CoreDNS EKS add-on after Cilium has become ready enough to clear the node taint
 - Tetragon Helm release
 - Kyverno namespace and Helm release
 - `monitoring-zone` namespace
@@ -44,6 +45,7 @@ This stage expects:
 - The platform now expects the `core` stage node group to be tainted with `node.cilium.io/agent-not-ready=true:NoExecute` before any application workloads are scheduled.
 - The Cilium install uses AWS ENI IPAM and `kubeProxyReplacement=true` so Cilium becomes the primary Kubernetes networking layer on EKS instead of chaining on top of the AWS VPC CNI datapath.
 - The EKS `aws-node` daemonset still exists because the `vpc-cni` add-on is installed, but it must be patched before the platform apply so it no longer schedules onto worker nodes.
+- Platform bootstrap order is intentionally `Cilium -> CoreDNS -> remaining add-ons -> ward/control-plane resources` to avoid the unschedulable CoreDNS deadlock caused by the node taint.
 - Kyverno and Tetragon CRDs are installed here, while the custom policy resources themselves are applied later by the dedicated `policies` stage.
 
 ## Inputs

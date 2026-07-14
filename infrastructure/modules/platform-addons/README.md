@@ -8,6 +8,7 @@ Installs the shared cluster add-ons used by the platform layer.
 | Name | Version |
 | ---- | ------- |
 | terraform | >= 1.7.0 |
+| aws | 5.100.0 |
 | helm | 2.17.0 |
 | kubernetes | 2.37.1 |
 
@@ -19,6 +20,7 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
+| [aws_eks_addon.coredns](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/eks_addon) | resource |
 | [helm_release.cilium](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
 | [helm_release.ingress_nginx](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
 | [helm_release.kyverno](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
@@ -33,6 +35,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | cilium_operator_iam_role_arn | IAM role ARN assumed by the Cilium operator for ENI management. | `string` | n/a | yes |
+| cluster_endpoint | HTTPS endpoint of the EKS API server used by Cilium during kube-proxy-free bootstrap. | `string` | n/a | yes |
 | cluster_name | Name of the EKS cluster where Cilium is installed. | `string` | n/a | yes |
 | cluster_vpc_cidr | IPv4 CIDR block of the cluster VPC used for Cilium native routing. | `string` | n/a | yes |
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |

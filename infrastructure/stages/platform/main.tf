@@ -84,6 +84,7 @@ module "addons" {
 
   kubernetes_version           = var.kubernetes_version
   cluster_name                 = var.cluster_name
+  cluster_endpoint             = data.aws_eks_cluster.this.endpoint
   cluster_vpc_cidr             = data.aws_vpc.cluster.cidr_block
   cilium_operator_iam_role_arn = aws_iam_role.cilium_operator.arn
   enable_ingress_nginx         = var.enable_ingress_nginx
@@ -100,7 +101,7 @@ module "subjects" {
   analysis_subjects  = var.analysis_subjects
   kubernetes_version = var.kubernetes_version
 
-  depends_on = [time_sleep.cluster_access_ready]
+  depends_on = [module.addons]
 }
 
 module "control_plane" {
@@ -133,7 +134,7 @@ module "control_plane" {
   runner_replicas  = var.control_plane_runner_replicas
   runner_resources = var.control_plane_runner_resources
 
-  depends_on = [time_sleep.cluster_access_ready]
+  depends_on = [module.addons]
 }
 
 module "postgresql" {
