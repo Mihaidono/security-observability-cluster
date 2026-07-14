@@ -32,6 +32,9 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
+| cilium_operator_iam_role_arn | IAM role ARN assumed by the Cilium operator for ENI management. | `string` | n/a | yes |
+| cluster_name | Name of the EKS cluster where Cilium is installed. | `string` | n/a | yes |
+| cluster_vpc_cidr | IPv4 CIDR block of the cluster VPC used for Cilium native routing. | `string` | n/a | yes |
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |
 | kubernetes_version | Cluster Kubernetes version used to label namespaces with the matching PSA version. | `string` | n/a | yes |
 

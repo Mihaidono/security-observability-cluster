@@ -3,30 +3,40 @@ resource "helm_release" "cilium" {
   repository      = "https://helm.cilium.io/"
   chart           = "cilium"
   namespace       = "kube-system"
-  version         = "1.19.2"
+  version         = "1.19.5"
   wait            = true
   timeout         = 900
   atomic          = true
   cleanup_on_fail = true
 
   set {
-    name  = "cni.chainingMode"
-    value = "aws-cni"
+    name  = "cluster.name"
+    value = var.cluster_name
   }
 
   set {
-    name  = "cni.exclusive"
-    value = "false"
+    name  = "eni.enabled"
+    value = "true"
   }
 
   set {
-    name  = "enableIPv4Masquerade"
-    value = "false"
+    name  = "eni.iamRole"
+    value = var.cilium_operator_iam_role_arn
+  }
+
+  set {
+    name  = "kubeProxyReplacement"
+    value = "true"
   }
 
   set {
     name  = "routingMode"
     value = "native"
+  }
+
+  set {
+    name  = "ipv4NativeRoutingCIDR"
+    value = var.cluster_vpc_cidr
   }
 
   set {
@@ -47,6 +57,106 @@ resource "helm_release" "cilium" {
   set {
     name  = "operator.replicas"
     value = "1"
+  }
+
+  set {
+    name  = "resources.requests.cpu"
+    value = "250m"
+  }
+
+  set {
+    name  = "resources.requests.memory"
+    value = "512Mi"
+  }
+
+  set {
+    name  = "resources.limits.cpu"
+    value = "1000m"
+  }
+
+  set {
+    name  = "resources.limits.memory"
+    value = "1Gi"
+  }
+
+  set {
+    name  = "operator.resources.requests.cpu"
+    value = "100m"
+  }
+
+  set {
+    name  = "operator.resources.requests.memory"
+    value = "128Mi"
+  }
+
+  set {
+    name  = "operator.resources.limits.cpu"
+    value = "500m"
+  }
+
+  set {
+    name  = "operator.resources.limits.memory"
+    value = "512Mi"
+  }
+
+  set {
+    name  = "hubble.relay.resources.requests.cpu"
+    value = "100m"
+  }
+
+  set {
+    name  = "hubble.relay.resources.requests.memory"
+    value = "128Mi"
+  }
+
+  set {
+    name  = "hubble.relay.resources.limits.cpu"
+    value = "500m"
+  }
+
+  set {
+    name  = "hubble.relay.resources.limits.memory"
+    value = "512Mi"
+  }
+
+  set {
+    name  = "hubble.ui.backend.resources.requests.cpu"
+    value = "100m"
+  }
+
+  set {
+    name  = "hubble.ui.backend.resources.requests.memory"
+    value = "128Mi"
+  }
+
+  set {
+    name  = "hubble.ui.backend.resources.limits.cpu"
+    value = "250m"
+  }
+
+  set {
+    name  = "hubble.ui.backend.resources.limits.memory"
+    value = "256Mi"
+  }
+
+  set {
+    name  = "hubble.ui.frontend.resources.requests.cpu"
+    value = "50m"
+  }
+
+  set {
+    name  = "hubble.ui.frontend.resources.requests.memory"
+    value = "64Mi"
+  }
+
+  set {
+    name  = "hubble.ui.frontend.resources.limits.cpu"
+    value = "250m"
+  }
+
+  set {
+    name  = "hubble.ui.frontend.resources.limits.memory"
+    value = "256Mi"
   }
 }
 

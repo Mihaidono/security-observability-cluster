@@ -8,6 +8,8 @@ import { api, buildRunEventsUrl, getApiToken } from "./lib/api";
 import type {
   AnalysisSubject,
   ContainerConfig,
+  ConnectivityConfig,
+  ExposureConfig,
   IngressConfig,
   NetworkPolicyPeer,
   NetworkPolicyPort,
@@ -218,8 +220,8 @@ function staticSiteHtml(appName: string): string {
     '    <div class="shell">',
     `      <h1>${appName}</h1>`,
     "      <p>This app is managed through the Isolens interface and is designed to be safe to deploy as a first cluster workload.</p>",
-    "      <p>Use it when you want a quick ingress and service sanity check before moving to a more dynamic workload.</p>",
-    "      <p><code>/</code> should return this page through the service and ingress path.</p>",
+    "      <p>Use it when you want a quick service and exposure sanity check before moving to a more dynamic workload.</p>",
+    "      <p><code>/</code> should return this page through the service and edge path.</p>",
     "    </div>",
     "  </body>",
     "</html>",
@@ -243,15 +245,15 @@ function makePublicPythonApiApp(namespace: string): WardApplication {
       target_port: 80,
       annotations: {},
     },
-    ingress: {
+    exposure: {
       enabled: true,
-      class_name: "nginx",
       host: "public-python-api.lab.internal",
       path: "/",
       path_type: "Prefix",
-      annotations: {
-        "nginx.ingress.kubernetes.io/ssl-redirect": "false",
-      },
+    },
+    connectivity: {
+      internet_ingress_enabled: true,
+      internet_egress_enabled: true,
     },
     config_map: {
       enabled: true,
@@ -334,13 +336,15 @@ function makeInternalPythonApiApp(namespace: string): WardApplication {
       target_port: 80,
       annotations: {},
     },
-    ingress: {
+    exposure: {
       enabled: false,
-      class_name: "nginx",
       host: "",
       path: "/",
       path_type: "Prefix",
-      annotations: {},
+    },
+    connectivity: {
+      internet_ingress_enabled: false,
+      internet_egress_enabled: false,
     },
     config_map: {
       enabled: true,
@@ -413,15 +417,15 @@ function makeStaticSiteApp(namespace: string): WardApplication {
       target_port: 8080,
       annotations: {},
     },
-    ingress: {
+    exposure: {
       enabled: true,
-      class_name: "nginx",
       host: "static-site-probe.lab.internal",
       path: "/",
       path_type: "Prefix",
-      annotations: {
-        "nginx.ingress.kubernetes.io/ssl-redirect": "false",
-      },
+    },
+    connectivity: {
+      internet_ingress_enabled: true,
+      internet_egress_enabled: false,
     },
     config_map: {
       enabled: true,
@@ -595,13 +599,15 @@ function makeToolboxApp(
       target_port: 8080,
       annotations: {},
     },
-    ingress: {
+    exposure: {
       enabled: false,
-      class_name: "nginx",
       host: "",
       path: "/",
       path_type: "Prefix",
-      annotations: {},
+    },
+    connectivity: {
+      internet_ingress_enabled: false,
+      internet_egress_enabled: false,
     },
     config_map: {
       enabled: false,
@@ -656,10 +662,14 @@ function makeKyvernoLatestViolationApp(namespace: string): WardApplication {
     ...app.service,
     enabled: false,
   };
-  app.ingress = {
-    ...app.ingress,
+  app.exposure = {
+    ...app.exposure,
     enabled: false,
     host: "",
+  };
+  app.connectivity = {
+    ...app.connectivity,
+    internet_ingress_enabled: false,
   };
   app.allow_same_namespace_ingress = false;
   app.network_policy = {
@@ -719,7 +729,8 @@ const scenarioBlueprints: Record<ScenarioBlueprintId, ScenarioBlueprint> = {
     commandSteps(context) {
       const app = context.appByRole("public-api");
       const ingressHost =
-        app?.ingress?.host ?? `${app?.name ?? "edge-public-api"}.lab.internal`;
+        appExposureHost(app) ||
+        `${app?.name ?? "edge-public-api"}.lab.internal`;
       return [
         "kubectl -n kube-system port-forward svc/hubble-ui 12000:80",
         "LB=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{.status.loadBalancer.ingress[0].ip}')",
@@ -1055,13 +1066,15 @@ function emptyAppTemplate(namespace: string): WardApplication {
       target_port: 8080,
       annotations: {},
     },
-    ingress: {
+    exposure: {
       enabled: false,
-      class_name: "nginx",
       host: "",
       path: "/",
       path_type: "Prefix",
-      annotations: {},
+    },
+    connectivity: {
+      internet_ingress_enabled: false,
+      internet_egress_enabled: false,
     },
     config_map: {
       enabled: false,
@@ -1075,6 +1088,92 @@ function emptyAppTemplate(namespace: string): WardApplication {
       egress: [],
     },
   };
+}
+
+function normalizeExposure(
+  exposure?: ExposureConfig,
+  ingress?: IngressConfig,
+): ExposureConfig {
+  return {
+    enabled: exposure?.enabled ?? ingress?.enabled ?? false,
+    host: exposure?.host ?? ingress?.host ?? "",
+    path: exposure?.path ?? ingress?.path ?? "/",
+    path_type: exposure?.path_type ?? ingress?.path_type ?? "Prefix",
+    tls_secret_name:
+      exposure?.tls_secret_name ?? ingress?.tls_secret_name ?? "",
+  };
+}
+
+function normalizeConnectivity(
+  connectivity?: ConnectivityConfig,
+  exposure?: ExposureConfig,
+  ingress?: IngressConfig,
+): ConnectivityConfig {
+  return {
+    internet_ingress_enabled:
+      connectivity?.internet_ingress_enabled ??
+      exposure?.enabled ??
+      ingress?.enabled ??
+      false,
+    internet_egress_enabled: connectivity?.internet_egress_enabled ?? false,
+  };
+}
+
+function normalizeWardApplication(app: WardApplication): WardApplication {
+  const { ingress: legacyIngress, ...next } = structuredClone(app);
+  return {
+    ...next,
+    exposure: normalizeExposure(app.exposure, legacyIngress),
+    connectivity: normalizeConnectivity(
+      app.connectivity,
+      app.exposure,
+      legacyIngress,
+    ),
+  };
+}
+
+function normalizeTerraformConfig(config: TerraformConfig): TerraformConfig {
+  return {
+    ...config,
+    applications: {
+      ...config.applications,
+      ward_applications: (config.applications.ward_applications ?? []).map(
+        normalizeWardApplication,
+      ),
+    },
+  };
+}
+
+function appExposureEnabled(app: WardApplication | null | undefined): boolean {
+  return app?.exposure?.enabled ?? app?.ingress?.enabled ?? false;
+}
+
+function appExposureHost(app: WardApplication | null | undefined): string {
+  return app?.exposure?.host ?? app?.ingress?.host ?? "";
+}
+
+function appExposurePath(app: WardApplication | null | undefined): string {
+  return app?.exposure?.path ?? app?.ingress?.path ?? "/";
+}
+
+function appExposurePathType(app: WardApplication | null | undefined): string {
+  return app?.exposure?.path_type ?? app?.ingress?.path_type ?? "Prefix";
+}
+
+function appExposureTlsSecret(app: WardApplication | null | undefined): string {
+  return app?.exposure?.tls_secret_name ?? app?.ingress?.tls_secret_name ?? "";
+}
+
+function appInternetIngressEnabled(
+  app: WardApplication | null | undefined,
+): boolean {
+  return app?.connectivity?.internet_ingress_enabled ?? appExposureEnabled(app);
+}
+
+function appInternetEgressEnabled(
+  app: WardApplication | null | undefined,
+): boolean {
+  return app?.connectivity?.internet_egress_enabled ?? false;
 }
 
 function classNames(
@@ -1403,8 +1502,8 @@ function appSecretDependencies(
     }
   }
 
-  if (app.ingress?.tls_secret_name?.trim()) {
-    secretRefs.add(app.ingress.tls_secret_name.trim());
+  if (appExposureTlsSecret(app).trim()) {
+    secretRefs.add(appExposureTlsSecret(app).trim());
   }
 
   return [...secretRefs];
@@ -1413,9 +1512,11 @@ function appSecretDependencies(
 function hasIngressNamespaceAccess(
   app: WardApplication | null | undefined,
 ): boolean {
-  if (!app?.ingress?.enabled) return true;
+  if (!appExposureEnabled(app)) return true;
 
-  return (app.network_policy?.ingress ?? []).some((rule) =>
+  const ingressRules = app?.network_policy?.ingress ?? [];
+
+  return ingressRules.some((rule) =>
     (rule.from ?? []).some(
       (peer) =>
         peer.namespace_selector?.["kubernetes.io/metadata.name"] ===
@@ -1494,22 +1595,30 @@ function buildAppReview(
     }
   }
 
-  if (app.ingress?.enabled) {
-    resources.push("Ingress");
+  if (appExposureEnabled(app)) {
+    resources.push("Internet exposure");
     if (app.service?.enabled === false) {
-      errors.push("Ingress needs the service to stay enabled.");
+      errors.push("Internet exposure needs the service to stay enabled.");
     }
-    if (!app.ingress.host?.trim()) {
-      errors.push("Ingress is enabled, but the host is empty.");
+    if (!appExposureHost(app).trim()) {
+      errors.push("Internet exposure is enabled, but the host is empty.");
     }
-    if (!app.ingress.class_name?.trim()) {
-      errors.push("Ingress is enabled, but the ingress class is empty.");
+    if (!appInternetIngressEnabled(app)) {
+      warnings.push(
+        "The route is enabled, but internet ingress is disabled in connectivity settings.",
+      );
     }
     if (!hasIngressNamespaceAccess(app)) {
       warnings.push(
-        "Ingress is enabled, but the app-level network policy does not appear to allow traffic from the ingress-nginx namespace.",
+        "Internet exposure is enabled, but the current app-level network policy does not appear to allow traffic from the shared ingress controller namespace.",
       );
     }
+  }
+
+  if (appInternetEgressEnabled(app)) {
+    hints.push(
+      "Internet egress is enabled in the app contract. Later phases will render Cilium-aware egress policy from this flag.",
+    );
   }
 
   if (app.config_map?.enabled) {
@@ -1591,8 +1700,8 @@ function displayExposureSummary(
   app: WardApplication | null | undefined,
 ): string {
   if (!app) return "Not configured";
-  if (app.ingress?.enabled) {
-    return app.ingress.host?.trim() || "Ingress enabled";
+  if (appExposureEnabled(app)) {
+    return appExposureHost(app).trim() || "Internet exposure enabled";
   }
   return "Cluster-internal";
 }
@@ -2949,10 +3058,10 @@ export default function App() {
       ? "Plan behind this apply"
       : "Planned changes";
   const apiTokenValue = getApiToken();
-  const totalAppsWithIngress = useMemo(
+  const totalAppsWithExposure = useMemo(
     () =>
-      applicationsConfig?.ward_applications.filter(
-        (application) => application.ingress?.enabled,
+      applicationsConfig?.ward_applications.filter((application) =>
+        appExposureEnabled(application),
       ).length ?? 0,
     [applicationsConfig?.ward_applications],
   );
@@ -3245,12 +3354,13 @@ export default function App() {
         api.listRuns(),
         api.getHealth(),
       ]);
-      setConfig(loadedConfig);
+      const normalizedConfig = normalizeTerraformConfig(loadedConfig);
+      setConfig(normalizedConfig);
       setRuns(sortRuns(runResponse.items));
       const firstSubjectKey =
-        Object.keys(loadedConfig.platform.analysis_subjects)[0] ?? "";
+        Object.keys(normalizedConfig.platform.analysis_subjects)[0] ?? "";
       const firstAppIndex =
-        loadedConfig.applications.ward_applications.findIndex(
+        normalizedConfig.applications.ward_applications.findIndex(
           (application) => application.namespace === firstSubjectKey,
         );
       setSelectedSubjectKey(firstSubjectKey);
@@ -3497,8 +3607,11 @@ export default function App() {
         config.applications.ward_applications.map((existing) => existing.name),
       ),
     );
-    if (app.ingress?.enabled) {
-      app.ingress.host = `${app.name}.lab.internal`;
+    if (appExposureEnabled(app)) {
+      app.exposure = {
+        ...app.exposure,
+        host: `${app.name}.lab.internal`,
+      };
     }
 
     updateConfig((current) => ({
@@ -3542,8 +3655,11 @@ export default function App() {
         uniqueName(application.name, existingNames),
       );
       existingNames.push(application.name);
-      if (application.ingress?.enabled) {
-        application.ingress.host = `${application.name}.lab.internal`;
+      if (appExposureEnabled(application)) {
+        application.exposure = {
+          ...application.exposure,
+          host: `${application.name}.lab.internal`,
+        };
       }
     });
 
@@ -3648,10 +3764,14 @@ export default function App() {
                     annotations: compactRecord(application.service.annotations),
                   }
                 : undefined,
-              ingress: application.ingress
+              exposure: application.exposure
                 ? {
-                    ...application.ingress,
-                    annotations: compactRecord(application.ingress.annotations),
+                    ...application.exposure,
+                  }
+                : undefined,
+              connectivity: application.connectivity
+                ? {
+                    ...application.connectivity,
                   }
                 : undefined,
               config_map: application.config_map
@@ -3681,7 +3801,7 @@ export default function App() {
       };
 
       const saved = await api.saveConfig(normalized);
-      setConfig(saved);
+      setConfig(normalizeTerraformConfig(saved));
       setStatusMessage("Managed config saved.");
       setErrorMessage("");
       return true;
@@ -3696,7 +3816,7 @@ export default function App() {
   async function resetConfig() {
     setIsBusy(true);
     try {
-      const reset = await api.resetConfig();
+      const reset = normalizeTerraformConfig(await api.resetConfig());
       setConfig(reset);
       const firstSubjectKey =
         Object.keys(reset.platform.analysis_subjects)[0] ?? "";
@@ -4149,8 +4269,8 @@ export default function App() {
                               value={totalAppsWithService}
                             />
                             <MetricTile
-                              label="Ingress-enabled"
-                              value={totalAppsWithIngress}
+                              label="Internet-exposed"
+                              value={totalAppsWithExposure}
                             />
                           </div>
                         </div>
@@ -4559,9 +4679,9 @@ export default function App() {
                                   Applications
                                 </p>
                                 <p className="mt-2 text-sm leading-6 text-neutral-400">
-                                  Workload deployments, Services, Ingresses, and
-                                  application-specific network policies for the
-                                  live lab.
+                                  Workload deployments, Services, exposure
+                                  rules, and application-specific network
+                                  policies for the live lab.
                                 </p>
                               </div>
                               <div className="shrink-0 self-start">
@@ -4599,8 +4719,8 @@ export default function App() {
                                 value={totalAppsWithService}
                               />
                               <MetricTile
-                                label="Ingress"
-                                value={totalAppsWithIngress}
+                                label="Exposure"
+                                value={totalAppsWithExposure}
                               />
                             </div>
                             <div className="mt-5 flex flex-wrap gap-2">
@@ -4971,7 +5091,7 @@ export default function App() {
                                           </p>
                                         </div>
                                         <Badge>
-                                          {application.ingress?.enabled
+                                          {appExposureEnabled(application)
                                             ? "Public"
                                             : "Internal"}
                                         </Badge>
@@ -5034,7 +5154,7 @@ export default function App() {
                             <div className="themed-scrollbar flex gap-4 overflow-x-auto pb-2">
                               <ScenarioTile
                                 title="Public Python API"
-                                description="Ingress-exposed FastAPI with a built-in egress check."
+                                description="Internet-exposed FastAPI with a built-in egress check."
                                 tag="Public traffic"
                                 actionLabel="Add template"
                                 onApply={() =>
@@ -5052,7 +5172,7 @@ export default function App() {
                               />
                               <ScenarioTile
                                 title="Static Site Probe"
-                                description="Minimal web probe for service and ingress validation."
+                                description="Minimal web probe for service and exposure validation."
                                 tag="Smoke test"
                                 actionLabel="Add template"
                                 onApply={() => addAppTemplate("static-site")}
@@ -5263,9 +5383,21 @@ export default function App() {
                                 </p>
                                 <p>Port: {selectedApp?.service?.port ?? "-"}</p>
                                 <p className="break-all">
-                                  Ingress host:{" "}
-                                  {selectedApp?.ingress?.host ||
+                                  Exposure host:{" "}
+                                  {appExposureHost(selectedApp) ||
                                     "Not configured"}
+                                </p>
+                                <p>
+                                  Internet ingress:{" "}
+                                  {appInternetIngressEnabled(selectedApp)
+                                    ? "Enabled"
+                                    : "Disabled"}
+                                </p>
+                                <p>
+                                  Internet egress:{" "}
+                                  {appInternetEgressEnabled(selectedApp)
+                                    ? "Enabled"
+                                    : "Disabled"}
                                 </p>
                               </div>
                             </div>
@@ -6072,7 +6204,9 @@ export default function App() {
                         <select
                           className="w-full rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground"
                           value={
-                            selectedApp.ingress?.enabled ? "public" : "internal"
+                            appExposureEnabled(selectedApp)
+                              ? "public"
+                              : "internal"
                           }
                           onChange={(event) =>
                             updateSelectedApp((current) => ({
@@ -6081,24 +6215,27 @@ export default function App() {
                                 ...current.service,
                                 enabled: true,
                               },
-                              ingress: {
-                                ...current.ingress,
+                              exposure: {
+                                ...current.exposure,
                                 enabled: event.target.value === "public",
-                                class_name:
-                                  current.ingress?.class_name ?? "nginx",
                                 host:
                                   event.target.value === "public"
-                                    ? current.ingress?.host?.trim() ||
+                                    ? current.exposure?.host?.trim() ||
                                       `${current.name}.lab.internal`
                                     : "",
-                              } as IngressConfig,
+                              } as ExposureConfig,
+                              connectivity: {
+                                ...current.connectivity,
+                                internet_ingress_enabled:
+                                  event.target.value === "public",
+                              } as ConnectivityConfig,
                             }))
                           }
                         >
                           <option value="internal">
                             Internal service only
                           </option>
-                          <option value="public">Ingress exposed</option>
+                          <option value="public">Internet exposed</option>
                         </select>
                       </label>
                       <label className="grid gap-1 text-sm">
@@ -6374,8 +6511,8 @@ export default function App() {
               </EditorSection>
 
               <EditorSection
-                title="Service & Ingress"
-                summary="Tighten how the app is exposed once the quick setup looks right."
+                title="Service & Exposure"
+                summary="Tighten how the app is exposed and which internet flows the later Cilium phases should allow."
               >
                 <div className="grid gap-4 xl:grid-cols-2">
                   <div className="grid gap-3">
@@ -6444,30 +6581,30 @@ export default function App() {
                   </div>
                   <div className="grid gap-3">
                     <label className="grid gap-1 text-sm">
-                      <span>Ingress class</span>
+                      <span>Host</span>
                       <Input
-                        value={selectedApp.ingress?.class_name ?? "nginx"}
+                        value={appExposureHost(selectedApp)}
                         onChange={(event) =>
                           updateSelectedApp((current) => ({
                             ...current,
-                            ingress: {
-                              ...current.ingress,
-                              class_name: event.target.value,
+                            exposure: {
+                              ...current.exposure,
+                              host: event.target.value,
                             },
                           }))
                         }
                       />
                     </label>
                     <label className="grid gap-1 text-sm">
-                      <span>Host</span>
+                      <span>TLS secret name</span>
                       <Input
-                        value={selectedApp.ingress?.host ?? ""}
+                        value={appExposureTlsSecret(selectedApp)}
                         onChange={(event) =>
                           updateSelectedApp((current) => ({
                             ...current,
-                            ingress: {
-                              ...current.ingress,
-                              host: event.target.value,
+                            exposure: {
+                              ...current.exposure,
+                              tls_secret_name: event.target.value,
                             },
                           }))
                         }
@@ -6477,12 +6614,12 @@ export default function App() {
                       <label className="grid gap-1 text-sm">
                         <span>Path</span>
                         <Input
-                          value={selectedApp.ingress?.path ?? "/"}
+                          value={appExposurePath(selectedApp)}
                           onChange={(event) =>
                             updateSelectedApp((current) => ({
                               ...current,
-                              ingress: {
-                                ...current.ingress,
+                              exposure: {
+                                ...current.exposure,
                                 path: event.target.value,
                               },
                             }))
@@ -6492,12 +6629,12 @@ export default function App() {
                       <label className="grid gap-1 text-sm">
                         <span>Path type</span>
                         <Input
-                          value={selectedApp.ingress?.path_type ?? "Prefix"}
+                          value={appExposurePathType(selectedApp)}
                           onChange={(event) =>
                             updateSelectedApp((current) => ({
                               ...current,
-                              ingress: {
-                                ...current.ingress,
+                              exposure: {
+                                ...current.exposure,
                                 path_type: event.target.value,
                               },
                             }))
@@ -6505,17 +6642,38 @@ export default function App() {
                         />
                       </label>
                     </div>
-                    <KeyValueEditor
-                      label="Ingress annotations"
-                      value={selectedApp.ingress?.annotations}
-                      onChange={(annotations) =>
-                        updateSelectedApp((current) => ({
-                          ...current,
-                          ingress: { ...current.ingress, annotations },
-                        }))
-                      }
-                      addLabel="Add annotation"
-                    />
+                    <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-600">
+                      <input
+                        type="checkbox"
+                        checked={appInternetIngressEnabled(selectedApp)}
+                        onChange={(event) =>
+                          updateSelectedApp((current) => ({
+                            ...current,
+                            connectivity: {
+                              ...current.connectivity,
+                              internet_ingress_enabled: event.target.checked,
+                            },
+                          }))
+                        }
+                      />
+                      Allow internet ingress
+                    </label>
+                    <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-600">
+                      <input
+                        type="checkbox"
+                        checked={appInternetEgressEnabled(selectedApp)}
+                        onChange={(event) =>
+                          updateSelectedApp((current) => ({
+                            ...current,
+                            connectivity: {
+                              ...current.connectivity,
+                              internet_egress_enabled: event.target.checked,
+                            },
+                          }))
+                        }
+                      />
+                      Allow internet egress
+                    </label>
                   </div>
                 </div>
               </EditorSection>

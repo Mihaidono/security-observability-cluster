@@ -40,8 +40,16 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "20.37.2"
 
-  cluster_name    = var.cluster_name
-  cluster_version = var.kubernetes_version
+  cluster_name                  = var.cluster_name
+  cluster_version               = var.kubernetes_version
+  bootstrap_self_managed_addons = false
+
+  cluster_addons = {
+    coredns = {}
+    vpc-cni = {
+      before_compute = true
+    }
+  }
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
@@ -53,10 +61,18 @@ module "eks" {
 
   eks_managed_node_groups = {
     standard = {
+      ami_type       = "AL2023_x86_64_STANDARD"
       instance_types = var.node_instance_types
       min_size       = var.node_group_scaling.min_size
       max_size       = var.node_group_scaling.max_size
       desired_size   = var.node_group_scaling.desired_size
+      taints = {
+        cilium_agent_not_ready = {
+          key    = "node.cilium.io/agent-not-ready"
+          value  = "true"
+          effect = "NO_EXECUTE"
+        }
+      }
     }
   }
 

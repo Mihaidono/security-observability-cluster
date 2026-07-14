@@ -6,7 +6,7 @@ The `platform` stage owns everything that runs inside the already-created EKS cl
 
 ### Platform add-ons
 
-- Cilium with Hubble enabled, chained on top of the AWS VPC CNI plugin
+- Cilium with Hubble enabled as the primary EKS CNI using AWS ENI IPAM
 - Tetragon Helm release
 - Kyverno namespace and Helm release
 - `monitoring-zone` namespace
@@ -41,8 +41,9 @@ This stage expects:
 
 ## Cilium Bootstrap Notes
 
-- The current platform design uses the Cilium-supported AWS VPC CNI chaining mode on EKS rather than Cilium ENI IPAM mode.
-- This keeps the EKS `aws-node` daemonset responsible for pod IP allocation and baseline node networking while still letting Cilium provide policy enforcement, Hubble, and the foundation for Tetragon.
+- The platform now expects the `core` stage node group to be tainted with `node.cilium.io/agent-not-ready=true:NoExecute` before any application workloads are scheduled.
+- The Cilium install uses AWS ENI IPAM and `kubeProxyReplacement=true` so Cilium becomes the primary Kubernetes networking layer on EKS instead of chaining on top of the AWS VPC CNI datapath.
+- The EKS `aws-node` daemonset still exists because the `vpc-cni` add-on is installed, but it must be patched before the platform apply so it no longer schedules onto worker nodes.
 - Kyverno and Tetragon CRDs are installed here, while the custom policy resources themselves are applied later by the dedicated `policies` stage.
 
 ## Inputs
@@ -149,8 +150,15 @@ http://127.0.0.1:12000
 
 | Name | Type |
 | ---- | ---- |
+| [aws_iam_policy.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_policy) | resource |
+| [aws_iam_role.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy_attachment.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_role_policy_attachment) | resource |
 | [time_sleep.cluster_access_ready](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
 | [aws_eks_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/eks_cluster) | data source |
+| [aws_iam_openid_connect_provider.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/iam_openid_connect_provider) | data source |
+| [aws_iam_policy_document.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.cilium_operator_assume_role](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_vpc.cluster](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/vpc) | data source |
 
 ## Inputs
 

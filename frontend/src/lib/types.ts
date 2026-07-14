@@ -34,6 +34,19 @@ export interface IngressConfig {
   annotations?: Record<string, string>;
 }
 
+export interface ExposureConfig {
+  enabled?: boolean;
+  host?: string;
+  path?: string;
+  path_type?: string;
+  tls_secret_name?: string;
+}
+
+export interface ConnectivityConfig {
+  internet_ingress_enabled?: boolean;
+  internet_egress_enabled?: boolean;
+}
+
 export interface ConfigMapConfig {
   enabled?: boolean;
   mount_path?: string;
@@ -128,6 +141,8 @@ export interface WardApplication {
   automount_service_account_token?: boolean;
   allow_same_namespace_ingress?: boolean;
   service?: ServiceConfig;
+  exposure?: ExposureConfig;
+  connectivity?: ConnectivityConfig;
   ingress?: IngressConfig;
   config_map?: ConfigMapConfig;
   containers?: ContainerConfig[];

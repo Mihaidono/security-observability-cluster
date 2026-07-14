@@ -11,7 +11,7 @@
     "analysis_subjects": {
       "ward-public-api": {
         "tier": "public-demo",
-        "description": "Ingress-exposed Python API meant for lab demonstrations around reachability, egress, and operator workflow.",
+        "description": "Internet-exposed Python API meant for lab demonstrations around reachability, egress, and operator workflow.",
         "labels": {
           "owner": "demo",
           "scenario": "public-api"
@@ -85,15 +85,15 @@
             }
           ]
         },
-        "ingress": {
+        "exposure": {
           "enabled": true,
-          "class_name": "nginx",
           "host": "public-python-api.lab.internal",
           "path": "/",
-          "path_type": "Prefix",
-          "annotations": {
-            "nginx.ingress.kubernetes.io/ssl-redirect": "false"
-          }
+          "path_type": "Prefix"
+        },
+        "connectivity": {
+          "internet_ingress_enabled": true,
+          "internet_egress_enabled": true
         },
         "containers": [
           {

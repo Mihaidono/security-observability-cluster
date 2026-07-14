@@ -19,10 +19,10 @@ The current implementation provisions or manages:
 - AWS VPC and EKS through the `terraform-aws-modules/vpc/aws` and `terraform-aws-modules/eks/aws` modules
 - EKS access entries for configured admin IAM principals
 - ECR repositories for backend and frontend container images
-- Cilium with Hubble enabled, chained on top of the AWS VPC CNI plugin
+- Cilium with Hubble enabled as the primary EKS CNI using AWS ENI IPAM
 - Tetragon
 - Kyverno
-- conditional `ingress-nginx` when any ward application declares `ingress.class_name = "nginx"`
+- conditional `ingress-nginx` when any ward application still declares `ingress.class_name = "nginx"`
 - a Helm release named `lgtm` that currently installs the `grafana-agent` chart
 - ward namespaces, quotas, baseline network policies, workloads, and outputs
 - an internal-only Hubble access path through `kubectl port-forward`
@@ -30,7 +30,7 @@ The current implementation provisions or manages:
 
 Two important reality checks:
 
-- The repo currently uses standard Kubernetes `NetworkPolicy` resources for workload isolation. It does not define Cilium L7 policy resources.
+- The repo currently uses standard Kubernetes `NetworkPolicy` resources for workload isolation. It does not yet define Cilium L7 policy resources.
 - The monitoring release is explicitly pinned and still installs `grafana-agent`; it is not a full maintained LGTM stack.
 - Hubble is currently intended to stay internal to the cluster. The UI helps you reach it through a local `kubectl port-forward`, not through a public auth gateway.
 

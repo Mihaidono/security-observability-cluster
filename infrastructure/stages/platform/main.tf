@@ -1,3 +1,74 @@
+data "aws_iam_openid_connect_provider" "this" {
+  url = data.aws_eks_cluster.this.identity[0].oidc[0].issuer
+}
+
+data "aws_vpc" "cluster" {
+  id = data.aws_eks_cluster.this.vpc_config[0].vpc_id
+}
+
+data "aws_iam_policy_document" "cilium_operator_assume_role" {
+  statement {
+    sid     = "AllowCiliumOperatorWebIdentity"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [data.aws_iam_openid_connect_provider.this.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(data.aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")}:sub"
+      values   = ["system:serviceaccount:kube-system:cilium-operator"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(data.aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "cilium_operator" {
+  statement {
+    sid = "AllowCiliumEniManagement"
+    actions = [
+      "ec2:AssignPrivateIpAddresses",
+      "ec2:AttachNetworkInterface",
+      "ec2:CreateNetworkInterface",
+      "ec2:CreateTags",
+      "ec2:DeleteNetworkInterface",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DescribeRouteTables",
+      "ec2:DescribeSecurityGroups",
+      "ec2:DescribeSubnets",
+      "ec2:DescribeTags",
+      "ec2:DescribeVpcs",
+      "ec2:ModifyNetworkInterfaceAttribute",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "cilium_operator" {
+  name        = "${var.project_name}-${var.environment}-cilium-operator"
+  description = "Least-privilege EC2 permissions for the Cilium operator in ENI mode."
+  policy      = data.aws_iam_policy_document.cilium_operator.json
+}
+
+resource "aws_iam_role" "cilium_operator" {
+  name               = "${var.project_name}-${var.environment}-cilium-operator"
+  assume_role_policy = data.aws_iam_policy_document.cilium_operator_assume_role.json
+  description        = "IRSA role for the Cilium operator running in kube-system."
+}
+
+resource "aws_iam_role_policy_attachment" "cilium_operator" {
+  role       = aws_iam_role.cilium_operator.name
+  policy_arn = aws_iam_policy.cilium_operator.arn
+}
+
 resource "time_sleep" "cluster_access_ready" {
   create_duration = "45s"
 
@@ -11,10 +82,16 @@ resource "time_sleep" "cluster_access_ready" {
 module "addons" {
   source = "../../modules/platform-addons"
 
-  kubernetes_version   = var.kubernetes_version
-  enable_ingress_nginx = var.enable_ingress_nginx
+  kubernetes_version           = var.kubernetes_version
+  cluster_name                 = var.cluster_name
+  cluster_vpc_cidr             = data.aws_vpc.cluster.cidr_block
+  cilium_operator_iam_role_arn = aws_iam_role.cilium_operator.arn
+  enable_ingress_nginx         = var.enable_ingress_nginx
 
-  depends_on = [time_sleep.cluster_access_ready]
+  depends_on = [
+    time_sleep.cluster_access_ready,
+    aws_iam_role_policy_attachment.cilium_operator,
+  ]
 }
 
 module "subjects" {

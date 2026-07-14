@@ -108,14 +108,25 @@ locals {
         mount_path = coalesce(try(app.config_map.mount_path, null), "/usr/share/app/config")
         data       = coalesce(try(app.config_map.data, null), {})
       }
+      exposure = {
+        enabled         = coalesce(try(app.exposure.enabled, null), try(app.ingress.enabled, null), false)
+        host            = coalesce(try(app.exposure.host, null), try(app.ingress.host, null), null)
+        path            = coalesce(try(app.exposure.path, null), try(app.ingress.path, null), "/")
+        path_type       = coalesce(try(app.exposure.path_type, null), try(app.ingress.path_type, null), "Prefix")
+        tls_secret_name = coalesce(try(app.exposure.tls_secret_name, null), try(app.ingress.tls_secret_name, null), null)
+      }
+      connectivity = {
+        internet_ingress_enabled = coalesce(try(app.connectivity.internet_ingress_enabled, null), try(app.exposure.enabled, null), try(app.ingress.enabled, null), false)
+        internet_egress_enabled  = coalesce(try(app.connectivity.internet_egress_enabled, null), false)
+      }
       ingress = {
-        enabled         = try(app.ingress.enabled, false)
-        class_name      = try(app.ingress.class_name, null)
+        enabled         = coalesce(try(app.exposure.enabled, null), try(app.ingress.enabled, null), false)
+        class_name      = coalesce(try(app.ingress.class_name, null), "nginx")
         annotations     = coalesce(try(app.ingress.annotations, null), {})
-        host            = try(app.ingress.host, null)
-        path            = coalesce(try(app.ingress.path, null), "/")
-        path_type       = coalesce(try(app.ingress.path_type, null), "Prefix")
-        tls_secret_name = try(app.ingress.tls_secret_name, null)
+        host            = coalesce(try(app.exposure.host, null), try(app.ingress.host, null), null)
+        path            = coalesce(try(app.exposure.path, null), try(app.ingress.path, null), "/")
+        path_type       = coalesce(try(app.exposure.path_type, null), try(app.ingress.path_type, null), "Prefix")
+        tls_secret_name = coalesce(try(app.exposure.tls_secret_name, null), try(app.ingress.tls_secret_name, null), null)
       }
       network_policy = {
         ingress = [
