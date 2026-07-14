@@ -1,3 +1,13 @@
+## [0.7.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.6.3...v0.7.0) (2026-07-14)
+
+### Features
+
+* **infra:** separated platform and policy again, implementing cilium focused networking in aws ([1a85ba3](https://github.com/Mihaidono/security-observability-cluster/commit/1a85ba374355ce8202f6f516444e332ce6ba707e))
+
+### Bug Fixes
+
+* **infra:** cilium now handles creation properly, taints stopping spin up solved ([f0adca1](https://github.com/Mihaidono/security-observability-cluster/commit/f0adca1daea453636160709d7caf27e728b5493a))
+
 ## [0.6.3](https://github.com/Mihaidono/security-observability-cluster/compare/v0.6.2...v0.6.3) (2026-07-13)
 
 ### Bug Fixes
