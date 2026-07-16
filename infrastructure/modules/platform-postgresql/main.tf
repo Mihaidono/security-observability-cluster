@@ -1,193 +1,66 @@
-resource "kubernetes_secret_v1" "credentials" {
-  metadata {
-    name      = "${var.name}-credentials"
-    namespace = var.namespace
-    labels    = local.labels
-  }
+resource "aws_db_subnet_group" "postgresql" {
+  name       = var.name
+  subnet_ids = var.subnet_ids
 
-  data = {
-    POSTGRES_DB       = var.database_name
-    POSTGRES_USER     = var.username
-    POSTGRES_PASSWORD = var.password
-  }
-
-  type = "Opaque"
+  tags = local.labels
 }
 
-resource "kubernetes_service_v1" "postgresql" {
-  metadata {
-    name      = var.name
-    namespace = var.namespace
-    labels    = local.labels
-  }
+resource "aws_security_group" "postgresql" {
+  name        = var.name
+  description = "Security group for the Isolens PostgreSQL RDS instance."
+  vpc_id      = var.vpc_id
 
-  spec {
-    selector = local.labels
-
-    port {
-      name        = "postgresql"
-      port        = var.service_port
-      target_port = var.service_port
-      protocol    = "TCP"
-    }
-  }
+  tags = local.labels
 }
 
-resource "kubernetes_stateful_set_v1" "postgresql" {
-  metadata {
-    name      = var.name
-    namespace = var.namespace
-    labels    = local.labels
-  }
+resource "aws_vpc_security_group_ingress_rule" "postgresql" {
+  for_each = toset(var.allowed_cidr_blocks)
 
-  spec {
-    replicas     = 1
-    service_name = kubernetes_service_v1.postgresql.metadata[0].name
-
-    selector {
-      match_labels = local.labels
-    }
-
-    template {
-      metadata {
-        labels = local.labels
-      }
-
-      spec {
-        security_context {
-          fs_group = 999
-
-          seccomp_profile {
-            type = "RuntimeDefault"
-          }
-        }
-
-        container {
-          name              = "postgresql"
-          image             = var.image
-          image_pull_policy = "IfNotPresent"
-
-          port {
-            name           = "postgresql"
-            container_port = var.service_port
-          }
-
-          env_from {
-            secret_ref {
-              name = kubernetes_secret_v1.credentials.metadata[0].name
-            }
-          }
-
-          resources {
-            requests = {
-              cpu    = var.resources.requests_cpu
-              memory = var.resources.requests_memory
-            }
-            limits = {
-              cpu    = var.resources.limits_cpu
-              memory = var.resources.limits_memory
-            }
-          }
-
-          security_context {
-            allow_privilege_escalation = false
-            read_only_root_filesystem  = false
-            run_as_non_root            = true
-            run_as_user                = 999
-            run_as_group               = 999
-
-            capabilities {
-              drop = ["ALL"]
-            }
-          }
-
-          readiness_probe {
-            exec {
-              command = ["/bin/sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
-            }
-
-            initial_delay_seconds = 10
-            period_seconds        = 10
-            timeout_seconds       = 5
-            failure_threshold     = 6
-            success_threshold     = 1
-          }
-
-          liveness_probe {
-            exec {
-              command = ["/bin/sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
-            }
-
-            initial_delay_seconds = 20
-            period_seconds        = 20
-            timeout_seconds       = 5
-            failure_threshold     = 6
-            success_threshold     = 1
-          }
-
-          startup_probe {
-            exec {
-              command = ["/bin/sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -h 127.0.0.1"]
-            }
-
-            initial_delay_seconds = 10
-            period_seconds        = 10
-            timeout_seconds       = 5
-            failure_threshold     = 18
-            success_threshold     = 1
-          }
-
-          volume_mount {
-            name       = "data"
-            mount_path = "/var/lib/postgresql/data"
-          }
-        }
-      }
-    }
-
-    volume_claim_template {
-      metadata {
-        name = "data"
-      }
-
-      spec {
-        access_modes       = ["ReadWriteOnce"]
-        storage_class_name = var.storage_class_name
-
-        resources {
-          requests = {
-            storage = var.storage_size
-          }
-        }
-      }
-    }
-  }
-
-  wait_for_rollout = true
+  security_group_id = aws_security_group.postgresql.id
+  description       = "Allow PostgreSQL access from trusted cluster CIDRs."
+  cidr_ipv4         = each.value
+  from_port         = var.port
+  ip_protocol       = "tcp"
+  to_port           = var.port
 }
 
-resource "kubernetes_network_policy" "allow_same_namespace_ingress" {
-  metadata {
-    name      = "allow-${var.name}-same-namespace"
-    namespace = var.namespace
-  }
+resource "aws_vpc_security_group_ingress_rule" "postgresql_security_groups" {
+  for_each = toset(var.allowed_security_group_ids)
 
-  spec {
-    pod_selector {
-      match_labels = local.labels
-    }
+  security_group_id            = aws_security_group.postgresql.id
+  description                  = "Allow PostgreSQL access from trusted security groups."
+  referenced_security_group_id = each.value
+  from_port                    = var.port
+  ip_protocol                  = "tcp"
+  to_port                      = var.port
+}
 
-    policy_types = ["Ingress"]
+resource "aws_db_instance" "postgresql" {
+  identifier                 = var.name
+  db_name                    = var.database_name
+  username                   = var.username
+  password                   = var.password
+  port                       = var.port
+  engine                     = "postgres"
+  engine_version             = var.engine_version
+  instance_class             = var.instance_class
+  allocated_storage          = var.allocated_storage
+  max_allocated_storage      = var.max_allocated_storage
+  storage_type               = var.storage_type
+  db_subnet_group_name       = aws_db_subnet_group.postgresql.name
+  vpc_security_group_ids     = [aws_security_group.postgresql.id]
+  backup_retention_period    = var.backup_retention_period
+  backup_window              = var.backup_window
+  maintenance_window         = var.maintenance_window
+  multi_az                   = var.multi_az
+  deletion_protection        = var.deletion_protection
+  skip_final_snapshot        = var.skip_final_snapshot
+  final_snapshot_identifier  = var.skip_final_snapshot ? null : local.final_snapshot_identifier
+  apply_immediately          = var.apply_immediately
+  storage_encrypted          = var.storage_encrypted
+  publicly_accessible        = false
+  auto_minor_version_upgrade = true
+  copy_tags_to_snapshot      = true
 
-    ingress {
-      from {
-        pod_selector {}
-      }
-
-      ports {
-        port     = var.service_port
-        protocol = "TCP"
-      }
-    }
-  }
+  tags = local.labels
 }

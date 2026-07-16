@@ -6,6 +6,23 @@ data "aws_vpc" "cluster" {
   id = data.aws_eks_cluster.this.vpc_config[0].vpc_id
 }
 
+data "aws_security_group" "eks_nodes" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.cluster.id]
+  }
+
+  filter {
+    name   = "tag:Name"
+    values = ["${var.cluster_name}-node"]
+  }
+
+  filter {
+    name   = "tag:kubernetes.io/cluster/${var.cluster_name}"
+    values = ["owned"]
+  }
+}
+
 data "aws_iam_policy_document" "cilium_operator_assume_role" {
   statement {
     sid     = "AllowCiliumOperatorWebIdentity"
@@ -79,6 +96,21 @@ resource "time_sleep" "cluster_access_ready" {
   }
 }
 
+resource "kubernetes_namespace_v1" "control_plane" {
+  metadata {
+    name = var.control_plane_namespace
+    labels = merge({
+      "pod-security.kubernetes.io/enforce"         = "baseline"
+      "pod-security.kubernetes.io/enforce-version" = startswith(var.kubernetes_version, "v") || var.kubernetes_version == "latest" ? var.kubernetes_version : "v${var.kubernetes_version}"
+      "isolens.io/component"                       = "control-plane"
+      "app.kubernetes.io/part-of"                  = "isolens"
+    }, var.control_plane_namespace_labels)
+    annotations = var.control_plane_namespace_annotations
+  }
+
+  depends_on = [time_sleep.cluster_access_ready]
+}
+
 module "addons" {
   source = "../../modules/platform-addons"
 
@@ -95,19 +127,11 @@ module "addons" {
   ]
 }
 
-module "subjects" {
-  source = "../../modules/ward-subjects"
-
-  analysis_subjects  = var.analysis_subjects
-  kubernetes_version = var.kubernetes_version
-
-  depends_on = [module.addons]
-}
-
 module "control_plane" {
   source = "../../modules/control-plane"
 
   namespace          = var.control_plane_namespace
+  create_namespace   = false
   kubernetes_version = var.kubernetes_version
   labels             = var.control_plane_namespace_labels
   annotations        = var.control_plane_namespace_annotations
@@ -119,7 +143,7 @@ module "control_plane" {
   backend_service_port      = var.control_plane_backend_service_port
   backend_container_port    = var.control_plane_backend_container_port
   backend_api_token         = var.control_plane_backend_api_token
-  backend_database_url      = "postgresql://${var.postgresql_username}:${var.postgresql_password}@${var.postgresql_name}.${var.control_plane_namespace}.svc.cluster.local:${var.postgresql_service_port}/${var.postgresql_database_name}"
+  backend_database_url      = "postgresql://${var.postgresql_username}:${var.postgresql_password}@${module.postgresql.address}:${module.postgresql.port}/${var.postgresql_database_name}?sslmode=require"
   backend_resources         = var.control_plane_backend_resources
 
   frontend_image             = var.control_plane_frontend_image
@@ -134,22 +158,45 @@ module "control_plane" {
   runner_replicas  = var.control_plane_runner_replicas
   runner_resources = var.control_plane_runner_resources
 
-  depends_on = [module.addons]
+  depends_on = [
+    module.addons,
+    kubernetes_namespace_v1.control_plane,
+    module.postgresql,
+  ]
 }
 
 module "postgresql" {
   source = "../../modules/platform-postgresql"
 
-  namespace          = module.control_plane.namespace
-  name               = var.postgresql_name
-  database_name      = var.postgresql_database_name
-  username           = var.postgresql_username
-  password           = var.postgresql_password
-  image              = var.postgresql_image
-  storage_size       = var.postgresql_storage_size
-  storage_class_name = var.postgresql_storage_class_name
-  service_port       = var.postgresql_service_port
-  resources          = var.postgresql_resources
+  name                       = var.postgresql_name
+  database_name              = var.postgresql_database_name
+  username                   = var.postgresql_username
+  password                   = var.postgresql_password
+  port                       = var.postgresql_port
+  vpc_id                     = data.aws_vpc.cluster.id
+  subnet_ids                 = data.aws_eks_cluster.this.vpc_config[0].subnet_ids
+  allowed_security_group_ids = [data.aws_security_group.eks_nodes.id]
+  instance_class             = var.postgresql_instance_class
+  engine_version             = var.postgresql_engine_version
+  allocated_storage          = var.postgresql_allocated_storage
+  max_allocated_storage      = var.postgresql_max_allocated_storage
+  storage_type               = var.postgresql_storage_type
+  backup_retention_period    = var.postgresql_backup_retention_period
+  backup_window              = var.postgresql_backup_window
+  maintenance_window         = var.postgresql_maintenance_window
+  multi_az                   = var.postgresql_multi_az
+  deletion_protection        = var.postgresql_deletion_protection
+  skip_final_snapshot        = var.postgresql_skip_final_snapshot
+  apply_immediately          = var.postgresql_apply_immediately
+  storage_encrypted          = var.postgresql_storage_encrypted
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    Stage       = "platform"
+  }
 
-  depends_on = [module.control_plane]
+  depends_on = [
+    module.addons,
+    kubernetes_namespace_v1.control_plane,
+  ]
 }

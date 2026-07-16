@@ -22,6 +22,12 @@ variable "cluster_name" {
   default     = "forensic-lab"
 }
 
+variable "kubernetes_version" {
+  description = "Cluster Kubernetes version used to label ward namespaces with the matching PSA version."
+  type        = string
+  default     = "1.35"
+}
+
 variable "cluster_admin_principal_arns" {
   description = "IAM principal ARNs granted cluster-admin access in the core stage. Used here to keep the post-core readiness wait tied to access configuration changes."
   type        = list(string)

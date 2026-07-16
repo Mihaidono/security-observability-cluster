@@ -3,6 +3,11 @@ output "update_kubeconfig_command" {
   value       = "aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}"
 }
 
+output "ward_namespaces" {
+  description = "Ward namespaces created for analysis subjects."
+  value       = module.subjects.ward_namespaces
+}
+
 output "ward_service_endpoints" {
   description = "Cluster-local DNS names for services created from ward applications."
   value       = module.workloads.ward_service_endpoints

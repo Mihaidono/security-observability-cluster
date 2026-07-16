@@ -8,11 +8,20 @@ resource "time_sleep" "cluster_access_ready" {
   }
 }
 
+module "subjects" {
+  source = "../../modules/ward-subjects"
+
+  analysis_subjects  = var.analysis_subjects
+  kubernetes_version = var.kubernetes_version
+
+  depends_on = [time_sleep.cluster_access_ready]
+}
+
 module "workloads" {
   source = "../../modules/ward-workloads"
 
   analysis_subject_names = toset(keys(var.analysis_subjects))
   ward_applications      = var.ward_applications
 
-  depends_on = [time_sleep.cluster_access_ready]
+  depends_on = [module.subjects]
 }

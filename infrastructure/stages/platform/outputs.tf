@@ -1,18 +1,3 @@
-output "ward_namespaces" {
-  description = "Ward namespaces created for analysis subjects."
-  value       = module.subjects.ward_namespaces
-}
-
-output "monitoring_namespace" {
-  description = "Namespace containing the observability stack."
-  value       = module.addons.monitoring_namespace
-}
-
-output "monitoring_release_name" {
-  description = "Helm release name used for the monitoring agent stack."
-  value       = module.addons.monitoring_release_name
-}
-
 output "kyverno_namespace" {
   description = "Namespace containing the Kyverno policy engine."
   value       = module.addons.kyverno_namespace
@@ -53,14 +38,19 @@ output "control_plane_runner_name" {
   value       = module.control_plane.runner_name
 }
 
-output "postgresql_service_fqdn" {
-  description = "Cluster-local DNS name for the PostgreSQL service used by the control plane."
-  value       = module.postgresql.service_fqdn
+output "postgresql_endpoint" {
+  description = "Endpoint of the RDS PostgreSQL instance used by the control plane."
+  value       = module.postgresql.endpoint
 }
 
-output "postgresql_secret_name" {
-  description = "Secret containing the PostgreSQL connection credentials."
-  value       = module.postgresql.secret_name
+output "postgresql_address" {
+  description = "DNS address of the RDS PostgreSQL instance used by the control plane."
+  value       = module.postgresql.address
+}
+
+output "postgresql_port" {
+  description = "Port exposed by the RDS PostgreSQL instance."
+  value       = module.postgresql.port
 }
 
 output "postgresql_database_name" {

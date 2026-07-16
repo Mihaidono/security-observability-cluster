@@ -13,6 +13,11 @@ output "cluster_security_group_id" {
   value       = module.eks.cluster_security_group_id
 }
 
+output "node_security_group_id" {
+  description = "Security group attached to the EKS worker nodes."
+  value       = module.eks.node_security_group_id
+}
+
 output "cluster_log_group_name" {
   description = "CloudWatch log group receiving EKS control-plane logs."
   value       = aws_cloudwatch_log_group.eks_cluster.name

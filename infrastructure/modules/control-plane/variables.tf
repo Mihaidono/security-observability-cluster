@@ -3,6 +3,12 @@ variable "namespace" {
   type        = string
 }
 
+variable "create_namespace" {
+  description = "Whether the control-plane module should create the namespace before deploying workloads."
+  type        = bool
+  default     = true
+}
+
 variable "kubernetes_version" {
   description = "Cluster Kubernetes version used to label the namespace with the matching PSA version."
   type        = string

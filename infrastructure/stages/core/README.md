@@ -118,5 +118,6 @@ terraform apply
 | cluster_log_group_name | CloudWatch log group receiving EKS control-plane logs. |
 | cluster_name | Name of the provisioned EKS cluster. |
 | cluster_security_group_id | Security group attached to the EKS control plane. |
+| node_security_group_id | Security group attached to the EKS worker nodes. |
 | update_kubeconfig_command | Command to merge this cluster into the local kubeconfig. |
 <!-- END_TF_DOCS -->

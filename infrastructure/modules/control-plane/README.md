@@ -40,6 +40,7 @@ No modules.
 | backend_resources | Resource requests and limits for the backend container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
 | backend_service_name | ClusterIP Service name for the backend workload. | `string` | `"isolens-backend"` | no |
 | backend_service_port | Service port exposed by the backend ClusterIP Service. | `number` | `8000` | no |
+| create_namespace | Whether the control-plane module should create the namespace before deploying workloads. | `bool` | `true` | no |
 | frontend_container_port | Container port exposed by the frontend workload. | `number` | `8080` | no |
 | frontend_image | Container image for the Isolens frontend workload. | `string` | n/a | yes |
 | frontend_image_pull_policy | Image pull policy for the frontend container. | `string` | `"IfNotPresent"` | no |

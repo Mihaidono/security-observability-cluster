@@ -233,40 +233,6 @@ resource "helm_release" "kyverno" {
   ]
 }
 
-resource "kubernetes_namespace_v1" "monitoring" {
-  metadata {
-    name = "monitoring-zone"
-    labels = {
-      "pod-security.kubernetes.io/enforce"         = "baseline"
-      "pod-security.kubernetes.io/enforce-version" = local.kubernetes_psa_version
-      "observability-role"                         = "platform"
-    }
-  }
-}
-
-resource "helm_release" "monitoring_agent" {
-  name            = "lgtm"
-  repository      = "https://grafana.github.io/helm-charts"
-  chart           = "grafana-agent"
-  version         = "0.44.2"
-  namespace       = kubernetes_namespace_v1.monitoring.metadata[0].name
-  wait            = true
-  timeout         = 900
-  atomic          = true
-  cleanup_on_fail = true
-
-  set {
-    name  = "fullnameOverride"
-    value = "lgtm-agent"
-  }
-
-  depends_on = [
-    helm_release.cilium,
-    aws_eks_addon.coredns,
-    kubernetes_namespace_v1.monitoring,
-  ]
-}
-
 resource "kubernetes_namespace_v1" "ingress_nginx" {
   count = var.enable_ingress_nginx ? 1 : 0
 

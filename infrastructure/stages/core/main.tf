@@ -82,6 +82,7 @@ module "eks" {
   depends_on = [aws_cloudwatch_log_group.eks_cluster]
 }
 
+
 resource "aws_eks_access_entry" "cluster_admins" {
   for_each = toset(var.cluster_admin_principal_arns)
 

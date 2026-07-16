@@ -538,7 +538,6 @@ def platform_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
         "cluster_name": config.core.cluster_name,
         "kubernetes_version": config.core.kubernetes_version,
         "cluster_admin_principal_arns": config.core.cluster_admin_principal_arns,
-        "analysis_subjects": config.platform.analysis_subjects,
     }
 
 

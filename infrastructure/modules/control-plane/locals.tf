@@ -3,6 +3,8 @@ locals {
     startswith(var.kubernetes_version, "v") ? var.kubernetes_version : "v${var.kubernetes_version}"
   )
 
+  namespace_name = var.namespace
+
   backend_labels = {
     "app.kubernetes.io/name"       = var.backend_service_name
     "app.kubernetes.io/component"  = "backend"
@@ -24,5 +26,5 @@ locals {
     "app.kubernetes.io/managed-by" = "terraform"
   }
 
-  backend_service_fqdn = "${var.backend_service_name}.${var.namespace}.svc.cluster.local"
+  backend_service_fqdn = "${var.backend_service_name}.${local.namespace_name}.svc.cluster.local"
 }

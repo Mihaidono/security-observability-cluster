@@ -23,7 +23,7 @@ variable "cluster_name" {
 }
 
 variable "kubernetes_version" {
-  description = "Cluster Kubernetes version used to label namespaces with the matching PSA version."
+  description = "Cluster Kubernetes version used to label shared namespaces with the matching PSA version."
   type        = string
   default     = "1.35"
 }
@@ -208,7 +208,7 @@ variable "control_plane_runner_resources" {
 }
 
 variable "postgresql_name" {
-  description = "Base name used for PostgreSQL resources in the control-plane namespace."
+  description = "Base name used for the RDS PostgreSQL resources."
   type        = string
   default     = "isolens-postgresql"
 }
@@ -232,67 +232,87 @@ variable "postgresql_password" {
   default     = "isolens-dev-password-change-me"
 }
 
-variable "postgresql_image" {
-  description = "Container image used for the control-plane PostgreSQL workload."
-  type        = string
-  default     = "postgres:16.9-alpine"
-}
-
-variable "postgresql_storage_size" {
-  description = "Persistent volume size for the control-plane PostgreSQL data."
-  type        = string
-  default     = "20Gi"
-}
-
-variable "postgresql_storage_class_name" {
-  description = "Optional storage class name for the PostgreSQL persistent volume claim."
-  type        = string
-  default     = null
-}
-
-variable "postgresql_service_port" {
-  description = "Service port exposed by PostgreSQL."
+variable "postgresql_port" {
+  description = "Port exposed by PostgreSQL."
   type        = number
   default     = 5432
 }
 
-variable "postgresql_resources" {
-  description = "Resource requests and limits for the PostgreSQL container."
-  type = object({
-    requests_cpu    = string
-    requests_memory = string
-    limits_cpu      = string
-    limits_memory   = string
-  })
-  default = {
-    requests_cpu    = "250m"
-    requests_memory = "512Mi"
-    limits_cpu      = "1000m"
-    limits_memory   = "1Gi"
-  }
+variable "postgresql_instance_class" {
+  description = "RDS instance class for the control-plane PostgreSQL database."
+  type        = string
+  default     = "db.t3.medium"
 }
 
-variable "analysis_subjects" {
-  description = "Ward namespace definitions. Each entry creates a namespace, ward metadata ConfigMap, ResourceQuota, LimitRange, and baseline NetworkPolicies."
-  type = map(object({
-    tier        = string
-    description = string
-    labels      = optional(map(string), {})
-    annotations = optional(map(string), {})
-    resource_quota = optional(object({
-      pods            = optional(string, "10")
-      requests_cpu    = optional(string, "2")
-      requests_memory = optional(string, "4Gi")
-      limits_cpu      = optional(string, "4")
-      limits_memory   = optional(string, "8Gi")
-    }), {})
-  }))
+variable "postgresql_engine_version" {
+  description = "PostgreSQL engine version. Null lets AWS choose the default version for the selected engine family."
+  type        = string
+  default     = null
+  nullable    = true
+}
 
-  validation {
-    condition = alltrue([
-      for name in keys(var.analysis_subjects) :
-      can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", name)) && length(name) <= 63
-    ])
-    error_message = "Each analysis_subjects key must be a valid Kubernetes namespace name."
-  }
+variable "postgresql_allocated_storage" {
+  description = "Allocated storage in GiB for PostgreSQL."
+  type        = number
+  default     = 20
+}
+
+variable "postgresql_max_allocated_storage" {
+  description = "Upper limit in GiB for PostgreSQL storage autoscaling."
+  type        = number
+  default     = 100
+}
+
+variable "postgresql_storage_type" {
+  description = "RDS storage type."
+  type        = string
+  default     = "gp3"
+}
+
+variable "postgresql_backup_retention_period" {
+  description = "Number of days to retain automated backups."
+  type        = number
+  default     = 7
+}
+
+variable "postgresql_backup_window" {
+  description = "Preferred daily backup window in UTC."
+  type        = string
+  default     = "03:00-04:00"
+}
+
+variable "postgresql_maintenance_window" {
+  description = "Preferred weekly maintenance window in UTC."
+  type        = string
+  default     = "sun:04:30-sun:05:30"
+}
+
+variable "postgresql_multi_az" {
+  description = "Whether to provision a Multi-AZ standby for PostgreSQL."
+  type        = bool
+  default     = true
+}
+
+variable "postgresql_deletion_protection" {
+  description = "Whether to enable deletion protection on PostgreSQL."
+  type        = bool
+  default     = false
+}
+
+variable "postgresql_skip_final_snapshot" {
+  description = "Whether to skip the final snapshot when destroying PostgreSQL."
+  type        = bool
+  default     = true
+}
+
+variable "postgresql_apply_immediately" {
+  description = "Whether PostgreSQL modifications should be applied immediately."
+  type        = bool
+  default     = true
+}
+
+variable "postgresql_storage_encrypted" {
+  description = "Whether to enable storage encryption for PostgreSQL."
+  type        = bool
+  default     = true
 }

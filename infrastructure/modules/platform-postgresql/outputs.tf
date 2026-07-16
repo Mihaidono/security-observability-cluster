@@ -1,16 +1,16 @@
-output "service_name" {
-  description = "Kubernetes Service name used for PostgreSQL."
-  value       = kubernetes_service_v1.postgresql.metadata[0].name
+output "address" {
+  description = "DNS address of the RDS PostgreSQL instance."
+  value       = aws_db_instance.postgresql.address
 }
 
-output "service_fqdn" {
-  description = "Cluster-local DNS name for the PostgreSQL service."
-  value       = "${kubernetes_service_v1.postgresql.metadata[0].name}.${var.namespace}.svc.cluster.local"
+output "endpoint" {
+  description = "Endpoint of the RDS PostgreSQL instance in host:port form."
+  value       = aws_db_instance.postgresql.endpoint
 }
 
-output "secret_name" {
-  description = "Secret containing the PostgreSQL connection credentials."
-  value       = kubernetes_secret_v1.credentials.metadata[0].name
+output "port" {
+  description = "Port exposed by the RDS PostgreSQL instance."
+  value       = aws_db_instance.postgresql.port
 }
 
 output "database_name" {
@@ -21,4 +21,9 @@ output "database_name" {
 output "username" {
   description = "Application username for PostgreSQL."
   value       = var.username
+}
+
+output "security_group_id" {
+  description = "Security group attached to the RDS PostgreSQL instance."
+  value       = aws_security_group.postgresql.id
 }

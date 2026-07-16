@@ -2,6 +2,15 @@
 
 Installs the shared cluster add-ons used by the platform layer.
 
+## Implementation Notes
+
+- Cilium is installed as the primary Kubernetes networking layer for EKS.
+- The deployment uses AWS ENI IPAM together with `kubeProxyReplacement=true`.
+- Hubble is enabled for flow visibility.
+- CoreDNS is installed only after Cilium is ready enough to remove the initial node taint.
+- Tetragon and Kyverno are installed as shared platform capabilities.
+- `ingress-nginx` is optional and disabled by default because the target direction is Cilium Gateway API rather than nginx ingress.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -24,11 +33,9 @@ No modules.
 | [helm_release.cilium](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
 | [helm_release.ingress_nginx](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
 | [helm_release.kyverno](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
-| [helm_release.monitoring_agent](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
 | [helm_release.tetragon](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
 | [kubernetes_namespace_v1.ingress_nginx](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
 | [kubernetes_namespace_v1.kyverno](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
-| [kubernetes_namespace_v1.monitoring](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
 
 ## Inputs
 
@@ -47,6 +54,4 @@ No modules.
 | ---- | ----------- |
 | ingress_controller_namespace | Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled. |
 | kyverno_namespace | Namespace containing the Kyverno policy engine. |
-| monitoring_namespace | Namespace containing the observability stack. |
-| monitoring_release_name | Helm release name used for the monitoring agent stack. |
 <!-- END_TF_DOCS -->

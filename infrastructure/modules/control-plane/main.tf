@@ -1,4 +1,6 @@
 resource "kubernetes_namespace_v1" "control_plane" {
+  count = var.create_namespace ? 1 : 0
+
   metadata {
     name = var.namespace
     labels = merge({
@@ -14,7 +16,7 @@ resource "kubernetes_namespace_v1" "control_plane" {
 resource "kubernetes_secret_v1" "backend_runtime" {
   metadata {
     name      = "${var.backend_service_name}-runtime"
-    namespace = kubernetes_namespace_v1.control_plane.metadata[0].name
+    namespace = local.namespace_name
     labels    = local.backend_labels
   }
 
@@ -29,7 +31,7 @@ resource "kubernetes_secret_v1" "backend_runtime" {
 resource "kubernetes_service_v1" "backend" {
   metadata {
     name      = var.backend_service_name
-    namespace = kubernetes_namespace_v1.control_plane.metadata[0].name
+    namespace = local.namespace_name
     labels    = local.backend_labels
   }
 
@@ -49,7 +51,7 @@ resource "kubernetes_service_v1" "backend" {
 resource "kubernetes_deployment_v1" "backend" {
   metadata {
     name      = var.backend_service_name
-    namespace = kubernetes_namespace_v1.control_plane.metadata[0].name
+    namespace = local.namespace_name
     labels    = local.backend_labels
   }
 
@@ -159,7 +161,7 @@ resource "kubernetes_deployment_v1" "backend" {
 resource "kubernetes_service_v1" "frontend" {
   metadata {
     name      = var.frontend_service_name
-    namespace = kubernetes_namespace_v1.control_plane.metadata[0].name
+    namespace = local.namespace_name
     labels    = local.frontend_labels
   }
 
@@ -179,7 +181,7 @@ resource "kubernetes_service_v1" "frontend" {
 resource "kubernetes_deployment_v1" "frontend" {
   metadata {
     name      = var.frontend_service_name
-    namespace = kubernetes_namespace_v1.control_plane.metadata[0].name
+    namespace = local.namespace_name
     labels    = local.frontend_labels
   }
 
@@ -292,7 +294,7 @@ resource "kubernetes_deployment_v1" "frontend" {
 resource "kubernetes_deployment_v1" "runner" {
   metadata {
     name      = var.runner_name
-    namespace = kubernetes_namespace_v1.control_plane.metadata[0].name
+    namespace = local.namespace_name
     labels    = local.runner_labels
   }
 
