@@ -23,6 +23,8 @@ permissions:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+  CLUSTER_ADMIN_USER_ARNS_JSON: ${{ vars.CLUSTER_ADMIN_USER_ARNS_JSON }}
   TF_IN_AUTOMATION: "true"
 
 jobs:
@@ -38,10 +40,13 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
 
       - name: Set Up Terraform
         uses: hashicorp/setup-terraform@v3
+
+      - name: Sync Cluster Admin ARNs
+        run: bash ./.github/scripts/sync-cluster-admin-arns.sh
 
       - name: Terraform Init Core
         working-directory: infrastructure/stages/core
@@ -87,10 +92,13 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
 
       - name: Set Up Terraform
         uses: hashicorp/setup-terraform@v3
+
+      - name: Sync Cluster Admin ARNs
+        run: bash ./.github/scripts/sync-cluster-admin-arns.sh
 
       - name: Terraform Init Platform
         working-directory: infrastructure/stages/platform
