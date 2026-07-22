@@ -25,6 +25,8 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
   CLUSTER_ADMIN_USER_ARNS_JSON: ${{ vars.CLUSTER_ADMIN_USER_ARNS_JSON }}
+  CONTROL_PLANE_BACKEND_API_TOKEN: ${{ secrets.CONTROL_PLANE_BACKEND_API_TOKEN }}
+  PLATFORM_POSTGRESQL_PASSWORD: ${{ secrets.PLATFORM_POSTGRESQL_PASSWORD }}
   TF_IN_AUTOMATION: "true"
 
 jobs:
@@ -45,8 +47,25 @@ jobs:
       - name: Set Up Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Sync Cluster Admin ARNs
-        run: bash ./.github/scripts/sync-cluster-admin-arns.sh
+      - name: Write Core CI Tfvars
+        working-directory: infrastructure/stages/core
+        shell: bash
+        run: |
+          jq -cn \
+            --arg assume_role "${AWS_ROLE_TO_ASSUME}" \
+            --argjson user_arns "${CLUSTER_ADMIN_USER_ARNS_JSON:-[]}" \
+            '
+              if ($assume_role | length) == 0 then
+                error("AWS_ROLE_TO_ASSUME must be a non-empty IAM role ARN")
+              elif ($user_arns | type) != "array" then
+                error("CLUSTER_ADMIN_USER_ARNS_JSON must be a JSON array of IAM principal ARNs")
+              else
+                {
+                  cluster_admin_principal_arns:
+                    ([$assume_role] + ($user_arns | map(select(type == "string") | gsub("^\\s+|\\s+$"; "") | select(length > 0))) | unique)
+                }
+              end
+            ' > ci.auto.tfvars.json
 
       - name: Terraform Init Core
         working-directory: infrastructure/stages/core
@@ -97,8 +116,33 @@ jobs:
       - name: Set Up Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Sync Cluster Admin ARNs
-        run: bash ./.github/scripts/sync-cluster-admin-arns.sh
+      - name: Write Platform CI Tfvars
+        working-directory: infrastructure/stages/platform
+        shell: bash
+        run: |
+          jq -cn \
+            --arg assume_role "${AWS_ROLE_TO_ASSUME}" \
+            --argjson user_arns "${CLUSTER_ADMIN_USER_ARNS_JSON:-[]}" \
+            --arg backend_api_token "${CONTROL_PLANE_BACKEND_API_TOKEN}" \
+            --arg postgresql_password "${PLATFORM_POSTGRESQL_PASSWORD}" \
+            '
+              if ($assume_role | length) == 0 then
+                error("AWS_ROLE_TO_ASSUME must be a non-empty IAM role ARN")
+              elif ($user_arns | type) != "array" then
+                error("CLUSTER_ADMIN_USER_ARNS_JSON must be a JSON array of IAM principal ARNs")
+              elif ($backend_api_token | length) == 0 then
+                error("CONTROL_PLANE_BACKEND_API_TOKEN GitHub secret must be set")
+              elif ($postgresql_password | length) == 0 then
+                error("PLATFORM_POSTGRESQL_PASSWORD GitHub secret must be set")
+              else
+                {
+                  cluster_admin_principal_arns:
+                    ([$assume_role] + ($user_arns | map(select(type == "string") | gsub("^\\s+|\\s+$"; "") | select(length > 0))) | unique),
+                  control_plane_backend_api_token: $backend_api_token,
+                  postgresql_password: $postgresql_password
+                }
+              end
+            ' > ci.auto.tfvars.json
 
       - name: Terraform Init Platform
         working-directory: infrastructure/stages/platform
