@@ -14,13 +14,13 @@ The frontend is a Vite + React operator console for the backend control plane. I
 The UI works with four tabs:
 
 - `Overview`
-  stage actions, stage status, and Hubble handoff
+  shared-infrastructure context, policy/application stage actions, and Hubble handoff
 - `Assets`
   ward editing, application editing, app templates, scenarios, and scenario playbooks
 - `Activity`
   run history, plan summary, logs, and Terraform outputs
 - `Settings`
-  read-only cluster profile and editable admin access ARNs
+  read-only cluster profile
 
 The UI loads:
 
@@ -64,7 +64,8 @@ The frontend edits the managed config model returned by the backend:
 - cluster metadata is read-only
 - `analysis_subjects` can be added, renamed, edited, and removed
 - `ward_applications` can be added, edited, and removed
-- `cluster_admin_principal_arns` can be edited in `Settings`
+
+The `core` and `platform` portions of the configuration stay visible for context, but they are not executed from the UI.
 
 The `Assets` tab now has three distinct layers:
 
@@ -93,12 +94,9 @@ The UI is editing structured JSON, not freeform HCL.
 
 The UI exposes:
 
-- `Plan core`
-- `Apply core`
-- `Destroy core`
-- `Plan platform`
-- `Apply platform`
-- `Destroy platform`
+- `Plan policies`
+- `Apply policies`
+- `Destroy policies`
 - `Plan applications`
 - `Apply applications`
 - `Destroy applications`
@@ -108,9 +106,8 @@ Important behavior:
 
 - apply buttons operate on the latest planned run for that stage
 - apply can be queued behind the latest stage plan while that plan is still running, and it will fail closed if the source plan does not finish successfully
-- platform-stage actions stay disabled until a successful core apply exists
-- applications-stage actions stay disabled until a successful platform apply exists
-- core destroy is visually blocked while downstream stages are still effectively applied
+- policies are expected to run only after the dedicated infrastructure pipeline has reconciled `core` and `platform`
+- applications-stage actions stay disabled until a successful policies apply exists
 - cancel is only enabled for queued or active runs
 - destroy uses a two-click arming pattern in the UI, but the backend still enforces the real safety checks
 
@@ -140,6 +137,8 @@ The UI does not embed Hubble. It shows the local `kubectl port-forward` command 
 ```text
 http://127.0.0.1:12000
 ```
+
+Hubble itself is part of the infra-managed shared platform, so the UI treats it as externally owned context rather than an app-stage capability.
 
 ## Local Development
 

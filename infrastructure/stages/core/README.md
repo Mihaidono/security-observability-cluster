@@ -54,10 +54,10 @@ use_lockfile = true
 
 ## Operational Notes
 
-- The backend always runs `terraform init -reconfigure -backend-config=backend.hcl` before executing this stage.
-- Applies are executed from saved plan files, not fresh `terraform apply -auto-approve`.
+- This stage is infrastructure-owned and is no longer executable from the Isolens control-plane UI.
+- The repository workflow [deploy-infrastructure.yml](/home/mihandrei/work/security-observability-cluster/.github/workflows/deploy-infrastructure.yml) plans this stage first and applies it only when Terraform reports a real core change.
 - This stage should finish before planning `platform`.
-- The operator UI blocks `platform` while core is not effectively applied, and it visually blocks `core` destroy while downstream stages still exist.
+- When `core` changes, the infrastructure workflow reconciles `platform` afterwards in the same pipeline so the shared cluster layer stays consistent.
 
 ## Direct Terraform Usage
 

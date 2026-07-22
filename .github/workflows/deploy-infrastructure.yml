@@ -1,0 +1,124 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deploy-infrastructure.yml"
+      - "infrastructure/stages/core/**"
+      - "infrastructure/stages/platform/**"
+      - "infrastructure/modules/control-plane/**"
+      - "infrastructure/modules/platform-addons/**"
+      - "infrastructure/modules/platform-postgresql/**"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-infrastructure-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.plan.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      - name: Set Up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init Core
+        working-directory: infrastructure/stages/core
+        run: terraform init -reconfigure -backend-config=backend.hcl
+
+      - name: Terraform Plan Core
+        id: plan
+        working-directory: infrastructure/stages/core
+        shell: bash
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -input=false -no-color -out=core.tfplan
+          exit_code=$?
+          set -e
+
+          if [[ "$exit_code" == "0" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$exit_code" == "2" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          exit "$exit_code"
+
+      - name: Terraform Apply Core
+        if: steps.plan.outputs.changed == 'true'
+        working-directory: infrastructure/stages/core
+        run: terraform apply -input=false -no-color core.tfplan
+
+  platform:
+    needs: core
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.plan.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      - name: Set Up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init Platform
+        working-directory: infrastructure/stages/platform
+        run: terraform init -reconfigure -backend-config=backend.hcl
+
+      - name: Terraform Plan Platform
+        id: plan
+        working-directory: infrastructure/stages/platform
+        shell: bash
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -input=false -no-color -out=platform.tfplan
+          exit_code=$?
+          set -e
+
+          if [[ "$exit_code" == "0" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$exit_code" == "2" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          exit "$exit_code"
+
+      - name: Terraform Apply Platform
+        if: steps.plan.outputs.changed == 'true'
+        working-directory: infrastructure/stages/platform
+        run: terraform apply -input=false -no-color platform.tfplan

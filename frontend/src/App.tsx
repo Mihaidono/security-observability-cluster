@@ -10,12 +10,16 @@ import type {
   ContainerConfig,
   ConnectivityConfig,
   ExposureConfig,
+  HealthResponse,
   IngressConfig,
+  JsonObject,
+  KyvernoClusterPolicyConfig,
   NetworkPolicyPeer,
   NetworkPolicyPort,
   NetworkPolicyRule,
   ProbeConfig,
   RunStage,
+  TetragonTracingPolicyConfig,
   TerraformConfig,
   TerraformRun,
   VolumeConfig,
@@ -24,7 +28,11 @@ import type {
 } from "./lib/types";
 
 type Direction = "ingress" | "egress";
-type AppTab = "overview" | "assets" | "activity" | "settings";
+type AppTab = "deployment" | "assets" | "activity" | "accounts";
+type DeploymentStage = "policies" | "applications" | "observability";
+type ThemeMode = "light" | "dark";
+type PolicyEngine = "kyverno" | "tetragon";
+type PolicyFilter = "all" | PolicyEngine;
 type AppTemplateId =
   "public-python-api" | "internal-python-api" | "static-site";
 type ScenarioBlueprintId =
@@ -69,9 +77,32 @@ type ActiveScenarioBundle = {
   apps: WardApplication[];
 };
 
+type SelectedPolicyRef = {
+  engine: PolicyEngine;
+  id: string;
+};
+
 const SCENARIO_ID_LABEL = "isolens.io/scenario-id";
 const SCENARIO_BUNDLE_LABEL = "isolens.io/scenario-bundle";
 const SCENARIO_ROLE_LABEL = "isolens.io/scenario-role";
+const themeStorageKey = "isolens-theme-mode";
+
+function getInitialThemeMode(): ThemeMode {
+  if (typeof window === "undefined") {
+    return "light";
+  }
+
+  const stored = window.localStorage.getItem(themeStorageKey);
+  if (stored === "light" || stored === "dark") {
+    return stored;
+  }
+
+  if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+
+  return "light";
+}
 
 function stageIsEffectivelyApplied(
   runs: TerraformRun[],
@@ -1090,6 +1121,220 @@ function emptyAppTemplate(namespace: string): WardApplication {
   };
 }
 
+function makeRequireWardSubjectPolicy(): KyvernoClusterPolicyConfig {
+  return {
+    id: "require-ward-subject-label",
+    name: "Require ward subject label",
+    description:
+      "Require pods deployed into ward namespaces to carry the isolens.io/subject label.",
+    enabled: true,
+    manifest: {
+      apiVersion: "kyverno.io/v1",
+      kind: "ClusterPolicy",
+      metadata: {
+        name: "require-ward-subject-label",
+      },
+      spec: {
+        background: true,
+        rules: [
+          {
+            name: "pods-in-wards-must-carry-subject-label",
+            match: {
+              any: [
+                {
+                  resources: {
+                    kinds: ["Pod"],
+                    namespaceSelector: {
+                      matchExpressions: [
+                        {
+                          key: "analysis-tier",
+                          operator: "Exists",
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+            validate: {
+              failureAction: "Enforce",
+              message:
+                "Pods deployed into ward namespaces must declare the isolens.io/subject label.",
+              pattern: {
+                metadata: {
+                  labels: {
+                    "isolens.io/subject": "?*",
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+function makeDisallowLatestTagPolicy(): KyvernoClusterPolicyConfig {
+  return {
+    id: "disallow-latest-tag-in-wards",
+    name: "Disallow latest image tags",
+    description: "Deny ward workloads that use mutable latest tags.",
+    enabled: true,
+    manifest: {
+      apiVersion: "kyverno.io/v1",
+      kind: "ClusterPolicy",
+      metadata: {
+        name: "disallow-latest-tag-in-wards",
+      },
+      spec: {
+        background: true,
+        rules: [
+          {
+            name: "disallow-latest-image-tags",
+            match: {
+              any: [
+                {
+                  resources: {
+                    kinds: ["Pod"],
+                    namespaceSelector: {
+                      matchExpressions: [
+                        {
+                          key: "analysis-tier",
+                          operator: "Exists",
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+            validate: {
+              failureAction: "Enforce",
+              message:
+                "Ward workloads must pin container images and may not use the latest tag.",
+              foreach: [
+                {
+                  list: "request.object.spec.containers",
+                  deny: {
+                    conditions: {
+                      any: [
+                        {
+                          key: "{{ contains(element.image, ':latest') }}",
+                          operator: "Equals",
+                          value: true,
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+function makeSuspiciousExecTracingPolicy(): TetragonTracingPolicyConfig {
+  return {
+    id: "suspicious-exec",
+    name: "Suspicious exec tracing",
+    description:
+      "Trace suspicious network and shell executions in every ward namespace.",
+    enabled: true,
+    scope: "all-wards",
+    manifest: {
+      apiVersion: "cilium.io/v1alpha1",
+      kind: "TracingPolicyNamespaced",
+      metadata: {
+        name: "suspicious-exec",
+      },
+      spec: {
+        kprobes: [
+          {
+            call: "sys_execve",
+            syscall: true,
+            selectors: [
+              {
+                matchBinaries: [
+                  {
+                    operator: "In",
+                    values: [
+                      "/usr/bin/curl",
+                      "/usr/bin/wget",
+                      "/bin/wget",
+                      "/bin/curl",
+                      "/usr/bin/nc",
+                      "/bin/nc",
+                    ],
+                  },
+                ],
+                matchActions: [{ action: "Post" }],
+              },
+              {
+                matchBinaries: [
+                  {
+                    operator: "In",
+                    values: [
+                      "/bin/sh",
+                      "/bin/bash",
+                      "/usr/bin/bash",
+                      "/usr/bin/sh",
+                    ],
+                  },
+                ],
+                matchActions: [{ action: "Post" }],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
+
+function makeCustomKyvernoPolicy(): KyvernoClusterPolicyConfig {
+  return {
+    id: `kyverno-policy-${Date.now()}`,
+    name: "Custom Kyverno policy",
+    description: "Author a custom Kyverno ClusterPolicy manifest.",
+    enabled: true,
+    manifest: {
+      apiVersion: "kyverno.io/v1",
+      kind: "ClusterPolicy",
+      metadata: {
+        name: "custom-kyverno-policy",
+      },
+      spec: {
+        background: true,
+        rules: [],
+      },
+    },
+  };
+}
+
+function makeCustomTetragonPolicy(): TetragonTracingPolicyConfig {
+  return {
+    id: `tetragon-policy-${Date.now()}`,
+    name: "Custom Tetragon policy",
+    description: "Author a custom Tetragon tracing policy manifest.",
+    enabled: true,
+    scope: "all-wards",
+    manifest: {
+      apiVersion: "cilium.io/v1alpha1",
+      kind: "TracingPolicyNamespaced",
+      metadata: {
+        name: "custom-tetragon-policy",
+      },
+      spec: {
+        kprobes: [],
+      },
+    },
+  };
+}
+
 function normalizeExposure(
   exposure?: ExposureConfig,
   ingress?: IngressConfig,
@@ -1135,6 +1380,15 @@ function normalizeWardApplication(app: WardApplication): WardApplication {
 function normalizeTerraformConfig(config: TerraformConfig): TerraformConfig {
   return {
     ...config,
+    policies: {
+      kyverno_cluster_policies: config.policies?.kyverno_cluster_policies ?? [
+        makeRequireWardSubjectPolicy(),
+        makeDisallowLatestTagPolicy(),
+      ],
+      tetragon_tracing_policies: config.policies?.tetragon_tracing_policies ?? [
+        makeSuspiciousExecTracingPolicy(),
+      ],
+    },
     applications: {
       ...config.applications,
       ward_applications: (config.applications.ward_applications ?? []).map(
@@ -1444,7 +1698,7 @@ function logLevelTone(level?: string): string {
   if (normalized === "error" || normalized === "fatal")
     return "border-warning/40 bg-warning/16 text-foreground";
   if (normalized === "warn" || normalized === "warning")
-    return "border-[#ab9f9d]/60 bg-[#ab9f9d]/20 text-foreground";
+    return "border-border/60 bg-border/20 text-foreground";
   if (normalized === "debug" || normalized === "trace")
     return "border-border/70 bg-card/70 text-foreground/80";
   return "border-accent/30 bg-accent/12 text-accent";
@@ -1711,11 +1965,13 @@ function KeyValueEditor({
   value,
   onChange,
   addLabel = "Add row",
+  rowsClassName,
 }: {
   label: string;
   value?: Record<string, string>;
   onChange: (next: Record<string, string>) => void;
   addLabel?: string;
+  rowsClassName?: string;
 }) {
   const entries = Object.entries(value ?? {});
 
@@ -1767,7 +2023,7 @@ function KeyValueEditor({
       {entries.length === 0 ? (
         <p className="text-sm text-neutral-500">No entries.</p>
       ) : null}
-      <div className="grid gap-2">
+      <div className={classNames("grid gap-2", rowsClassName)}>
         {entries.map(([entryKey, entryValue], index) => (
           <div
             key={`kv-row-${index}`}
@@ -2562,20 +2818,27 @@ function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-[#383f51]/48 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-foreground/28 p-4 backdrop-blur-md"
       onClick={onClose}
     >
       <div
-        className="panel flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden"
+        className="panel flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-[2.2rem]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 className="text-lg font-semibold">{title}</h2>
+        <div className="flex items-center justify-between px-6 py-5">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.3em] text-neutral-500">
+              Workspace Context
+            </p>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight">
+              {title}
+            </h2>
+          </div>
           <Button variant="ghost" type="button" onClick={onClose}>
             Close
           </Button>
         </div>
-        <div className="overflow-y-auto px-5 py-4">{children}</div>
+        <div className="overflow-y-auto px-6 pb-6">{children}</div>
       </div>
     </div>
   );
@@ -2618,18 +2881,212 @@ function MetricTile({
   label,
   value,
   hint,
+  className,
 }: {
   label: string;
   value: string | number;
   hint?: string;
+  className?: string;
 }) {
   return (
-    <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-      <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
+    <div
+      className={classNames(
+        "relative overflow-hidden rounded-[1.55rem] border border-border/55 bg-card/82 px-4 py-4 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.14)]",
+        className,
+      )}
+    >
+      <div className="absolute inset-x-4 top-0 h-px bg-card/60" />
+      <p className="metric-label text-[11px] uppercase tracking-[0.24em]">
         {label}
       </p>
-      <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
-      {hint ? <p className="mt-2 text-sm text-neutral-500">{hint}</p> : null}
+      <p className="metric-value mt-4 text-2xl font-semibold tracking-tight">
+        {value}
+      </p>
+      {hint ? (
+        <p className="metric-hint mt-2 text-sm leading-6">{hint}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function BrandGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M5 6.5h14" />
+      <path d="M5 12h14" />
+      <path d="M5 17.5h9" />
+      <circle cx="17.5" cy="17.5" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function SunIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.5v2.2" />
+      <path d="M12 19.3v2.2" />
+      <path d="m4.9 4.9 1.6 1.6" />
+      <path d="m17.5 17.5 1.6 1.6" />
+      <path d="M2.5 12h2.2" />
+      <path d="M19.3 12h2.2" />
+      <path d="m4.9 19.1 1.6-1.6" />
+      <path d="m17.5 6.5 1.6-1.6" />
+    </svg>
+  );
+}
+
+function MoonIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M20 14.2A7.8 7.8 0 1 1 9.8 4a6.6 6.6 0 0 0 10.2 10.2Z" />
+    </svg>
+  );
+}
+
+function ClusterStatusIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="4" y="5" width="16" height="5" rx="1.5" />
+      <rect x="4" y="14" width="16" height="5" rx="1.5" />
+      <path d="M8 7.5h.01" />
+      <path d="M8 16.5h.01" />
+      <path d="M11 7.5h5" />
+      <path d="M11 16.5h5" />
+    </svg>
+  );
+}
+
+function AccountIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M20 21a8 8 0 0 0-16 0" />
+      <circle cx="12" cy="8" r="4" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M4 7h16" />
+      <path d="M9.5 4h5" />
+      <path d="M18 7l-1 12a2 2 0 0 1-2 1H9a2 2 0 0 1-2-1L6 7" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
+  );
+}
+
+function FilterIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M4 6h16" />
+      <path d="M7 12h10" />
+      <path d="M10 18h4" />
+    </svg>
+  );
+}
+
+function IconActionButton({
+  label,
+  active = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={classNames(
+        "inline-flex h-11 w-11 items-center justify-center rounded-full border transition duration-200",
+        active
+          ? "border-accent/45 bg-accent/16 text-accent shadow-[0_12px_28px_rgb(var(--color-accent)_/_0.22)]"
+          : "border-border/50 bg-card/76 text-foreground/72 hover:bg-accent/10 hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ContextTag({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="surface-soft shrink-0 flex items-center gap-2 rounded-full px-3 py-2">
+      <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+        {label}
+      </span>
+      <span className="context-value text-sm font-medium">{value}</span>
     </div>
   );
 }
@@ -2649,7 +3106,7 @@ function ReviewItems({
     tone === "error"
       ? "border-warning/35 bg-warning/10 text-warning"
       : tone === "warning"
-        ? "border-[#ab9f9d]/55 bg-[#ab9f9d]/14 text-foreground"
+        ? "border-border/55 bg-border/14 text-foreground"
         : "border-accent/25 bg-accent/10 text-foreground";
 
   return (
@@ -2669,25 +3126,46 @@ function ScenarioTile({
   description,
   tag,
   actionLabel = "Apply to selected application",
+  compact = false,
   onApply,
 }: {
   title: string;
   description: string;
   tag: string;
   actionLabel?: string;
+  compact?: boolean;
   onApply: () => void;
 }) {
+  const compactDescription =
+    compact && description.length > 82
+      ? `${description.slice(0, 79).trimEnd()}...`
+      : description;
+
   return (
-    <div className="flex min-h-[232px] min-w-[280px] max-w-[280px] shrink-0 snap-start flex-col justify-between rounded-[1.5rem] border border-border/80 bg-card/80 p-4">
+    <div
+      className={classNames(
+        "flex shrink-0 snap-start flex-col justify-between rounded-[1.5rem] border border-border/80 bg-card/80 p-4",
+        compact
+          ? "min-h-[188px] min-w-[220px] max-w-[220px]"
+          : "min-h-[232px] min-w-[280px] max-w-[280px]",
+      )}
+    >
       <div className="flex-1">
         <p className="font-semibold">{title}</p>
         <p className="mt-2 inline-flex rounded-full border border-border/75 bg-muted/70 px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] text-neutral-500">
           {tag}
         </p>
-        <p className="mt-3 text-sm leading-6 text-neutral-500">{description}</p>
+        <p
+          className={classNames(
+            "mt-3 text-neutral-500",
+            compact ? "text-[13px] leading-5" : "text-sm leading-6",
+          )}
+        >
+          {compact ? compactDescription : description}
+        </p>
       </div>
       <Button
-        className="mt-5 self-start"
+        className={classNames("self-start", compact ? "mt-4" : "mt-5")}
         variant="secondary"
         type="button"
         onClick={onApply}
@@ -2757,7 +3235,7 @@ function ScenarioPlaybookCard({
             {commands.map((command) => (
               <pre
                 key={command}
-                className="themed-scrollbar overflow-auto rounded-[1rem] border border-border/70 bg-[#f5f1fb] px-4 py-3 font-mono text-xs leading-6 text-[#383f51]"
+                className="themed-scrollbar overflow-auto rounded-[1rem] border border-border/70 bg-card/82 px-4 py-3 font-mono text-xs leading-6 text-foreground"
               >
                 {command}
               </pre>
@@ -2812,7 +3290,6 @@ function EditorSection({
             <p className="mt-2 text-sm leading-6 text-neutral-500">{summary}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:justify-self-end">
-            <Badge>Advanced</Badge>
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/80 bg-card/80 text-lg leading-none text-foreground/70">
               {isOpen ? "−" : "+"}
             </span>
@@ -2826,11 +3303,93 @@ function EditorSection({
 
 function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
+    <div className="rounded-[1.35rem] border border-border/55 bg-card/76 px-4 py-3 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.14)]">
       <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
         {label}
       </p>
-      <p className="mt-3 text-sm font-medium text-foreground">{value}</p>
+      <p className="mt-2 text-sm font-medium leading-6 text-foreground">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function CommandBlock({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-[1.35rem] border border-border/55 bg-card/76 px-4 py-4 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.14)]">
+      <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
+        {label}
+      </p>
+      <pre className="themed-scrollbar mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-[1rem] border border-border/55 bg-background/58 px-3 py-3 font-mono text-xs leading-6 text-foreground/85">
+        {value}
+      </pre>
+      {hint ? (
+        <p className="mt-2 text-sm leading-6 text-neutral-500">{hint}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function PolicyManifestEditor({
+  value,
+  onCommit,
+}: {
+  value: JsonObject;
+  onCommit: (next: JsonObject) => void;
+}) {
+  const [draft, setDraft] = useState(prettyPrint(value));
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setDraft(prettyPrint(value));
+    setError("");
+  }, [value]);
+
+  function commitDraft() {
+    try {
+      const parsed = JSON.parse(draft) as unknown;
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+        setError("Manifest must be a JSON object.");
+        return;
+      }
+      onCommit(parsed as JsonObject);
+      setError("");
+    } catch {
+      setError("Manifest must be valid JSON before it can be saved.");
+    }
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
+          Manifest JSON
+        </p>
+        <Button variant="secondary" type="button" onClick={commitDraft}>
+          Update draft
+        </Button>
+      </div>
+      <Textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        className="min-h-[24rem] font-mono text-xs leading-6"
+      />
+      {error ? (
+        <p className="text-sm leading-6 text-warning">{error}</p>
+      ) : (
+        <p className="text-sm leading-6 text-neutral-500">
+          Edit the full manifest when you need fields beyond the guided
+          controls. This only updates the managed config draft.
+        </p>
+      )}
     </div>
   );
 }
@@ -2849,7 +3408,7 @@ function StageAction({
   return (
     <div className="group relative inline-flex">
       {children}
-      <div className="pointer-events-none absolute bottom-[calc(100%+0.45rem)] left-0 z-20 hidden w-56 rounded-[0.95rem] border border-[#ab9f9d]/40 bg-[#383f51] px-3 py-2 text-left text-xs leading-5 text-[#f6f4fb] shadow-[0_16px_40px_rgba(56,63,81,0.22)] group-hover:block">
+      <div className="pointer-events-none absolute bottom-[calc(100%+0.45rem)] left-0 z-20 hidden w-56 rounded-[0.95rem] border border-border/45 bg-foreground px-3 py-2 text-left text-xs leading-5 text-background shadow-[0_16px_40px_rgb(15_23_42_/_0.28)] group-hover:block">
         {disabledReason}
       </div>
     </div>
@@ -2871,11 +3430,37 @@ function StageNotice({
       : "border-border/80 bg-card/85 text-foreground";
 
   return (
-    <div className={`rounded-[1.25rem] border px-4 py-3 ${toneClass}`}>
+    <div
+      className={`rounded-[1.4rem] border px-4 py-3.5 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.12)] ${toneClass}`}
+    >
       <p className="text-[11px] uppercase tracking-[0.22em]">{title}</p>
       <p className="mt-2 text-sm leading-6">{body}</p>
     </div>
   );
+}
+
+function clusterStatusTone(status?: string): "neutral" | "warning" {
+  return status === "healthy" ? "neutral" : "warning";
+}
+
+function buildHealthStatusMessage(health: HealthResponse): string {
+  if (!health.worker_running) {
+    return `Backend worker is down. Queue depth ${health.queue_depth}. Restart the backend before launching runs.`;
+  }
+
+  if (health.cluster_status === "healthy") {
+    return `Cluster healthy. Queue depth ${health.queue_depth}.`;
+  }
+
+  if (health.cluster_status === "degraded") {
+    return `Cluster reachable but degraded. ${health.cluster_message}`;
+  }
+
+  if (health.cluster_status === "offline") {
+    return `Cluster offline or unreachable. ${health.cluster_message}`;
+  }
+
+  return `Cluster status not verified. ${health.cluster_message || `Queue depth ${health.queue_depth}.`}`;
 }
 
 function formatRunTimestamp(value: string | null | undefined) {
@@ -2898,7 +3483,20 @@ function formatRunTimestamp(value: string | null | undefined) {
 
 export default function App() {
   const [config, setConfig] = useState<TerraformConfig | null>(null);
-  const [activeTab, setActiveTab] = useState<AppTab>("overview");
+  const [activeTab, setActiveTab] = useState<AppTab>("deployment");
+  const [isWardsAssetsOpen, setIsWardsAssetsOpen] = useState(true);
+  const [isPoliciesAssetsOpen, setIsPoliciesAssetsOpen] = useState(true);
+  const [wardSearchQuery, setWardSearchQuery] = useState("");
+  const [policySearchQuery, setPolicySearchQuery] = useState("");
+  const [policyFilter, setPolicyFilter] = useState<PolicyFilter>("all");
+  const [isPolicyFilterMenuOpen, setIsPolicyFilterMenuOpen] = useState(false);
+  const [isPolicyTypeMenuOpen, setIsPolicyTypeMenuOpen] = useState(false);
+  const [selectedWardLibraryTab, setSelectedWardLibraryTab] = useState<
+    "templates" | "scenarios"
+  >("templates");
+  const [selectedDeploymentStage, setSelectedDeploymentStage] =
+    useState<DeploymentStage>("policies");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialThemeMode);
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
   const [runs, setRuns] = useState<TerraformRun[]>([]);
   const [selectedSubjectKey, setSelectedSubjectKey] = useState<string>("");
@@ -2907,8 +3505,14 @@ export default function App() {
   const [selectedRun, setSelectedRun] = useState<TerraformRun | null>(null);
   const [selectedRunLogs, setSelectedRunLogs] = useState<string[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown> | null>(null);
+  const [healthSnapshot, setHealthSnapshot] = useState<HealthResponse | null>(
+    null,
+  );
   const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
   const [isAppModalOpen, setIsAppModalOpen] = useState(false);
+  const [isClusterInfoOpen, setIsClusterInfoOpen] = useState(false);
+  const [selectedPolicyRef, setSelectedPolicyRef] =
+    useState<SelectedPolicyRef | null>(null);
   const [armedDestroyStage, setArmedDestroyStage] = useState<RunStage | null>(
     null,
   );
@@ -2921,15 +3525,32 @@ export default function App() {
   );
   const workspaceScrollRef = useRef<HTMLDivElement | null>(null);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
+  const policyFilterMenuRef = useRef<HTMLDivElement | null>(null);
+  const policyTypeMenuRef = useRef<HTMLDivElement | null>(null);
   const copiedLogsHintTimerRef = useRef<number | null>(null);
+  const errorToastTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    window.localStorage.setItem(themeStorageKey, themeMode);
+  }, [themeMode]);
+
   const coreConfig = config?.core ?? null;
   const platformConfig = config?.platform ?? null;
   const applicationsConfig = config?.applications ?? null;
+  const policiesConfig = config?.policies ?? null;
 
   const subjectKeys = useMemo(
     () => Object.keys(platformConfig?.analysis_subjects ?? {}),
     [platformConfig?.analysis_subjects],
   );
+  const filteredSubjectKeys = useMemo(() => {
+    const query = wardSearchQuery.trim().toLowerCase();
+    if (!query) return subjectKeys;
+    return subjectKeys.filter((subjectKey) =>
+      subjectKey.toLowerCase().includes(query),
+    );
+  }, [subjectKeys, wardSearchQuery]);
   const selectedSubject = useMemo(() => {
     if (!platformConfig || !selectedSubjectKey) return null;
     return platformConfig.analysis_subjects[selectedSubjectKey] ?? null;
@@ -2992,6 +3613,96 @@ export default function App() {
     () => primaryContainer(selectedApp),
     [selectedApp],
   );
+  const visibleKyvernoPolicies = useMemo(() => {
+    const query = policySearchQuery.trim().toLowerCase();
+    if (policyFilter === "tetragon") {
+      return [];
+    }
+
+    return (policiesConfig?.kyverno_cluster_policies ?? []).filter((policy) => {
+      if (!query) return true;
+      return policy.name.toLowerCase().includes(query);
+    });
+  }, [
+    policiesConfig?.kyverno_cluster_policies,
+    policyFilter,
+    policySearchQuery,
+  ]);
+  const visibleTetragonPolicies = useMemo(() => {
+    const query = policySearchQuery.trim().toLowerCase();
+    if (policyFilter === "kyverno") {
+      return [];
+    }
+
+    return (policiesConfig?.tetragon_tracing_policies ?? []).filter(
+      (policy) => {
+        if (!query) return true;
+        return policy.name.toLowerCase().includes(query);
+      },
+    );
+  }, [
+    policiesConfig?.tetragon_tracing_policies,
+    policyFilter,
+    policySearchQuery,
+  ]);
+  const selectedKyvernoPolicy = useMemo(
+    () =>
+      policiesConfig?.kyverno_cluster_policies.find(
+        (policy) =>
+          selectedPolicyRef?.engine === "kyverno" &&
+          policy.id === selectedPolicyRef.id,
+      ) ?? null,
+    [policiesConfig?.kyverno_cluster_policies, selectedPolicyRef],
+  );
+  const selectedTetragonPolicy = useMemo(
+    () =>
+      policiesConfig?.tetragon_tracing_policies.find(
+        (policy) =>
+          selectedPolicyRef?.engine === "tetragon" &&
+          policy.id === selectedPolicyRef.id,
+      ) ?? null,
+    [policiesConfig?.tetragon_tracing_policies, selectedPolicyRef],
+  );
+  const selectedPolicy =
+    selectedPolicyRef?.engine === "kyverno"
+      ? selectedKyvernoPolicy
+      : selectedTetragonPolicy;
+  useEffect(() => {
+    if (!policiesConfig) return;
+
+    const hasSelectedKyverno =
+      selectedPolicyRef?.engine === "kyverno" &&
+      visibleKyvernoPolicies.some(
+        (policy) => policy.id === selectedPolicyRef.id,
+      );
+    const hasSelectedTetragon =
+      selectedPolicyRef?.engine === "tetragon" &&
+      visibleTetragonPolicies.some(
+        (policy) => policy.id === selectedPolicyRef.id,
+      );
+    if (hasSelectedKyverno || hasSelectedTetragon) {
+      return;
+    }
+
+    const firstKyverno = visibleKyvernoPolicies[0];
+    if (firstKyverno) {
+      setSelectedPolicyRef({ engine: "kyverno", id: firstKyverno.id });
+      return;
+    }
+
+    const firstTetragon = visibleTetragonPolicies[0];
+    if (firstTetragon) {
+      setSelectedPolicyRef({ engine: "tetragon", id: firstTetragon.id });
+      return;
+    }
+
+    setSelectedPolicyRef(null);
+  }, [
+    policiesConfig,
+    selectedPolicyRef,
+    visibleKyvernoPolicies,
+    visibleTetragonPolicies,
+  ]);
   const selectedAppReview = useMemo(
     () => buildAppReview(selectedApp, subjectKeys),
     [selectedApp, subjectKeys],
@@ -3000,28 +3711,14 @@ export default function App() {
     const entries = Object.entries(selectedApp?.config_map?.data ?? {});
     return entries[0] ?? ["main.py", ""];
   }, [selectedApp?.config_map?.data]);
-  const latestCoreRun = useMemo(
-    () => runs.find((run) => run.stage === "core") ?? null,
-    [runs],
-  );
-  const latestPlatformRun = useMemo(
-    () => runs.find((run) => run.stage === "platform") ?? null,
-    [runs],
-  );
+  const selectedAppIngressRules = selectedApp?.network_policy?.ingress ?? [];
+  const selectedAppEgressRules = selectedApp?.network_policy?.egress ?? [];
   const latestPoliciesRun = useMemo(
     () => runs.find((run) => run.stage === "policies") ?? null,
     [runs],
   );
   const latestApplicationsRun = useMemo(
     () => runs.find((run) => run.stage === "applications") ?? null,
-    [runs],
-  );
-  const hasAppliedCoreRun = useMemo(
-    () => stageIsEffectivelyApplied(runs, "core"),
-    [runs],
-  );
-  const hasAppliedPlatformRun = useMemo(
-    () => stageIsEffectivelyApplied(runs, "platform"),
     [runs],
   );
   const hasAppliedPoliciesRun = useMemo(
@@ -3031,13 +3728,6 @@ export default function App() {
   const hasAppliedApplicationsRun = useMemo(
     () => stageIsEffectivelyApplied(runs, "applications"),
     [runs],
-  );
-  const hasAdminAccess = useMemo(
-    () =>
-      (coreConfig?.cluster_admin_principal_arns ?? []).some(
-        (arn) => arn.trim() !== "",
-      ),
-    [coreConfig?.cluster_admin_principal_arns],
   );
   const sourcePlanRun = useMemo(() => {
     if (!selectedRun?.source_run_id) return null;
@@ -3058,6 +3748,9 @@ export default function App() {
       ? "Plan behind this apply"
       : "Planned changes";
   const apiTokenValue = getApiToken();
+  const toggleThemeMode = () => {
+    setThemeMode((current) => (current === "light" ? "dark" : "light"));
+  };
   const totalAppsWithExposure = useMemo(
     () =>
       applicationsConfig?.ward_applications.filter((application) =>
@@ -3084,79 +3777,113 @@ export default function App() {
     () => groupRunLogLines(selectedRunLogs),
     [selectedRunLogs],
   );
-  const configuredAdminArnsCount = useMemo(
-    () =>
-      coreConfig?.cluster_admin_principal_arns.filter(
-        (arn) => arn.trim() !== "",
-      ).length ?? 0,
-    [coreConfig?.cluster_admin_principal_arns],
-  );
-  const adminAccessDisabledReason = !hasAdminAccess
-    ? "Add at least one IAM principal ARN in Settings -> Admin Access before running this action."
-    : undefined;
-  const platformLockedReason = !hasAppliedCoreRun
-    ? "Apply core first to unlock the platform stage."
-    : undefined;
-  const policiesLockedReason = !hasAppliedPlatformRun
-    ? "Apply platform first to unlock the policies stage."
-    : undefined;
-  const applicationsLockedReason = !hasAppliedPoliciesRun
-    ? "Apply policies first to unlock the applications stage."
-    : undefined;
-  const coreDestroyBlockedReason = hasAppliedApplicationsRun
-    ? "Destroy the applications stage first. The applications stage still owns resources that depend on core."
-    : hasAppliedPoliciesRun
-      ? "Destroy the policies stage first. The policies stage still owns resources that depend on core."
-      : hasAppliedPlatformRun
-        ? "Destroy the platform stage first. The platform stage still owns resources that depend on core."
-        : undefined;
-  const platformDestroyBlockedReason = hasAppliedApplicationsRun
-    ? "Destroy the applications stage first. The applications stage still owns resources that depend on platform."
-    : hasAppliedPoliciesRun
-      ? "Destroy the policies stage first. The policies stage still owns resources that depend on platform."
-      : undefined;
+  const configuredAdminArnsCount =
+    coreConfig?.cluster_admin_principal_arns.filter((arn) => arn.trim() !== "")
+      .length ?? 0;
   const policiesDestroyBlockedReason = hasAppliedApplicationsRun
     ? "Destroy the applications stage first. The applications stage still owns resources that depend on policies."
     : undefined;
-  const coreActionDisabledReason = adminAccessDisabledReason;
-  const coreDestroyActionDisabledReason =
-    adminAccessDisabledReason ?? coreDestroyBlockedReason;
-  const platformActionDisabledReason =
-    adminAccessDisabledReason ?? platformLockedReason;
-  const platformDestroyActionDisabledReason =
-    adminAccessDisabledReason ??
-    platformLockedReason ??
-    platformDestroyBlockedReason;
-  const policiesActionDisabledReason =
-    adminAccessDisabledReason ?? policiesLockedReason;
-  const policiesDestroyActionDisabledReason =
-    adminAccessDisabledReason ??
-    policiesLockedReason ??
-    policiesDestroyBlockedReason;
-  const applicationsActionDisabledReason =
-    adminAccessDisabledReason ?? applicationsLockedReason;
-  const platformStageLocked = !hasAppliedCoreRun;
-  const policiesStageLocked = !hasAppliedPlatformRun;
-  const applicationsStageLocked = !hasAppliedPoliciesRun;
-  const platformStageNotice = platformStageLocked
-    ? "Platform stays unavailable until core has been applied successfully. Once the cluster exists, you can plan and apply namespaces, add-ons, and control-plane services."
-    : null;
-  const policiesStageNotice = policiesStageLocked
-    ? "Policies stay unavailable until platform has been applied successfully. Apply the shared in-cluster services and CRDs first, then layer the Kyverno and Tetragon custom resources on top."
-    : null;
-  const applicationsStageNotice = applicationsStageLocked
-    ? "Applications stay unavailable until policies have been applied successfully. Apply the shared in-cluster services and policy layer first, then deploy workloads."
-    : null;
-  const coreDestroyNotice = hasAppliedApplicationsRun
-    ? "Destroy order is applications, then policies, then platform, then core. Applications is still applied right now, so core destroy remains locked."
-    : hasAppliedPoliciesRun
-      ? "Destroy order is policies, then platform, then core. Policies is still applied right now, so core destroy remains locked."
-      : hasAppliedPlatformRun
-        ? "Destroy order is platform, then core. Platform is still applied right now, so core destroy remains locked."
-        : null;
-  const hubblePortForwardCommand =
-    "kubectl -n kube-system port-forward svc/hubble-ui 12000:80";
-  const hubbleLocalUrl = "http://127.0.0.1:12000";
+  const stageAvailability = {
+    policies: true,
+    applications: true,
+    observability:
+      Boolean(healthSnapshot?.worker_running) &&
+      (healthSnapshot?.cluster_status === "healthy" ||
+        healthSnapshot?.cluster_status === "degraded"),
+  } as const;
+  const workerUnavailableReason =
+    healthSnapshot?.worker_running === false
+      ? "Backend worker is down. Start the runner before queuing plans or applies."
+      : undefined;
+  const policiesActionDisabledReason = workerUnavailableReason;
+  const policiesDestroyActionDisabledReason = policiesDestroyBlockedReason;
+  const applicationsActionDisabledReason = workerUnavailableReason;
+  const applicationsStageLocked = false;
+  const sharedInfrastructureNotice =
+    "Core and platform are managed outside this control plane. Use the infrastructure pipeline to apply shared AWS and cluster changes before you work on policies or applications here.";
+  const deploymentStageDetail = useMemo(() => {
+    if (selectedDeploymentStage === "observability") {
+      const clusterStatus = healthSnapshot?.cluster_status ?? "unknown";
+      return {
+        stage: "observability" as const,
+        title: "Observability",
+        description:
+          clusterStatus === "healthy" || clusterStatus === "degraded"
+            ? "Entry points for the shared observability tooling exposed from the current cluster."
+            : "Observability access depends on the backend worker being online and the shared platform being available.",
+        badge: clusterStatus,
+        metrics: [],
+      };
+    }
+
+    if (selectedDeploymentStage === "applications") {
+      return {
+        stage: "applications" as const,
+        title: "Applications",
+        description:
+          "Workload deployments, Services, exposure rules, and application-specific network policies for the live lab.",
+        badge: latestApplicationsRun ? latestApplicationsRun.status : "idle",
+        metrics: [
+          {
+            label: "Apps",
+            value: applicationsConfig?.ward_applications.length ?? 0,
+          },
+          { label: "Services", value: totalAppsWithService },
+          { label: "Exposure", value: totalAppsWithExposure },
+        ],
+      };
+    }
+
+    return {
+      stage: "policies" as const,
+      title: "Policies",
+      description:
+        "Kyverno and Tetragon custom resources layered onto the shared platform after the infrastructure pipeline has finished.",
+      badge: latestPoliciesRun ? latestPoliciesRun.status : "idle",
+      metrics: [
+        { label: "Wards", value: subjectKeys.length },
+        {
+          label: "Cluster Policies",
+          value: policiesConfig?.kyverno_cluster_policies.length ?? 0,
+        },
+        {
+          label: "Tracing Policies",
+          value: policiesConfig?.tetragon_tracing_policies.length ?? 0,
+        },
+      ],
+    };
+  }, [
+    applicationsConfig?.ward_applications.length,
+    healthSnapshot?.cluster_status,
+    latestApplicationsRun,
+    latestPoliciesRun,
+    policiesConfig?.kyverno_cluster_policies.length,
+    policiesConfig?.tetragon_tracing_policies.length,
+    selectedDeploymentStage,
+    subjectKeys.length,
+    totalAppsWithExposure,
+    totalAppsWithService,
+  ]);
+
+  useEffect(() => {
+    if (stageAvailability[selectedDeploymentStage]) {
+      return;
+    }
+
+    if (stageAvailability.policies) {
+      setSelectedDeploymentStage("policies");
+      return;
+    }
+
+    if (stageAvailability.applications) {
+      setSelectedDeploymentStage("applications");
+    }
+  }, [
+    selectedDeploymentStage,
+    stageAvailability.applications,
+    stageAvailability.observability,
+    stageAvailability.policies,
+  ]);
 
   useEffect(() => {
     selectedRunStatusRef.current = selectedRun?.status;
@@ -3189,7 +3916,53 @@ export default function App() {
   }, [armedDestroyStage]);
 
   useEffect(() => {
+    if (!isPolicyFilterMenuOpen && !isPolicyTypeMenuOpen) return;
+
+    function handleDocumentClick(event: MouseEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (
+        policyFilterMenuRef.current?.contains(target) ||
+        policyTypeMenuRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setIsPolicyFilterMenuOpen(false);
+      setIsPolicyTypeMenuOpen(false);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      setIsPolicyFilterMenuOpen(false);
+      setIsPolicyTypeMenuOpen(false);
+    }
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isPolicyFilterMenuOpen, isPolicyTypeMenuOpen]);
+
+  useEffect(() => {
     void loadInitial();
+
+    const intervalId = window.setInterval(() => {
+      void refreshHealth();
+    }, 30000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
@@ -3197,8 +3970,29 @@ export default function App() {
       if (copiedLogsHintTimerRef.current !== null) {
         window.clearTimeout(copiedLogsHintTimerRef.current);
       }
+      if (errorToastTimerRef.current !== null) {
+        window.clearTimeout(errorToastTimerRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (!errorMessage) {
+      if (errorToastTimerRef.current !== null) {
+        window.clearTimeout(errorToastTimerRef.current);
+        errorToastTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (errorToastTimerRef.current !== null) {
+      window.clearTimeout(errorToastTimerRef.current);
+    }
+    errorToastTimerRef.current = window.setTimeout(() => {
+      setErrorMessage("");
+      errorToastTimerRef.current = null;
+    }, 2000);
+  }, [errorMessage]);
 
   useEffect(() => {
     if (!selectedRunId) return;
@@ -3357,6 +4151,7 @@ export default function App() {
       const normalizedConfig = normalizeTerraformConfig(loadedConfig);
       setConfig(normalizedConfig);
       setRuns(sortRuns(runResponse.items));
+      setHealthSnapshot(health);
       const firstSubjectKey =
         Object.keys(normalizedConfig.platform.analysis_subjects)[0] ?? "";
       const firstAppIndex =
@@ -3365,11 +4160,7 @@ export default function App() {
         );
       setSelectedSubjectKey(firstSubjectKey);
       setSelectedAppIndex(firstAppIndex >= 0 ? firstAppIndex : 0);
-      setStatusMessage(
-        health.worker_running
-          ? `Ready. Queue depth ${health.queue_depth}.`
-          : `Backend worker is down. Queue depth ${health.queue_depth}. Restart the backend before launching runs.`,
-      );
+      setStatusMessage(buildHealthStatusMessage(health));
 
       if (runResponse.items[0]) {
         setSelectedRunId(runResponse.items[0].id);
@@ -3382,8 +4173,14 @@ export default function App() {
     }
   }
 
-  function openLocalHubbleUi() {
-    window.open(hubbleLocalUrl, "_blank", "noopener,noreferrer");
+  async function refreshHealth() {
+    try {
+      const health = await api.getHealth();
+      setHealthSnapshot(health);
+      setStatusMessage(buildHealthStatusMessage(health));
+    } catch {
+      // Keep the last known health snapshot when refresh fails.
+    }
   }
 
   async function refreshOutputs() {
@@ -3553,6 +4350,39 @@ export default function App() {
     setSelectedAppIndex(0);
   }
 
+  function removeSubject(subjectKey: string) {
+    if (!config || subjectKeys.length <= 1) return;
+    updateConfig((current) => {
+      const next = structuredClone(current);
+      delete next.platform.analysis_subjects[subjectKey];
+      next.applications.ward_applications =
+        next.applications.ward_applications.filter(
+          (application) => application.namespace !== subjectKey,
+        );
+      if (next.applications.ward_applications.length === 0) {
+        const fallbackNamespace =
+          Object.keys(next.platform.analysis_subjects)[0] ??
+          "ward-template-app";
+        const fallbackApp = makeInternalPythonApiApp(fallbackNamespace);
+        fallbackApp.name = kubeSafeName(
+          uniqueName(
+            fallbackApp.name,
+            next.applications.ward_applications.map(
+              (application) => application.name,
+            ),
+          ),
+        );
+        next.applications.ward_applications.push(fallbackApp);
+      }
+      return next;
+    });
+    if (selectedSubjectKey === subjectKey) {
+      const remainingKeys = subjectKeys.filter((key) => key !== subjectKey);
+      setSelectedSubjectKey(remainingKeys[0] ?? "");
+      setSelectedAppIndex(0);
+    }
+  }
+
   function selectSubject(subjectKey: string) {
     setSelectedSubjectKey(subjectKey);
     const firstAppIndex =
@@ -3588,6 +4418,11 @@ export default function App() {
       },
     }));
     setSelectedAppIndex(config.applications.ward_applications.length);
+  }
+
+  function addCustomAppFromBuilder() {
+    addApp();
+    setIsAppModalOpen(true);
   }
 
   function addAppTemplate(templateId: AppTemplateId) {
@@ -3693,43 +4528,147 @@ export default function App() {
     setSelectedAppIndex((currentIndex) => Math.max(0, currentIndex - 1));
   }
 
-  function addClusterAdminArn() {
+  function updateSelectedKyvernoPolicy(
+    mutator: (
+      current: KyvernoClusterPolicyConfig,
+    ) => KyvernoClusterPolicyConfig,
+  ) {
+    if (!selectedKyvernoPolicy) return;
     updateConfig((current) => ({
       ...current,
-      core: {
-        ...current.core,
-        cluster_admin_principal_arns: [
-          ...current.core.cluster_admin_principal_arns,
-          "",
+      policies: {
+        ...current.policies,
+        kyverno_cluster_policies: current.policies.kyverno_cluster_policies.map(
+          (policy) =>
+            policy.id === selectedKyvernoPolicy.id ? mutator(policy) : policy,
+        ),
+      },
+    }));
+  }
+
+  function updateSelectedTetragonPolicy(
+    mutator: (
+      current: TetragonTracingPolicyConfig,
+    ) => TetragonTracingPolicyConfig,
+  ) {
+    if (!selectedTetragonPolicy) return;
+    updateConfig((current) => ({
+      ...current,
+      policies: {
+        ...current.policies,
+        tetragon_tracing_policies:
+          current.policies.tetragon_tracing_policies.map((policy) =>
+            policy.id === selectedTetragonPolicy.id ? mutator(policy) : policy,
+          ),
+      },
+    }));
+  }
+
+  function addKyvernoPolicy(
+    template: "require-label" | "latest-tag" | "custom",
+  ) {
+    if (!config) return;
+    const nextPolicy =
+      template === "require-label"
+        ? makeRequireWardSubjectPolicy()
+        : template === "latest-tag"
+          ? makeDisallowLatestTagPolicy()
+          : makeCustomKyvernoPolicy();
+    nextPolicy.id = uniqueName(
+      nextPolicy.id,
+      config.policies.kyverno_cluster_policies.map((policy) => policy.id),
+    );
+    nextPolicy.manifest = {
+      ...nextPolicy.manifest,
+      metadata: {
+        ...(nextPolicy.manifest.metadata as JsonObject | undefined),
+        name:
+          typeof nextPolicy.manifest.metadata === "object" &&
+          nextPolicy.manifest.metadata &&
+          !Array.isArray(nextPolicy.manifest.metadata) &&
+          typeof nextPolicy.manifest.metadata.name === "string" &&
+          nextPolicy.manifest.metadata.name.trim() !== ""
+            ? nextPolicy.manifest.metadata.name
+            : nextPolicy.id,
+      },
+    };
+    updateConfig((current) => ({
+      ...current,
+      policies: {
+        ...current.policies,
+        kyverno_cluster_policies: [
+          ...current.policies.kyverno_cluster_policies,
+          nextPolicy,
         ],
       },
     }));
+    setSelectedPolicyRef({ engine: "kyverno", id: nextPolicy.id });
   }
 
-  function updateClusterAdminArn(index: number, value: string) {
+  function addTetragonPolicy(template: "suspicious-exec" | "custom") {
+    if (!config) return;
+    const nextPolicy =
+      template === "suspicious-exec"
+        ? makeSuspiciousExecTracingPolicy()
+        : makeCustomTetragonPolicy();
+    nextPolicy.id = uniqueName(
+      nextPolicy.id,
+      config.policies.tetragon_tracing_policies.map((policy) => policy.id),
+    );
+    nextPolicy.manifest = {
+      ...nextPolicy.manifest,
+      metadata: {
+        ...(nextPolicy.manifest.metadata as JsonObject | undefined),
+        name:
+          typeof nextPolicy.manifest.metadata === "object" &&
+          nextPolicy.manifest.metadata &&
+          !Array.isArray(nextPolicy.manifest.metadata) &&
+          typeof nextPolicy.manifest.metadata.name === "string" &&
+          nextPolicy.manifest.metadata.name.trim() !== ""
+            ? nextPolicy.manifest.metadata.name
+            : nextPolicy.id,
+      },
+    };
     updateConfig((current) => ({
       ...current,
-      core: {
-        ...current.core,
-        cluster_admin_principal_arns:
-          current.core.cluster_admin_principal_arns.map((item, itemIndex) =>
-            itemIndex === index ? value : item,
-          ),
+      policies: {
+        ...current.policies,
+        tetragon_tracing_policies: [
+          ...current.policies.tetragon_tracing_policies,
+          nextPolicy,
+        ],
       },
     }));
+    setSelectedPolicyRef({ engine: "tetragon", id: nextPolicy.id });
   }
 
-  function removeClusterAdminArn(index: number) {
+  function removeSelectedPolicy(target = selectedPolicyRef) {
+    if (!config || !target) return;
     updateConfig((current) => ({
       ...current,
-      core: {
-        ...current.core,
-        cluster_admin_principal_arns:
-          current.core.cluster_admin_principal_arns.filter(
-            (_, itemIndex) => itemIndex !== index,
-          ),
+      policies: {
+        ...current.policies,
+        kyverno_cluster_policies:
+          target.engine === "kyverno"
+            ? current.policies.kyverno_cluster_policies.filter(
+                (policy) => policy.id !== target.id,
+              )
+            : current.policies.kyverno_cluster_policies,
+        tetragon_tracing_policies:
+          target.engine === "tetragon"
+            ? current.policies.tetragon_tracing_policies.filter(
+                (policy) => policy.id !== target.id,
+              )
+            : current.policies.tetragon_tracing_policies,
       },
     }));
+    if (
+      selectedPolicyRef &&
+      selectedPolicyRef.engine === target.engine &&
+      selectedPolicyRef.id === target.id
+    ) {
+      setSelectedPolicyRef(null);
+    }
   }
 
   async function saveManagedConfig() {
@@ -3751,6 +4690,24 @@ export default function App() {
               ],
             ),
           ),
+        },
+        policies: {
+          kyverno_cluster_policies:
+            config.policies.kyverno_cluster_policies.map((policy) => ({
+              ...policy,
+              id: policy.id.trim() || "kyverno-policy",
+              name: policy.name.trim() || policy.id.trim() || "Kyverno policy",
+              description: policy.description?.trim() || "",
+            })),
+          tetragon_tracing_policies:
+            config.policies.tetragon_tracing_policies.map((policy) => ({
+              ...policy,
+              id: policy.id.trim() || "tetragon-policy",
+              name: policy.name.trim() || policy.id.trim() || "Tetragon policy",
+              description: policy.description?.trim() || "",
+              scope: policy.scope ?? "all-wards",
+              namespace: policy.namespace?.trim() || "",
+            })),
         },
         applications: {
           ...config.applications,
@@ -3961,9 +4918,6 @@ export default function App() {
       setStatusMessage(`${stageLabel(stage)} destroy queued.`);
       setErrorMessage("");
       setArmedDestroyStage(null);
-      if (stage === "core") {
-        setOutputs(null);
-      }
     } catch (error) {
       setStatusMessage(`${stageLabel(stage)} destroy was not queued.`);
       setErrorMessage((error as Error).message);
@@ -3995,13 +4949,19 @@ export default function App() {
   }
 
   async function copySelectedRunLogs() {
-    if (selectedRunLogs.length === 0) {
-      setErrorMessage("No logs available to copy.");
+    const copyPayload =
+      selectedRunLogs.length > 0
+        ? selectedRunLogs.join("\n")
+        : selectedRun?.error
+          ? formatRunErrorText(selectedRun.error)
+          : "";
+    if (!copyPayload.trim()) {
+      setErrorMessage("No logs or error details are available to copy.");
       return;
     }
 
     try {
-      await navigator.clipboard.writeText(selectedRunLogs.join("\n"));
+      await navigator.clipboard.writeText(copyPayload);
       setErrorMessage("");
       setShowCopiedLogsHint(true);
       if (copiedLogsHintTimerRef.current !== null) {
@@ -4046,36 +5006,2051 @@ export default function App() {
     );
   }
 
-  const tabs: Array<{ id: AppTab; label: string }> = [
-    { id: "overview", label: "Overview" },
+  const tabs: Array<{ id: Exclude<AppTab, "accounts">; label: string }> = [
+    { id: "deployment", label: "Stages" },
     { id: "assets", label: "Assets" },
     { id: "activity", label: "Activity" },
-    { id: "settings", label: "Settings" },
   ];
 
   return (
     <div className="app-shell">
       <div className="mx-auto max-w-[1560px] space-y-6">
-        <Card className="overflow-hidden">
-          <CardContent className="space-y-6 px-6 py-6">
-            <div className="flex flex-col gap-6 2xl:flex-row 2xl:items-start 2xl:justify-between">
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
-                    Cluster Flow
-                  </p>
-                  <h2 className="text-3xl font-semibold tracking-tight">
-                    Keep the important context visible while you work.
-                  </h2>
-                </div>
-                <p className="max-w-3xl text-sm leading-7 text-neutral-400">
-                  Shape workloads, stage Terraform safely, and hand off to
-                  native observability tools without losing the current cluster
-                  context.
-                </p>
-              </div>
+        {errorMessage ? (
+          <div className="pointer-events-none fixed left-1/2 top-5 z-50 w-full max-w-xl -translate-x-1/2 px-4">
+            <div className="rounded-[1.4rem] border border-warning/30 bg-warning/92 px-4 py-3 text-sm text-accentForeground shadow-[0_18px_48px_rgb(0_0_0_/_0.24)] backdrop-blur">
+              {errorMessage}
+            </div>
+          </div>
+        ) : null}
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="navbar-shell sticky top-0 z-20 px-2 py-3">
+          <div className="mx-auto max-w-[1560px]">
+            <div className="px-2 py-1 sm:px-4">
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
+                    <div className="brand-block flex items-center gap-4 rounded-[1.7rem] px-4 py-3">
+                      <button
+                        type="button"
+                        aria-label="Open cluster status"
+                        title="Open cluster status"
+                        onClick={() => setIsClusterInfoOpen(true)}
+                        className={classNames(
+                          "inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#191308] shadow-[0_14px_36px_rgb(0_0_0_/_0.18)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_rgb(0_0_0_/_0.22)]",
+                          isClusterInfoOpen ? "ring-2 ring-white/35" : "",
+                        )}
+                      >
+                        <BrandGlyph className="h-5 w-5" />
+                      </button>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold tracking-tight text-white">
+                          Isolens
+                        </p>
+                        <p className="mt-1 text-[11px] uppercase tracking-[0.26em] text-white/60">
+                          Cluster Control Plane
+                        </p>
+                      </div>
+                    </div>
+
+                    <nav className="surface-strong themed-scrollbar flex items-center gap-1 overflow-x-auto rounded-full p-1.5">
+                      {tabs.map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setActiveTab(tab.id)}
+                          className={classNames(
+                            "shrink-0 rounded-full px-4 py-2.5 text-sm font-medium transition duration-200",
+                            activeTab === tab.id
+                              ? "bg-accent text-accentForeground shadow-[0_14px_32px_rgb(var(--color-accent)_/_0.28)]"
+                              : "text-foreground/70 hover:bg-card hover:text-foreground",
+                          )}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </nav>
+                  </div>
+
+                  <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+                    <IconActionButton
+                      label="Open account"
+                      active={activeTab === "accounts"}
+                      onClick={() => setActiveTab("accounts")}
+                    >
+                      <AccountIcon className="h-5 w-5" />
+                    </IconActionButton>
+                    <IconActionButton
+                      label={
+                        themeMode === "light"
+                          ? "Enable dark mode"
+                          : "Enable light mode"
+                      }
+                      onClick={toggleThemeMode}
+                    >
+                      {themeMode === "light" ? (
+                        <MoonIcon className="h-5 w-5" />
+                      ) : (
+                        <SunIcon className="h-5 w-5" />
+                      )}
+                    </IconActionButton>
+                    <Button
+                      className="col-span-1"
+                      variant="secondary"
+                      onClick={() => void saveManagedConfig()}
+                      disabled={isBusy}
+                    >
+                      Save config
+                    </Button>
+                    <Button
+                      className="col-span-1"
+                      variant="ghost"
+                      onClick={() => void resetConfig()}
+                      disabled={isBusy}
+                    >
+                      Reset config
+                    </Button>
+                    <Button
+                      className="col-span-2 sm:col-span-1"
+                      variant="danger"
+                      onClick={() => void cancelSelectedRun()}
+                      disabled={
+                        isBusy ||
+                        !selectedRun ||
+                        [
+                          "running",
+                          "applying",
+                          "destroying",
+                          "queued",
+                          "canceling",
+                        ].includes(selectedRun.status) === false
+                      }
+                    >
+                      Cancel run
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="themed-scrollbar flex gap-2 overflow-x-auto pb-1">
+                  <ContextTag
+                    label="Ward"
+                    value={selectedSubjectKey || "No ward selected"}
+                  />
+                  <ContextTag
+                    label="Application"
+                    value={selectedApp?.name ?? "No application"}
+                  />
+                  <ContextTag
+                    label="Ingress"
+                    value={
+                      selectedApp
+                        ? appInternetIngressEnabled(selectedApp)
+                          ? "Internet"
+                          : "Internal"
+                        : "Unset"
+                    }
+                  />
+                  <ContextTag
+                    label="Egress"
+                    value={
+                      selectedApp
+                        ? appInternetEgressEnabled(selectedApp)
+                          ? "Open"
+                          : "Restricted"
+                        : "Unset"
+                    }
+                  />
+                  <ContextTag
+                    label="Run"
+                    value={
+                      selectedRun
+                        ? `${stageLabel(selectedRun.stage)} ${selectedRun.status}`
+                        : "No active run"
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mx-auto max-w-[1560px] px-3 pb-8 pt-4 sm:px-4 sm:pb-10 sm:pt-6 md:px-6">
+          <div ref={workspaceScrollRef} className="grid gap-6">
+            {activeTab === "deployment" ? (
+              <>
+                <div className="grid gap-6">
+                  <Card className="overflow-visible">
+                    <CardHeader>
+                      <CardTitle>Stages</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid gap-4">
+                      <div className="surface-soft rounded-[1.8rem] p-4 sm:p-5">
+                        <div className="grid gap-4 xl:grid-cols-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!stageAvailability.policies) return;
+                              setSelectedDeploymentStage("policies");
+                            }}
+                            disabled={!stageAvailability.policies}
+                            aria-disabled={!stageAvailability.policies}
+                            className={classNames(
+                              "rounded-[1.4rem] border px-4 py-4 text-left transition duration-200",
+                              !stageAvailability.policies
+                                ? "cursor-not-allowed border-border/35 bg-card/45 text-foreground/35 opacity-55"
+                                : "",
+                              selectedDeploymentStage === "policies"
+                                ? "border-accent/35 bg-accent/10 shadow-[0_10px_24px_rgb(var(--color-accent)_/_0.12)]"
+                                : "border-border/50 bg-card hover:border-accent/22 hover:bg-background",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-semibold">Policies</p>
+                                <p className="mt-1 text-sm text-neutral-500">
+                                  Shared policy and tracing layer
+                                </p>
+                              </div>
+                              <Badge>
+                                {stageAvailability.policies
+                                  ? (latestPoliciesRun?.status ?? "idle")
+                                  : "unavailable"}
+                              </Badge>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!stageAvailability.applications) return;
+                              setSelectedDeploymentStage("applications");
+                            }}
+                            disabled={!stageAvailability.applications}
+                            aria-disabled={!stageAvailability.applications}
+                            className={classNames(
+                              "rounded-[1.4rem] border px-4 py-4 text-left transition duration-200",
+                              !stageAvailability.applications
+                                ? "cursor-not-allowed border-border/35 bg-card/45 text-foreground/35 opacity-55"
+                                : "",
+                              selectedDeploymentStage === "applications"
+                                ? "border-accent/35 bg-accent/10 shadow-[0_10px_24px_rgb(var(--color-accent)_/_0.12)]"
+                                : "border-border/50 bg-card hover:border-accent/22 hover:bg-background",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-semibold">Applications</p>
+                                <p className="mt-1 text-sm text-neutral-500">
+                                  Workloads and exposure layer
+                                </p>
+                              </div>
+                              <Badge>
+                                {stageAvailability.applications
+                                  ? (latestApplicationsRun?.status ?? "idle")
+                                  : "unavailable"}
+                              </Badge>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!stageAvailability.observability) return;
+                              setSelectedDeploymentStage("observability");
+                            }}
+                            disabled={!stageAvailability.observability}
+                            aria-disabled={!stageAvailability.observability}
+                            className={classNames(
+                              "rounded-[1.4rem] border px-4 py-4 text-left transition duration-200",
+                              !stageAvailability.observability
+                                ? "cursor-not-allowed border-border/35 bg-card/45 text-foreground/35 opacity-55"
+                                : "",
+                              selectedDeploymentStage === "observability"
+                                ? "border-accent/35 bg-accent/10 shadow-[0_10px_24px_rgb(var(--color-accent)_/_0.12)]"
+                                : "border-border/50 bg-card hover:border-accent/22 hover:bg-background",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-semibold">Observability</p>
+                                <p className="mt-1 text-sm text-neutral-500">
+                                  Hubble, Tetragon, and local access commands
+                                </p>
+                              </div>
+                              <Badge>
+                                {stageAvailability.observability
+                                  ? "available"
+                                  : "unavailable"}
+                              </Badge>
+                            </div>
+                          </button>
+                        </div>
+
+                        <div className="surface-strong mt-5 rounded-[1.8rem] p-5 sm:p-6">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <h3 className="section-highlight text-2xl font-semibold tracking-tight">
+                                {deploymentStageDetail.title}
+                              </h3>
+                              <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
+                                {deploymentStageDetail.description}
+                              </p>
+                            </div>
+                            <div className="shrink-0 self-start">
+                              <Badge>{deploymentStageDetail.badge}</Badge>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid gap-3 md:grid-cols-3">
+                            {deploymentStageDetail.metrics.map((metric) => (
+                              <MetricTile
+                                key={metric.label}
+                                label={metric.label}
+                                value={metric.value}
+                              />
+                            ))}
+                          </div>
+
+                          <div className="mt-5 flex flex-wrap gap-2">
+                            {selectedDeploymentStage === "observability" ? (
+                              healthSnapshot?.cluster_status === "healthy" ||
+                              healthSnapshot?.cluster_status === "degraded" ? (
+                                <div className="grid w-full gap-4 xl:grid-cols-2">
+                                  <CommandBlock
+                                    label="Hubble UI Port-Forward"
+                                    value="kubectl -n kube-system port-forward svc/hubble-ui 12000:80"
+                                    hint="Run this locally, then open the URL in your browser."
+                                  />
+                                  <CommandBlock
+                                    label="Hubble UI URL"
+                                    value="http://127.0.0.1:12000"
+                                    hint="Use this after the port-forward is active."
+                                  />
+                                  <CommandBlock
+                                    label="Tetragon Event Stream"
+                                    value="kubectl -n kube-system logs -l app.kubernetes.io/name=tetragon -c export-stdout --since=5m -f"
+                                    hint="Streams recent Tetragon events directly from the cluster."
+                                  />
+                                  <CommandBlock
+                                    label="Hubble Flow Check"
+                                    value="kubectl -n kube-system exec ds/cilium -- hubble observe --last 20"
+                                    hint="Quick flow sample from the Cilium agent side."
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-full">
+                                  <StageNotice
+                                    title="Observability unavailable"
+                                    body={
+                                      healthSnapshot?.cluster_message ||
+                                      "The backend worker is not available yet, so observability commands stay hidden until the shared platform is ready."
+                                    }
+                                    tone={clusterStatusTone(
+                                      healthSnapshot?.cluster_status,
+                                    )}
+                                  />
+                                </div>
+                              )
+                            ) : selectedDeploymentStage === "policies" ? (
+                              <>
+                                <StageAction
+                                  disabledReason={policiesActionDisabledReason}
+                                >
+                                  <Button
+                                    onClick={() => void startPlan("policies")}
+                                    disabled={isBusy}
+                                  >
+                                    Plan policies
+                                  </Button>
+                                </StageAction>
+                                <StageAction
+                                  disabledReason={policiesActionDisabledReason}
+                                >
+                                  <Button
+                                    variant="secondary"
+                                    onClick={() => void startApply("policies")}
+                                    disabled={
+                                      isBusy ||
+                                      !canQueueApplyFromPlan("policies")
+                                    }
+                                  >
+                                    Apply policies
+                                  </Button>
+                                </StageAction>
+                                <div data-destroy-arm>
+                                  <StageAction
+                                    disabledReason={
+                                      policiesDestroyActionDisabledReason
+                                    }
+                                  >
+                                    <Button
+                                      variant={
+                                        armedDestroyStage === "policies"
+                                          ? "danger"
+                                          : "ghost"
+                                      }
+                                      className={
+                                        armedDestroyStage === "policies"
+                                          ? "border-warning/70 bg-warning text-accentForeground hover:bg-warning/90"
+                                          : ""
+                                      }
+                                      onClick={() =>
+                                        void startDestroy("policies")
+                                      }
+                                      disabled={
+                                        isBusy || hasAppliedApplicationsRun
+                                      }
+                                    >
+                                      Destroy policies
+                                    </Button>
+                                  </StageAction>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  onClick={() => void unlockState("policies")}
+                                  disabled={isBusy}
+                                >
+                                  Unlock state
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <StageAction
+                                  disabledReason={
+                                    applicationsActionDisabledReason
+                                  }
+                                >
+                                  <Button
+                                    onClick={() =>
+                                      void startPlan("applications")
+                                    }
+                                    disabled={isBusy}
+                                  >
+                                    Plan applications
+                                  </Button>
+                                </StageAction>
+                                <StageAction
+                                  disabledReason={
+                                    applicationsActionDisabledReason
+                                  }
+                                >
+                                  <Button
+                                    variant="secondary"
+                                    onClick={() =>
+                                      void startApply("applications")
+                                    }
+                                    disabled={
+                                      isBusy ||
+                                      !canQueueApplyFromPlan("applications")
+                                    }
+                                  >
+                                    Apply applications
+                                  </Button>
+                                </StageAction>
+                                <div data-destroy-arm>
+                                  <StageAction
+                                    disabledReason={
+                                      applicationsActionDisabledReason
+                                    }
+                                  >
+                                    <Button
+                                      variant={
+                                        armedDestroyStage === "applications"
+                                          ? "danger"
+                                          : "ghost"
+                                      }
+                                      className={
+                                        armedDestroyStage === "applications"
+                                          ? "border-warning/70 bg-warning text-accentForeground hover:bg-warning/90"
+                                          : ""
+                                      }
+                                      onClick={() =>
+                                        void startDestroy("applications")
+                                      }
+                                      disabled={isBusy}
+                                    >
+                                      Destroy applications
+                                    </Button>
+                                  </StageAction>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  onClick={() =>
+                                    void unlockState("applications")
+                                  }
+                                  disabled={isBusy || applicationsStageLocked}
+                                >
+                                  Unlock state
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </>
+            ) : null}
+
+            {activeTab === "assets" ? (
+              <div className="grid gap-6">
+                <Card className="overflow-hidden">
+                  <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <CardTitle>Wards</CardTitle>
+                      <p className="mt-2 text-sm leading-6 text-neutral-500">
+                        Browse wards on the left, then inspect resources,
+                        applications, templates, and scenarios on the right.
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      aria-label={
+                        isWardsAssetsOpen ? "Collapse wards" : "Expand wards"
+                      }
+                      title={
+                        isWardsAssetsOpen ? "Collapse wards" : "Expand wards"
+                      }
+                      className="h-10 w-10 rounded-full px-0 text-lg"
+                      onClick={() =>
+                        setIsWardsAssetsOpen((current) => !current)
+                      }
+                    >
+                      {isWardsAssetsOpen ? "−" : "+"}
+                    </Button>
+                  </CardHeader>
+                  {isWardsAssetsOpen ? (
+                    <CardContent className="grid gap-6">
+                      <div className="grid gap-6 2xl:grid-cols-[400px_minmax(0,1fr)] 2xl:items-stretch">
+                        <Card className="overflow-hidden">
+                          <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4">
+                            <CardTitle>Ward List</CardTitle>
+                            <div className="flex flex-wrap gap-2">
+                              <Input
+                                className="min-w-0 flex-1"
+                                value={wardSearchQuery}
+                                onChange={(event) =>
+                                  setWardSearchQuery(event.target.value)
+                                }
+                                placeholder="Search wards"
+                              />
+                              <Button variant="secondary" onClick={addSubject}>
+                                Add ward
+                              </Button>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="grid gap-4">
+                            <div className="themed-scrollbar h-[13.5rem] space-y-2.5 overflow-y-auto pr-1">
+                              {filteredSubjectKeys.length === 0 ? (
+                                <p className="text-sm text-neutral-500">
+                                  No wards match this search.
+                                </p>
+                              ) : null}
+                              {filteredSubjectKeys.map((subjectKey) => (
+                                <div
+                                  key={subjectKey}
+                                  className={classNames(
+                                    "group rounded-[1.35rem] border px-3.5 py-3.5 transition",
+                                    subjectKey === selectedSubjectKey
+                                      ? "border-accent/70 bg-accent/10"
+                                      : "border-border/80 bg-card/72 hover:bg-muted/70",
+                                  )}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <button
+                                      className="min-w-0 flex-1 text-left"
+                                      onClick={() => selectSubject(subjectKey)}
+                                    >
+                                      <p className="truncate font-medium">
+                                        {subjectKey}
+                                      </p>
+                                      <p className="mt-2 text-xs uppercase tracking-[0.2em] text-neutral-500">
+                                        {config.platform.analysis_subjects[
+                                          subjectKey
+                                        ]?.tier ?? "ward"}
+                                      </p>
+                                    </button>
+                                    <div className="flex shrink-0 items-center gap-2">
+                                      <Badge>
+                                        {
+                                          config.applications.ward_applications.filter(
+                                            (application) =>
+                                              application.namespace ===
+                                              subjectKey,
+                                          ).length
+                                        }
+                                      </Badge>
+                                      <div className="flex items-center gap-1.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                                        <Button
+                                          variant="ghost"
+                                          className="px-2 py-1 text-xs"
+                                          onClick={() => {
+                                            selectSubject(subjectKey);
+                                            setIsSubjectModalOpen(true);
+                                          }}
+                                        >
+                                          Edit
+                                        </Button>
+                                        <button
+                                          type="button"
+                                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-warning/35 bg-card/90 text-warning transition hover:bg-warning/10 disabled:cursor-not-allowed disabled:opacity-45"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            removeSubject(subjectKey);
+                                          }}
+                                          aria-label={`Delete ${subjectKey}`}
+                                          title={`Delete ${subjectKey}`}
+                                          disabled={subjectKeys.length <= 1}
+                                        >
+                                          <TrashIcon className="h-4 w-4" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+
+                        <Card className="min-w-0 overflow-hidden">
+                          <CardHeader className="border-b border-border/80 px-5 py-4">
+                            <CardTitle>Used Resources</CardTitle>
+                          </CardHeader>
+                          <CardContent className="grid gap-4">
+                            <div className="flex flex-wrap gap-2">
+                              <Badge>{selectedSubject?.tier ?? "ward"}</Badge>
+                              <Badge>
+                                {
+                                  Object.keys(selectedSubject?.labels ?? {})
+                                    .length
+                                }{" "}
+                                labels
+                              </Badge>
+                              <Badge>
+                                {appsForSelectedSubject.length} apps
+                              </Badge>
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                              <MetricTile
+                                label="Pods quota"
+                                value={
+                                  selectedSubject?.resource_quota?.pods ?? "-"
+                                }
+                              />
+                              <MetricTile
+                                label="CPU request"
+                                value={
+                                  selectedSubject?.resource_quota
+                                    ?.requests_cpu ?? "-"
+                                }
+                              />
+                              <MetricTile
+                                label="CPU limit"
+                                value={
+                                  selectedSubject?.resource_quota?.limits_cpu ??
+                                  "-"
+                                }
+                              />
+                              <MetricTile
+                                label="Memory limit"
+                                value={
+                                  selectedSubject?.resource_quota
+                                    ?.limits_memory ?? "-"
+                                }
+                              />
+                            </div>
+                            {Object.entries(selectedSubject?.labels ?? {})
+                              .length > 0 ? (
+                              <div className="flex flex-wrap gap-2">
+                                {Object.entries(
+                                  selectedSubject?.labels ?? {},
+                                ).map(([labelKey, labelValue]) => (
+                                  <span
+                                    key={`${labelKey}-${labelValue}`}
+                                    className="rounded-full border border-border/70 bg-card/78 px-3 py-1.5 text-xs text-foreground/75"
+                                  >
+                                    {labelKey}: {labelValue}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      <div className="grid min-w-0 gap-6 xl:grid-cols-2 xl:items-stretch">
+                        <Card className="flex h-full min-w-0 flex-col overflow-hidden">
+                          <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
+                            <CardTitle>Applications</CardTitle>
+                            <div className="flex flex-wrap gap-2">
+                              <Button variant="secondary" onClick={addApp}>
+                                Add empty app
+                              </Button>
+                              <Button
+                                variant="danger"
+                                onClick={removeSelectedApp}
+                                disabled={
+                                  config.applications.ward_applications
+                                    .length <= 1
+                                }
+                              >
+                                Remove selected app
+                              </Button>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="flex flex-1 flex-col gap-4">
+                            {appsForSelectedSubject.length === 0 ? (
+                              <div className="flex min-h-[16rem] flex-1 items-center rounded-[1.6rem] border border-dashed border-border/80 bg-muted/45 px-5 py-6 text-sm text-neutral-500">
+                                No applications in this ward yet.
+                              </div>
+                            ) : (
+                              <div className="themed-scrollbar flex min-h-[16rem] flex-1 gap-3 overflow-x-auto pb-2">
+                                {appsForSelectedSubject.map(
+                                  ({ application, index }) => {
+                                    const applicationReview = buildAppReview(
+                                      application,
+                                      subjectKeys,
+                                    );
+                                    const applicationPrimaryContainer =
+                                      primaryContainer(application);
+
+                                    return (
+                                      <div
+                                        key={`${application.name}-${index}`}
+                                        className={classNames(
+                                          "group min-w-[280px] max-w-[280px] shrink-0 rounded-[1.6rem] border p-4 transition",
+                                          index === selectedAppIndex
+                                            ? "border-accent/70 bg-accent/10"
+                                            : "border-border/80 bg-card/80 hover:bg-muted/65",
+                                        )}
+                                      >
+                                        <button
+                                          className="w-full text-left"
+                                          onClick={() =>
+                                            setSelectedAppIndex(index)
+                                          }
+                                        >
+                                          <div className="flex min-w-0 items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                              <p className="text-base font-semibold tracking-tight">
+                                                {application.name}
+                                              </p>
+                                              <p className="mt-2 text-xs uppercase tracking-[0.22em] text-neutral-500">
+                                                {application.containers
+                                                  ?.length ?? 0}{" "}
+                                                containers •{" "}
+                                                {application.replicas ?? 1}{" "}
+                                                replicas
+                                              </p>
+                                            </div>
+                                            <Badge>
+                                              {appExposureEnabled(application)
+                                                ? "Public"
+                                                : "Internal"}
+                                            </Badge>
+                                          </div>
+                                          <div className="mt-4 grid gap-3">
+                                            <div className="grid gap-1">
+                                              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">
+                                                Image
+                                              </p>
+                                              <p
+                                                className="truncate text-sm text-foreground/82"
+                                                title={
+                                                  applicationPrimaryContainer?.image ??
+                                                  "No image"
+                                                }
+                                              >
+                                                {displayImageName(
+                                                  applicationPrimaryContainer?.image,
+                                                )}
+                                              </p>
+                                            </div>
+                                            <div className="grid gap-1">
+                                              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">
+                                                Exposure
+                                              </p>
+                                              <p
+                                                className="truncate text-sm text-foreground/82"
+                                                title={displayExposureSummary(
+                                                  application,
+                                                )}
+                                              >
+                                                {displayExposureSummary(
+                                                  application,
+                                                )}
+                                              </p>
+                                            </div>
+                                            <div className="grid gap-1">
+                                              <p className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">
+                                                Status
+                                              </p>
+                                              <p className="text-sm text-foreground/82">
+                                                {applicationReview.errors
+                                                  .length > 0
+                                                  ? `${applicationReview.errors.length} issue${applicationReview.errors.length === 1 ? "" : "s"}`
+                                                  : applicationReview.warnings
+                                                        .length > 0
+                                                    ? `${applicationReview.warnings.length} warning${applicationReview.warnings.length === 1 ? "" : "s"}`
+                                                    : "Ready"}
+                                              </p>
+                                            </div>
+                                          </div>
+                                        </button>
+                                      </div>
+                                    );
+                                  },
+                                )}
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+
+                        <Card className="flex h-full min-w-0 flex-col overflow-hidden">
+                          <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <CardTitle>Application Inspector</CardTitle>
+                              <p className="mt-2 text-sm leading-6 text-neutral-500">
+                                Selected app runtime, exposure, and generated
+                                resources.
+                              </p>
+                            </div>
+                            {selectedApp ? (
+                              <Button onClick={() => setIsAppModalOpen(true)}>
+                                Open builder
+                              </Button>
+                            ) : null}
+                          </CardHeader>
+                          <CardContent className="grid gap-4">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <MetricTile
+                                label="Replicas"
+                                value={selectedApp?.replicas ?? 0}
+                              />
+                              <MetricTile
+                                label="Containers"
+                                value={selectedApp?.containers?.length ?? 0}
+                              />
+                              <MetricTile
+                                label="Volumes"
+                                value={selectedApp?.volumes?.length ?? 0}
+                              />
+                              <MetricTile
+                                label="Secrets"
+                                value={
+                                  selectedAppReview.secretDependencies.length
+                                }
+                              />
+                            </div>
+                            <div className="grid gap-3">
+                              <ReadOnlyField
+                                label="Image"
+                                value={displayImageName(
+                                  selectedAppPrimaryContainer?.image,
+                                )}
+                              />
+                              <ReadOnlyField
+                                label="Exposure"
+                                value={displayExposureSummary(selectedApp)}
+                              />
+                              <ReadOnlyField
+                                label="Resources"
+                                value={
+                                  selectedAppReview.resources.join(", ") ||
+                                  "Deployment"
+                                }
+                              />
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      <Card className="min-w-0 overflow-hidden">
+                        <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+                          <CardTitle>Templates And Scenarios</CardTitle>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant={
+                                selectedWardLibraryTab === "templates"
+                                  ? "primary"
+                                  : "ghost"
+                              }
+                              onClick={() =>
+                                setSelectedWardLibraryTab("templates")
+                              }
+                            >
+                              Templates
+                            </Button>
+                            <Button
+                              variant={
+                                selectedWardLibraryTab === "scenarios"
+                                  ? "primary"
+                                  : "ghost"
+                              }
+                              onClick={() =>
+                                setSelectedWardLibraryTab("scenarios")
+                              }
+                            >
+                              Scenarios
+                            </Button>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="themed-scrollbar min-w-0 grid auto-cols-[220px] grid-flow-col gap-3 overflow-x-auto pb-2">
+                          {selectedWardLibraryTab === "templates" ? (
+                            <>
+                              <ScenarioTile
+                                title="Public Python API"
+                                description="Internet-exposed FastAPI with a built-in egress check."
+                                tag="Public traffic"
+                                compact
+                                actionLabel="Add template"
+                                onApply={() =>
+                                  addAppTemplate("public-python-api")
+                                }
+                              />
+                              <ScenarioTile
+                                title="Internal Python API"
+                                description="Cluster-only FastAPI for a quieter comparison case."
+                                tag="Internal traffic"
+                                compact
+                                actionLabel="Add template"
+                                onApply={() =>
+                                  addAppTemplate("internal-python-api")
+                                }
+                              />
+                              <ScenarioTile
+                                title="Static Site Probe"
+                                description="Minimal web probe for service and exposure validation."
+                                tag="Smoke test"
+                                compact
+                                actionLabel="Add template"
+                                onApply={() => addAppTemplate("static-site")}
+                              />
+                            </>
+                          ) : (
+                            scenarioBlueprintList.map((blueprint) => (
+                              <ScenarioTile
+                                key={blueprint.id}
+                                title={blueprint.title}
+                                description={blueprint.description}
+                                tag={blueprint.tag}
+                                compact
+                                actionLabel="Load scenario"
+                                onApply={() =>
+                                  addScenarioBlueprint(blueprint.id)
+                                }
+                              />
+                            ))
+                          )}
+                        </CardContent>
+                      </Card>
+                    </CardContent>
+                  ) : null}
+                </Card>
+
+                <Card className="overflow-hidden">
+                  <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <CardTitle>Policies</CardTitle>
+                      <p className="mt-2 text-sm leading-6 text-neutral-500">
+                        Kyverno and Tetragon policies are listed on the left and
+                        edited on the right through a guided editor.
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      aria-label={
+                        isPoliciesAssetsOpen
+                          ? "Collapse policies"
+                          : "Expand policies"
+                      }
+                      title={
+                        isPoliciesAssetsOpen
+                          ? "Collapse policies"
+                          : "Expand policies"
+                      }
+                      className="h-10 w-10 rounded-full px-0 text-lg"
+                      onClick={() =>
+                        setIsPoliciesAssetsOpen((current) => !current)
+                      }
+                    >
+                      {isPoliciesAssetsOpen ? "−" : "+"}
+                    </Button>
+                  </CardHeader>
+                  {isPoliciesAssetsOpen ? (
+                    <CardContent className="grid gap-6 2xl:grid-cols-[460px_minmax(0,1fr)] 2xl:items-stretch">
+                      <div className="grid gap-6">
+                        <Card className="flex h-full min-h-[44rem] flex-col overflow-hidden">
+                          <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4">
+                            <CardTitle>Policies</CardTitle>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Input
+                                className="min-w-0 flex-1"
+                                value={policySearchQuery}
+                                onChange={(event) =>
+                                  setPolicySearchQuery(event.target.value)
+                                }
+                                placeholder="Search policies"
+                              />
+                              <div
+                                ref={policyFilterMenuRef}
+                                className="relative"
+                              >
+                                <button
+                                  type="button"
+                                  aria-label="Filter policies"
+                                  title="Filter policies"
+                                  onClick={() =>
+                                    setIsPolicyFilterMenuOpen(
+                                      (current) => !current,
+                                    )
+                                  }
+                                  className={classNames(
+                                    "inline-flex h-11 items-center gap-2 rounded-full border px-4 text-sm font-medium transition duration-200",
+                                    isPolicyFilterMenuOpen
+                                      ? "border-accent/45 bg-accent/16 text-accent shadow-[0_12px_28px_rgb(var(--color-accent)_/_0.22)]"
+                                      : "border-border/70 bg-card/82 text-foreground/78 shadow-[0_10px_24px_rgb(15_23_42_/_0.08)] hover:bg-accent/10 hover:text-foreground",
+                                  )}
+                                >
+                                  <FilterIcon className="h-4 w-4" />
+                                  <span>
+                                    {policyFilter === "all"
+                                      ? "All types"
+                                      : policyFilter === "kyverno"
+                                        ? "Kyverno"
+                                        : "Tetragon"}
+                                  </span>
+                                </button>
+                                {isPolicyFilterMenuOpen ? (
+                                  <div className="absolute right-0 top-[calc(100%+0.5rem)] z-20 grid min-w-[11rem] gap-1 rounded-[1.2rem] border border-border/80 bg-card p-2 text-sm shadow-[0_18px_40px_rgb(15_23_42_/_0.12)]">
+                                    {(
+                                      [
+                                        ["all", "All types"],
+                                        ["kyverno", "Kyverno"],
+                                        ["tetragon", "Tetragon"],
+                                      ] as const
+                                    ).map(([value, label]) => (
+                                      <button
+                                        key={value}
+                                        type="button"
+                                        className={classNames(
+                                          "rounded-[0.95rem] px-3 py-2 text-left transition",
+                                          policyFilter === value
+                                            ? "bg-accent/12 text-accent"
+                                            : "text-foreground/82 hover:bg-accent/10 hover:text-foreground",
+                                        )}
+                                        onClick={() => {
+                                          setPolicyFilter(value);
+                                          setIsPolicyFilterMenuOpen(false);
+                                        }}
+                                      >
+                                        {label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div ref={policyTypeMenuRef} className="relative">
+                                <IconActionButton
+                                  label="Add policy"
+                                  active={isPolicyTypeMenuOpen}
+                                  onClick={() =>
+                                    setIsPolicyTypeMenuOpen(
+                                      (current) => !current,
+                                    )
+                                  }
+                                >
+                                  <span className="text-xl leading-none">
+                                    +
+                                  </span>
+                                </IconActionButton>
+                                {isPolicyTypeMenuOpen ? (
+                                  <div className="absolute right-0 top-[calc(100%+0.5rem)] z-20 grid min-w-[11rem] gap-1 rounded-[1.2rem] border border-border/80 bg-card/96 p-2 shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur">
+                                    <button
+                                      type="button"
+                                      className="rounded-[0.95rem] px-3 py-2 text-left text-sm text-foreground/82 transition hover:bg-accent/10 hover:text-foreground"
+                                      onClick={() => {
+                                        addKyvernoPolicy("custom");
+                                        setIsPolicyTypeMenuOpen(false);
+                                      }}
+                                    >
+                                      Kyverno
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="rounded-[0.95rem] px-3 py-2 text-left text-sm text-foreground/82 transition hover:bg-accent/10 hover:text-foreground"
+                                      onClick={() => {
+                                        addTetragonPolicy("custom");
+                                        setIsPolicyTypeMenuOpen(false);
+                                      }}
+                                    >
+                                      Tetragon
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="flex flex-1 flex-col gap-4 overflow-hidden">
+                            <div className="flex flex-wrap gap-2">
+                              <Badge>
+                                {visibleKyvernoPolicies.length} Kyverno
+                              </Badge>
+                              <Badge>
+                                {visibleTetragonPolicies.length} Tetragon
+                              </Badge>
+                            </div>
+                            <div className="themed-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-visible pr-5 scrollbar-gutter-stable">
+                              <div className="grid gap-3 pt-1">
+                                <p className="text-xs uppercase tracking-[0.22em] text-neutral-500">
+                                  <span className="rounded-full border border-border/70 bg-muted/60 px-2 py-1">
+                                    Kyverno
+                                  </span>
+                                </p>
+                                {visibleKyvernoPolicies.length === 0 ? (
+                                  <p className="rounded-[1.2rem] border border-dashed border-border/75 bg-muted/38 px-4 py-3 text-sm text-neutral-500">
+                                    No Kyverno policies match the current
+                                    filter.
+                                  </p>
+                                ) : null}
+                                {visibleKyvernoPolicies.map((policy) => (
+                                  <div
+                                    key={`kyverno-${policy.id}`}
+                                    className="group relative"
+                                  >
+                                    <button
+                                      className={classNames(
+                                        "w-full rounded-[1.4rem] border px-4 py-4 pr-14 text-left transition",
+                                        selectedPolicyRef?.engine ===
+                                          "kyverno" &&
+                                          selectedPolicyRef.id === policy.id
+                                          ? "border-accent/70 bg-accent/10"
+                                          : "border-border/80 bg-card/76 hover:bg-muted/70",
+                                      )}
+                                      onClick={() =>
+                                        setSelectedPolicyRef({
+                                          engine: "kyverno",
+                                          id: policy.id,
+                                        })
+                                      }
+                                    >
+                                      <div className="flex items-center justify-between gap-3">
+                                        <p className="truncate font-medium">
+                                          {policy.name}
+                                        </p>
+                                        <Badge>
+                                          {policy.enabled === false
+                                            ? "Off"
+                                            : "On"}
+                                        </Badge>
+                                      </div>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="absolute right-3 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-warning/40 bg-card text-warning opacity-0 shadow-[0_12px_28px_rgb(15_23_42_/_0.12)] transition group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-warning/10"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setSelectedPolicyRef({
+                                          engine: "kyverno",
+                                          id: policy.id,
+                                        });
+                                        removeSelectedPolicy({
+                                          engine: "kyverno",
+                                          id: policy.id,
+                                        });
+                                      }}
+                                      aria-label={`Delete ${policy.name}`}
+                                      title={`Delete ${policy.name}`}
+                                    >
+                                      <TrashIcon className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <div className="grid gap-3 pt-1">
+                                <p className="text-xs uppercase tracking-[0.22em] text-neutral-500">
+                                  <span className="rounded-full border border-border/70 bg-muted/60 px-2 py-1">
+                                    Tetragon
+                                  </span>
+                                </p>
+                                {visibleTetragonPolicies.length === 0 ? (
+                                  <p className="rounded-[1.2rem] border border-dashed border-border/75 bg-muted/38 px-4 py-3 text-sm text-neutral-500">
+                                    No Tetragon policies match the current
+                                    filter.
+                                  </p>
+                                ) : null}
+                                {visibleTetragonPolicies.map((policy) => (
+                                  <div
+                                    key={`tetragon-${policy.id}`}
+                                    className="group relative"
+                                  >
+                                    <button
+                                      className={classNames(
+                                        "w-full rounded-[1.4rem] border px-4 py-4 pr-14 text-left transition",
+                                        selectedPolicyRef?.engine ===
+                                          "tetragon" &&
+                                          selectedPolicyRef.id === policy.id
+                                          ? "border-accent/70 bg-accent/10"
+                                          : "border-border/80 bg-card/76 hover:bg-muted/70",
+                                      )}
+                                      onClick={() =>
+                                        setSelectedPolicyRef({
+                                          engine: "tetragon",
+                                          id: policy.id,
+                                        })
+                                      }
+                                    >
+                                      <div className="flex items-center justify-between gap-3">
+                                        <p className="truncate font-medium">
+                                          {policy.name}
+                                        </p>
+                                        <Badge>
+                                          {policy.enabled === false
+                                            ? "Off"
+                                            : "On"}
+                                        </Badge>
+                                      </div>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="absolute right-3 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-warning/40 bg-card text-warning opacity-0 shadow-[0_12px_28px_rgb(15_23_42_/_0.12)] transition group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-warning/10"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setSelectedPolicyRef({
+                                          engine: "tetragon",
+                                          id: policy.id,
+                                        });
+                                        removeSelectedPolicy({
+                                          engine: "tetragon",
+                                          id: policy.id,
+                                        });
+                                      }}
+                                      aria-label={`Delete ${policy.name}`}
+                                      title={`Delete ${policy.name}`}
+                                    >
+                                      <TrashIcon className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+
+                      <Card className="overflow-hidden">
+                        <CardHeader className="border-b border-border/80 px-5 py-4">
+                          <CardTitle>Policy Editor</CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid gap-5">
+                          {!selectedPolicy || !selectedPolicyRef ? (
+                            <div className="rounded-[1.6rem] border border-dashed border-border/80 bg-muted/45 px-5 py-6 text-sm text-neutral-500">
+                              Select a policy to configure it.
+                            </div>
+                          ) : selectedPolicyRef.engine === "kyverno" &&
+                            selectedKyvernoPolicy ? (
+                            <>
+                              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                <MetricTile label="Engine" value="Kyverno" />
+                                <MetricTile label="Scope" value="Cluster" />
+                                <MetricTile
+                                  label="Enabled"
+                                  value={
+                                    selectedKyvernoPolicy.enabled === false
+                                      ? "No"
+                                      : "Yes"
+                                  }
+                                />
+                                <MetricTile
+                                  label="Rules"
+                                  value={
+                                    Array.isArray(
+                                      (
+                                        selectedKyvernoPolicy.manifest.spec as
+                                          JsonObject | undefined
+                                      )?.rules,
+                                    )
+                                      ? (
+                                          (
+                                            selectedKyvernoPolicy.manifest
+                                              .spec as JsonObject
+                                          ).rules as unknown[]
+                                        ).length
+                                      : 0
+                                  }
+                                />
+                              </div>
+                              <div className="grid gap-4 xl:grid-cols-2">
+                                <label className="grid gap-1 text-sm">
+                                  <span>Policy ID</span>
+                                  <Input
+                                    value={selectedKyvernoPolicy.id}
+                                    onChange={(event) =>
+                                      updateSelectedKyvernoPolicy(
+                                        (current) => ({
+                                          ...current,
+                                          id: event.target.value,
+                                        }),
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label className="grid gap-1 text-sm">
+                                  <span>Name</span>
+                                  <Input
+                                    value={selectedKyvernoPolicy.name}
+                                    onChange={(event) =>
+                                      updateSelectedKyvernoPolicy(
+                                        (current) => ({
+                                          ...current,
+                                          name: event.target.value,
+                                        }),
+                                      )
+                                    }
+                                  />
+                                </label>
+                              </div>
+                              <label className="grid gap-1 text-sm">
+                                <span>Description</span>
+                                <Textarea
+                                  value={
+                                    selectedKyvernoPolicy.description ?? ""
+                                  }
+                                  onChange={(event) =>
+                                    updateSelectedKyvernoPolicy((current) => ({
+                                      ...current,
+                                      description: event.target.value,
+                                    }))
+                                  }
+                                  className="min-h-[7rem]"
+                                />
+                              </label>
+                              <label className="flex items-center gap-2 rounded-[1.3rem] border border-border/75 bg-card/82 px-4 py-3 text-sm text-foreground/82">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    selectedKyvernoPolicy.enabled !== false
+                                  }
+                                  onChange={(event) =>
+                                    updateSelectedKyvernoPolicy((current) => ({
+                                      ...current,
+                                      enabled: event.target.checked,
+                                    }))
+                                  }
+                                />
+                                Enable this Kyverno policy
+                              </label>
+                              <PolicyManifestEditor
+                                value={selectedKyvernoPolicy.manifest}
+                                onCommit={(manifest) =>
+                                  updateSelectedKyvernoPolicy((current) => ({
+                                    ...current,
+                                    manifest,
+                                  }))
+                                }
+                              />
+                            </>
+                          ) : selectedTetragonPolicy ? (
+                            <>
+                              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                <MetricTile label="Engine" value="Tetragon" />
+                                <MetricTile
+                                  label="Scope"
+                                  value={
+                                    selectedTetragonPolicy.scope === "cluster"
+                                      ? "Cluster"
+                                      : selectedTetragonPolicy.scope ===
+                                          "namespace"
+                                        ? "Namespace"
+                                        : "All wards"
+                                  }
+                                />
+                                <MetricTile
+                                  label="Enabled"
+                                  value={
+                                    selectedTetragonPolicy.enabled === false
+                                      ? "No"
+                                      : "Yes"
+                                  }
+                                />
+                                <MetricTile
+                                  label="Target namespace"
+                                  value={
+                                    selectedTetragonPolicy.scope === "namespace"
+                                      ? selectedTetragonPolicy.namespace ||
+                                        "Unset"
+                                      : "Derived"
+                                  }
+                                />
+                              </div>
+                              <div className="grid gap-4 xl:grid-cols-2">
+                                <label className="grid gap-1 text-sm">
+                                  <span>Policy ID</span>
+                                  <Input
+                                    value={selectedTetragonPolicy.id}
+                                    onChange={(event) =>
+                                      updateSelectedTetragonPolicy(
+                                        (current) => ({
+                                          ...current,
+                                          id: event.target.value,
+                                        }),
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label className="grid gap-1 text-sm">
+                                  <span>Name</span>
+                                  <Input
+                                    value={selectedTetragonPolicy.name}
+                                    onChange={(event) =>
+                                      updateSelectedTetragonPolicy(
+                                        (current) => ({
+                                          ...current,
+                                          name: event.target.value,
+                                        }),
+                                      )
+                                    }
+                                  />
+                                </label>
+                              </div>
+                              <div className="grid gap-4 xl:grid-cols-2">
+                                <label className="grid gap-1 text-sm">
+                                  <span>Scope</span>
+                                  <select
+                                    className="w-full rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground"
+                                    value={
+                                      selectedTetragonPolicy.scope ??
+                                      "all-wards"
+                                    }
+                                    onChange={(event) =>
+                                      updateSelectedTetragonPolicy(
+                                        (current) => ({
+                                          ...current,
+                                          scope: event.target
+                                            .value as TetragonTracingPolicyConfig["scope"],
+                                        }),
+                                      )
+                                    }
+                                  >
+                                    <option value="all-wards">All wards</option>
+                                    <option value="namespace">
+                                      Single namespace
+                                    </option>
+                                    <option value="cluster">
+                                      Cluster-wide
+                                    </option>
+                                  </select>
+                                </label>
+                                <label className="grid gap-1 text-sm">
+                                  <span>Namespace</span>
+                                  <select
+                                    className="w-full rounded-2xl border border-border bg-card px-4 py-2 text-sm text-foreground"
+                                    value={
+                                      selectedTetragonPolicy.namespace ?? ""
+                                    }
+                                    onChange={(event) =>
+                                      updateSelectedTetragonPolicy(
+                                        (current) => ({
+                                          ...current,
+                                          namespace: event.target.value,
+                                        }),
+                                      )
+                                    }
+                                    disabled={
+                                      (selectedTetragonPolicy.scope ??
+                                        "all-wards") !== "namespace"
+                                    }
+                                  >
+                                    <option value="">Select ward</option>
+                                    {subjectKeys.map((subjectKey) => (
+                                      <option
+                                        key={subjectKey}
+                                        value={subjectKey}
+                                      >
+                                        {subjectKey}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                              <label className="grid gap-1 text-sm">
+                                <span>Description</span>
+                                <Textarea
+                                  value={
+                                    selectedTetragonPolicy.description ?? ""
+                                  }
+                                  onChange={(event) =>
+                                    updateSelectedTetragonPolicy((current) => ({
+                                      ...current,
+                                      description: event.target.value,
+                                    }))
+                                  }
+                                  className="min-h-[7rem]"
+                                />
+                              </label>
+                              <label className="flex items-center gap-2 rounded-[1.3rem] border border-border/75 bg-card/82 px-4 py-3 text-sm text-foreground/82">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    selectedTetragonPolicy.enabled !== false
+                                  }
+                                  onChange={(event) =>
+                                    updateSelectedTetragonPolicy((current) => ({
+                                      ...current,
+                                      enabled: event.target.checked,
+                                    }))
+                                  }
+                                />
+                                Enable this Tetragon policy
+                              </label>
+                              <PolicyManifestEditor
+                                value={selectedTetragonPolicy.manifest}
+                                onCommit={(manifest) =>
+                                  updateSelectedTetragonPolicy((current) => ({
+                                    ...current,
+                                    manifest,
+                                  }))
+                                }
+                              />
+                            </>
+                          ) : null}
+                        </CardContent>
+                      </Card>
+                    </CardContent>
+                  ) : null}
+                </Card>
+              </div>
+            ) : null}
+
+            {activeTab === "activity" ? (
+              <div className="grid h-full min-h-0 gap-6 2xl:grid-cols-[340px_minmax(0,1fr)] 2xl:items-stretch">
+                <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden border-border/70 bg-card/88 shadow-[0_18px_40px_rgb(15_23_42_/_0.12)]">
+                  <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+                    <CardTitle>Runs</CardTitle>
+                    <Button
+                      variant="ghost"
+                      className="px-3 py-1.5 text-xs"
+                      onClick={() => void pruneRunHistory(10)}
+                      disabled={isBusy || runs.length <= 10}
+                    >
+                      Keep latest 10
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+                    <div className="themed-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                      {runs.length === 0 ? (
+                        <p className="text-sm text-neutral-500">No runs.</p>
+                      ) : null}
+                      {runs.map((run) => (
+                        <button
+                          key={run.id}
+                          className={classNames(
+                            "w-full rounded-[1.4rem] border px-4 py-4 text-left shadow-[0_10px_24px_rgb(15_23_42_/_0.08)] transition",
+                            selectedRunId === run.id
+                              ? "border-accent/75 bg-accent/12"
+                              : "border-border/80 bg-card/88 hover:bg-muted/78",
+                          )}
+                          onClick={() => {
+                            setSelectedRunId(run.id);
+                            setSelectedRun(run);
+                            setSelectedRunLogs([]);
+                            setOutputs(normalizeTerraformOutputs(run.outputs));
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-medium">
+                                {stageLabel(run.stage)} {run.kind}
+                              </p>
+                              <p className="mt-1 text-xs text-neutral-500">
+                                {run.id}
+                              </p>
+                            </div>
+                            <Badge
+                              className={
+                                statusTone(run.status) === "danger"
+                                  ? "border-warning/30 bg-warning/10 text-warning"
+                                  : ""
+                              }
+                            >
+                              {run.status}
+                              {run.queue_position
+                                ? ` #${run.queue_position}`
+                                : ""}
+                            </Badge>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="grid min-w-0 gap-6">
+                  <Card className="flex min-h-0 flex-col border-border/70 bg-card/88 shadow-[0_18px_40px_rgb(15_23_42_/_0.12)]">
+                    <CardHeader>
+                      <CardTitle>Run Summary</CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+                      {selectedRun ? (
+                        <>
+                          <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+                            <div className="min-w-0 rounded-[1.8rem] border border-border/85 bg-muted/68 p-5 shadow-[0_16px_36px_rgb(15_23_42_/_0.10)]">
+                              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
+                                Selected run
+                              </p>
+                              <p className="mt-3 break-words text-2xl font-semibold">
+                                {stageLabel(selectedRun.stage)}{" "}
+                                {selectedRun.kind}
+                              </p>
+                              <div className="mt-4 grid gap-3">
+                                <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
+                                  <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                                    Status
+                                  </span>
+                                  <span className="break-words text-sm font-medium text-foreground">
+                                    {selectedRun.status}
+                                    {selectedRun.queue_position
+                                      ? ` • Queue #${selectedRun.queue_position}`
+                                      : ""}
+                                  </span>
+                                </div>
+                                <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
+                                  <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                                    Run ID
+                                  </span>
+                                  <span className="break-all text-sm text-foreground/80">
+                                    {selectedRun.id}
+                                  </span>
+                                </div>
+                                {selectedRun.started_at ||
+                                selectedRun.completed_at ? (
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    {selectedRun.started_at ? (
+                                      <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
+                                        <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                                          Started
+                                        </span>
+                                        <span className="break-words text-sm text-foreground/80">
+                                          {formatRunTimestamp(
+                                            selectedRun.started_at,
+                                          )}
+                                        </span>
+                                      </div>
+                                    ) : null}
+                                    {selectedRun.completed_at ? (
+                                      <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
+                                        <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                                          Completed
+                                        </span>
+                                        <span className="break-words text-sm text-foreground/80">
+                                          {formatRunTimestamp(
+                                            selectedRun.completed_at,
+                                          )}
+                                        </span>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                              {selectedRun.error ? (
+                                <div className="mt-4 rounded-[1.2rem] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+                                  <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.22em] text-warning/75">
+                                    <span>Details</span>
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`text-[10px] tracking-[0.2em] transition-all duration-200 ${showCopiedLogsHint ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-0.5 opacity-0"}`}
+                                      >
+                                        Copied
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="shrink-0 bg-transparent p-0 text-warning/75 transition hover:text-warning"
+                                        onClick={() =>
+                                          void copySelectedRunLogs()
+                                        }
+                                        title="Copy logs"
+                                        aria-label="Copy logs"
+                                      >
+                                        <svg
+                                          viewBox="0 0 24 24"
+                                          className="h-5 w-5"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="2"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          aria-hidden="true"
+                                        >
+                                          <rect
+                                            x="9"
+                                            y="9"
+                                            width="10"
+                                            height="10"
+                                            rx="2"
+                                          />
+                                          <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="themed-scrollbar max-h-48 overflow-auto break-words whitespace-pre-wrap pr-2 text-foreground/88">
+                                    {formatRunErrorText(selectedRun.error)}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="grid min-w-0 gap-3">
+                              {selectedRun.kind === "destroy" ? (
+                                <div className="rounded-[1.8rem] border border-border/85 bg-muted/68 p-5 shadow-[0_16px_36px_rgb(15_23_42_/_0.10)]">
+                                  <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
+                                    Destroy run
+                                  </p>
+                                  <p className="mt-3 text-sm leading-6 text-foreground/75">
+                                    This run removes the resources managed by
+                                    the{" "}
+                                    {stageLabel(
+                                      selectedRun.stage,
+                                    ).toLowerCase()}{" "}
+                                    stage directly from Terraform state and the
+                                    target platform.
+                                  </p>
+                                  <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
+                                    <MetricTile
+                                      label="Stage"
+                                      value={stageLabel(selectedRun.stage)}
+                                    />
+                                    <MetricTile label="Mode" value="Destroy" />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="rounded-[1.8rem] border border-border/85 bg-muted/68 p-5 shadow-[0_16px_36px_rgb(15_23_42_/_0.10)]">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                      <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
+                                        {planSummaryLabel}
+                                      </p>
+                                      {selectedRun.kind === "apply" ? (
+                                        <p className="mt-2 max-w-xl text-sm text-foreground/70">
+                                          These counts come from the saved plan
+                                          that this apply executed. They are not
+                                          a record of what finished
+                                          successfully.
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                    {selectedRun.kind === "apply" &&
+                                    sourcePlanRun ? (
+                                      <Badge className="whitespace-nowrap border-border/80 bg-card/80 text-foreground/75">
+                                        Source plan {sourcePlanRun.id}
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                    <MetricTile
+                                      label="Create"
+                                      value={displayedPlanSummary?.create ?? 0}
+                                      className="border-border/85 bg-background/92 shadow-[0_14px_32px_rgb(15_23_42_/_0.08),inset_0_1px_0_rgb(var(--color-card)_/_0.18)]"
+                                    />
+                                    <MetricTile
+                                      label="Update"
+                                      value={displayedPlanSummary?.update ?? 0}
+                                      className="border-border/85 bg-background/92 shadow-[0_14px_32px_rgb(15_23_42_/_0.08),inset_0_1px_0_rgb(var(--color-card)_/_0.18)]"
+                                    />
+                                    <MetricTile
+                                      label="Delete"
+                                      value={displayedPlanSummary?.delete ?? 0}
+                                      className="border-border/85 bg-background/92 shadow-[0_14px_32px_rgb(15_23_42_/_0.08),inset_0_1px_0_rgb(var(--color-card)_/_0.18)]"
+                                    />
+                                    <MetricTile
+                                      label="Replace"
+                                      value={displayedPlanSummary?.replace ?? 0}
+                                      className="border-border/85 bg-background/92 shadow-[0_14px_32px_rgb(15_23_42_/_0.08),inset_0_1px_0_rgb(var(--color-card)_/_0.18)]"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {selectedRun.kind !== "destroy" ? (
+                            <div className="flex min-h-0 flex-col rounded-[1.8rem] border border-border/85 bg-muted/68 p-5 shadow-[0_16px_36px_rgb(15_23_42_/_0.10)]">
+                              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
+                                {selectedRun.kind === "apply"
+                                  ? "Resources in saved plan"
+                                  : "Changed resources"}
+                              </p>
+                              <div className="themed-scrollbar mt-4 min-h-[12rem] max-h-[18rem] overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-foreground/80">
+                                {(displayedPlanSummary?.addresses ?? [])
+                                  .length === 0 ? (
+                                  <p>No structured plan summary yet.</p>
+                                ) : (
+                                  <ul className="space-y-1.5">
+                                    {(
+                                      displayedPlanSummary?.addresses ?? []
+                                    ).map((address) => (
+                                      <li key={address} className="break-all">
+                                        {address}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        <p className="text-sm text-neutral-500">
+                          Select a run.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] xl:items-stretch">
+                    <Card className="flex h-full flex-col border-border/70 bg-card/88 shadow-[0_18px_40px_rgb(15_23_42_/_0.12)]">
+                      <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+                        <CardTitle>Run Logs</CardTitle>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant={autoScrollLogs ? "secondary" : "ghost"}
+                            className="px-3 py-1.5 text-xs"
+                            onClick={() =>
+                              setAutoScrollLogs((current) => !current)
+                            }
+                          >
+                            Auto-scroll {autoScrollLogs ? "On" : "Off"}
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="flex min-h-0 flex-1">
+                        <div className="flex min-h-[16rem] max-h-[40rem] flex-1 flex-col overflow-hidden rounded-[1.2rem] border border-border/70 bg-card/92 shadow-[0_14px_32px_rgb(15_23_42_/_0.08),inset_0_1px_0_rgb(var(--color-card)_/_0.14)]">
+                          <div className="flex items-center justify-between gap-3 border-b border-border/55 bg-background/82 px-4 py-3 text-[11px] uppercase tracking-[0.24em] text-foreground/72">
+                            <span>
+                              {selectedRun
+                                ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}`
+                                : "No run selected"}
+                            </span>
+                            <span>
+                              {selectedRunLogs.length} lines •{" "}
+                              {groupedSelectedRunLogs.length} entries
+                            </span>
+                          </div>
+                          <div
+                            ref={logsViewportRef}
+                            className="themed-scrollbar min-h-0 flex-1 overflow-auto p-4 pr-5 font-mono text-xs text-foreground/88"
+                          >
+                            {groupedSelectedRunLogs.length > 0 ? (
+                              <div className="space-y-2.5">
+                                {groupedSelectedRunLogs.map((group, index) =>
+                                  (() => {
+                                    const entry =
+                                      group.kind === "structured"
+                                        ? group.entry
+                                        : null;
+                                    const message =
+                                      group.kind === "structured"
+                                        ? group.entry.message
+                                        : group.message;
+                                    return (
+                                      <div
+                                        key={`${index}-${group.startLineNumber}-${group.endLineNumber}`}
+                                        className="rounded-[1rem] border border-border/55 bg-background/88 px-3 py-2.5 shadow-[0_12px_28px_rgb(15_23_42_/_0.12)]"
+                                      >
+                                        <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.2em]">
+                                          <span className="rounded-full border border-accent/18 bg-accent/10 px-2 py-1 text-accent">
+                                            {group.startLineNumber ===
+                                            group.endLineNumber
+                                              ? group.startLineNumber
+                                              : `${group.startLineNumber}-${group.endLineNumber}`}
+                                          </span>
+                                          {entry?.level ? (
+                                            <span
+                                              className={`rounded-full border px-2 py-1 ${logLevelTone(entry.level)}`}
+                                            >
+                                              {entry.level}
+                                            </span>
+                                          ) : null}
+                                          {entry?.source ? (
+                                            <span className="text-accent/82">
+                                              {entry.source}
+                                            </span>
+                                          ) : null}
+                                          {entry?.address ? (
+                                            <span className="break-all text-foreground/62">
+                                              {entry.address}
+                                            </span>
+                                          ) : null}
+                                          {entry?.timestamp ? (
+                                            <span className="text-foreground/58">
+                                              {formatRunTimestamp(
+                                                entry.timestamp,
+                                              )}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <p className="mt-2 break-words whitespace-pre-wrap font-sans text-sm leading-6 text-foreground">
+                                          {message}
+                                        </p>
+                                        {entry?.detail ? (
+                                          <p className="mt-2 break-words whitespace-pre-wrap font-sans text-xs leading-5 text-accent/82">
+                                            {entry.detail}
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })(),
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-foreground/62">No logs yet.</p>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="flex h-full flex-col border-border/70 bg-card/88 shadow-[0_18px_40px_rgb(15_23_42_/_0.12)]">
+                      <CardHeader>
+                        <CardTitle>Terraform Outputs</CardTitle>
+                      </CardHeader>
+                      <CardContent className="flex min-h-0 flex-1">
+                        <div className="themed-scrollbar min-h-[16rem] max-h-[40rem] flex-1 overflow-auto pr-2">
+                          {hasTerraformOutputs(outputs) ? (
+                            <div className="space-y-4">
+                              {Object.entries(outputs ?? {}).map(
+                                ([key, entry]) => {
+                                  const normalized =
+                                    formatTerraformOutputValue(entry);
+                                  return (
+                                    <div
+                                      key={key}
+                                      className="min-w-0 rounded-[1rem] border border-border/78 bg-card/86 p-4 shadow-[0_12px_28px_rgb(15_23_42_/_0.10)]"
+                                    >
+                                      <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <p className="min-w-0 flex-1 break-all font-mono text-xs uppercase tracking-[0.2em] text-neutral-500">
+                                          {key}
+                                        </p>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          {normalized.sensitive ? (
+                                            <Badge className="border-warning/40 bg-warning/12 text-warning">
+                                              Sensitive
+                                            </Badge>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                      <div className="mt-3 overflow-hidden rounded-[0.9rem] border border-border/60 bg-background/58 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.12)]">
+                                        <pre className="themed-scrollbar scrollbar-gutter-stable max-h-[18rem] w-full overflow-auto whitespace-pre px-3 py-3 font-mono text-xs leading-6 text-foreground/82">
+                                          {normalized.sensitive
+                                            ? "(sensitive output)"
+                                            : typeof normalized.value ===
+                                                "string"
+                                              ? normalized.value
+                                              : prettyPrint(normalized.value)}
+                                        </pre>
+                                      </div>
+                                    </div>
+                                  );
+                                },
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex min-h-[16rem] items-center justify-center text-sm text-neutral-500">
+                              No outputs available.
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "accounts" ? (
+              <div className="grid gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Accounts</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="surface-strong rounded-[1.8rem] p-6">
+                      <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
+                        Accounts Preview
+                      </p>
+                      <h2 className="mt-3 text-3xl font-semibold tracking-tight">
+                        User accounts will replace the old infrastructure access
+                        model here.
+                      </h2>
+                      <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
+                        This page is reserved for sign-in state, user profiles,
+                        membership, and role-based access once the managed
+                        sign-in flow is in place. Infrastructure ARNs are no
+                        longer edited from the control plane.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <MetricTile
+                        label="Identity"
+                        value="Coming soon"
+                        hint="Managed session-backed login"
+                      />
+                      <MetricTile
+                        label="Roles"
+                        value="Planned"
+                        hint="Viewer, operator, admin"
+                      />
+                      <MetricTile
+                        label="Provisioning"
+                        value="Pending"
+                        hint="Organization-scoped user access"
+                      />
+                      <MetricTile
+                        label="Current Auth"
+                        value="Shared token"
+                        hint="Temporary model until accounts land"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <Modal
+          title="Cluster Status"
+          open={isClusterInfoOpen}
+          onClose={() => setIsClusterInfoOpen(false)}
+        >
+          <div className="grid gap-6">
+            <div className="surface-strong rounded-[2rem] p-6">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+                <div className="max-w-2xl">
+                  <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
+                    Cluster Status
+                  </p>
+                  <h3 className="mt-3 text-3xl font-semibold tracking-tight">
+                    Keep the important context visible while you work.
+                  </h3>
+                  <p className="mt-3 text-sm leading-7 text-neutral-400">
+                    Shape workloads, stage Terraform safely, and hand off to
+                    native observability tools without losing the current
+                    cluster context.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge>Infra-owned foundation</Badge>
+                  <Badge>{config.core.cluster_name}</Badge>
+                  <Badge>{config.core.environment}</Badge>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+              <div className="grid gap-3 md:grid-cols-2">
                 <MetricTile label="Status" value={statusMessage || "Ready"} />
                 <MetricTile
                   label="Queue"
@@ -4096,17 +7071,12 @@ export default function App() {
                 />
                 <MetricTile label="Containers" value={totalContainers} />
               </div>
-            </div>
 
-            {errorMessage ? (
-              <div className="rounded-[1.4rem] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
-                {errorMessage}
-              </div>
-            ) : null}
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-              <div className="rounded-[1.6rem] border border-border/80 bg-muted/45 p-4">
-                <div className="grid gap-3 md:grid-cols-3">
+              <div className="surface-strong rounded-[1.9rem] p-5">
+                <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
+                  Working Set
+                </p>
+                <div className="mt-4 grid gap-3">
                   <ReadOnlyField
                     label="Selected Ward"
                     value={selectedSubjectKey || "None"}
@@ -4121,18 +7091,75 @@ export default function App() {
                   />
                 </div>
               </div>
-              <div className="rounded-[1.6rem] border border-border/80 bg-muted/45 p-4">
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+              <div className="surface-strong rounded-[1.9rem] p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="max-w-2xl">
+                    <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
+                      Shared Infrastructure
+                    </p>
+                    <h4 className="mt-3 text-2xl font-semibold tracking-tight text-foreground">
+                      Foundation details live here, not in the operator flow.
+                    </h4>
+                    <p className="mt-3 text-sm leading-7 text-foreground/66">
+                      Core and platform are managed outside this control plane.
+                      Reconcile shared AWS and cluster layers through the
+                      infrastructure pipeline, then use this UI for policy and
+                      workload changes.
+                    </p>
+                  </div>
+                  <Badge>Infra-owned</Badge>
+                </div>
+
+                <div className="mt-5">
+                  <StageNotice
+                    title="Ownership Boundary"
+                    body={sharedInfrastructureNotice}
+                  />
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <ReadOnlyField
+                    label="Project"
+                    value={config.core.project_name}
+                  />
+                  <ReadOnlyField
+                    label="Environment"
+                    value={config.core.environment}
+                  />
+                  <ReadOnlyField
+                    label="Cluster"
+                    value={config.core.cluster_name}
+                  />
+                  <ReadOnlyField
+                    label="Kubernetes"
+                    value={config.core.kubernetes_version}
+                  />
+                  <ReadOnlyField
+                    label="Log Retention"
+                    value={`${config.core.cluster_log_retention_in_days} days`}
+                  />
+                  <ReadOnlyField
+                    label="Configured admin principals"
+                    value={String(configuredAdminArnsCount)}
+                  />
+                </div>
+              </div>
+
+              <div className="surface-soft rounded-[1.9rem] p-5">
                 <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
                   Current Run
                 </p>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-lg font-semibold">
+                    <p className="text-xl font-semibold tracking-tight">
                       {selectedRun
                         ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}`
                         : "No selected run"}
                     </p>
-                    <p className="mt-1 text-sm text-neutral-400">
+                    <p className="mt-2 text-sm leading-6 text-neutral-400">
                       {selectedRun
                         ? `Status: ${selectedRun.status}`
                         : "Move to Activity to inspect queued and completed work."}
@@ -4140,1862 +7167,31 @@ export default function App() {
                   </div>
                   {selectedRun ? <Badge>{selectedRun.status}</Badge> : null}
                 </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card className="overflow-hidden">
-          <CardContent className="px-0 py-0">
-            <div className="sticky top-0 z-20 border-b border-border/80 bg-card/96 px-5 py-4 backdrop-blur-2xl">
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:gap-6">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
-                      Operator Console
-                    </p>
-                    <h1 className="mt-1 text-2xl font-bold tracking-tight">
-                      Isolens
-                    </h1>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge>{selectedSubjectKey || "No ward"}</Badge>
-                    <Badge>{selectedApp?.name ?? "No application"}</Badge>
-                    <Badge>
-                      {selectedRun
-                        ? `${stageLabel(selectedRun.stage)} ${selectedRun.status}`
-                        : "No active run"}
-                    </Badge>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => void saveManagedConfig()}
-                    disabled={isBusy}
-                  >
-                    Save config
-                  </Button>
-                  <Button
-                    variant="danger"
-                    onClick={() => void cancelSelectedRun()}
-                    disabled={
-                      isBusy ||
-                      !selectedRun ||
-                      [
-                        "running",
-                        "applying",
-                        "destroying",
-                        "queued",
-                        "canceling",
-                      ].includes(selectedRun.status) === false
+                <div className="mt-6 grid gap-3">
+                  <MetricTile
+                    label="Run queue position"
+                    value={
+                      selectedRun?.queue_position
+                        ? `#${selectedRun.queue_position}`
+                        : "None"
                     }
-                  >
-                    Cancel run
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => void resetConfig()}
-                    disabled={isBusy}
-                  >
-                    Reset config
-                  </Button>
+                    hint="Only queued runs receive a queue index."
+                  />
+                  <MetricTile
+                    label="Last focus"
+                    value={
+                      selectedRun
+                        ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}`
+                        : "Activity tab"
+                    }
+                    hint="Use Activity for logs, outputs, and historical runs."
+                  />
                 </div>
               </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveTab(tab.id)}
-                    className={classNames(
-                      "rounded-full border px-4 py-2.5 text-sm font-medium transition",
-                      activeTab === tab.id
-                        ? "border-accent/70 bg-accent text-accentForeground"
-                        : "border-border/80 bg-card/70 text-foreground/80 hover:bg-muted/70 hover:text-foreground",
-                    )}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
             </div>
-
-            <div
-              ref={workspaceScrollRef}
-              className="themed-scrollbar h-[calc(100vh-12.5rem)] overflow-y-auto px-5 py-5"
-            >
-              <div className="grid h-full gap-6">
-                {activeTab === "overview" ? (
-                  <>
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Overview Snapshot</CardTitle>
-                      </CardHeader>
-                      <CardContent className="grid gap-6 px-6 py-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-                        <div className="space-y-5">
-                          <div className="space-y-3">
-                            <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
-                              Overview
-                            </p>
-                            <h2 className="text-3xl font-semibold tracking-tight">
-                              Operate the cluster in the order it actually wants
-                              to be used.
-                            </h2>
-                            <p className="max-w-3xl text-sm leading-7 text-neutral-400">
-                              Start with core, move into platform once the
-                              cluster is real. Platform carries the shared
-                              in-cluster services, then policies layers the
-                              custom resources on top before you drill into
-                              assets or logs.
-                            </p>
-                          </div>
-
-                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                            <MetricTile
-                              label="Wards"
-                              value={subjectKeys.length}
-                            />
-                            <MetricTile
-                              label="Applications"
-                              value={
-                                config.applications.ward_applications.length
-                              }
-                            />
-                            <MetricTile
-                              label="Service-backed"
-                              value={totalAppsWithService}
-                            />
-                            <MetricTile
-                              label="Internet-exposed"
-                              value={totalAppsWithExposure}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                          <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">
-                            Current Focus
-                          </p>
-                          <p className="mt-4 text-xl font-semibold">
-                            {selectedApp?.name ?? "No selected application"}
-                          </p>
-                          <p className="mt-2 text-sm text-neutral-400">
-                            {selectedApp
-                              ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers • ${selectedApp.replicas ?? 1} replicas`
-                              : "Move to Assets to choose a ward and application before editing."}
-                          </p>
-                          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                            <MetricTile
-                              label="Current Run"
-                              value={
-                                selectedRun
-                                  ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}`
-                                  : "Idle"
-                              }
-                            />
-                            <MetricTile
-                              label="Run Status"
-                              value={selectedRun?.status ?? "Ready"}
-                            />
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                      <Card className="overflow-visible">
-                        <CardHeader>
-                          <CardTitle>Deployment Stages</CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid gap-4">
-                          <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-lg font-semibold">Core</p>
-                                <p className="mt-2 text-sm leading-6 text-neutral-400">
-                                  VPC, EKS, node access, and the cluster
-                                  foundation that everything else depends on.
-                                </p>
-                              </div>
-                              <div className="shrink-0 self-start">
-                                <Badge>
-                                  {latestCoreRun
-                                    ? latestCoreRun.status
-                                    : "idle"}
-                                </Badge>
-                              </div>
-                            </div>
-                            {coreDestroyNotice ? (
-                              <div className="mt-4">
-                                <StageNotice
-                                  title="Destroy Order"
-                                  body={coreDestroyNotice}
-                                  tone="warning"
-                                />
-                              </div>
-                            ) : null}
-                            <div className="mt-4 grid gap-3 md:grid-cols-3">
-                              <MetricTile
-                                label="Admin ARNs"
-                                value={configuredAdminArnsCount}
-                              />
-                              <MetricTile
-                                label="Wards Planned"
-                                value={subjectKeys.length}
-                              />
-                              <MetricTile
-                                label="Apps Planned"
-                                value={
-                                  config.applications.ward_applications.length
-                                }
-                              />
-                            </div>
-                            <div className="mt-5 flex flex-wrap gap-2">
-                              <StageAction
-                                disabledReason={coreActionDisabledReason}
-                              >
-                                <Button
-                                  onClick={() => void startPlan("core")}
-                                  disabled={isBusy || !hasAdminAccess}
-                                >
-                                  Plan core
-                                </Button>
-                              </StageAction>
-                              <StageAction
-                                disabledReason={coreActionDisabledReason}
-                              >
-                                <Button
-                                  variant="secondary"
-                                  onClick={() => void startApply("core")}
-                                  disabled={
-                                    isBusy ||
-                                    !hasAdminAccess ||
-                                    !canQueueApplyFromPlan("core")
-                                  }
-                                >
-                                  Apply core
-                                </Button>
-                              </StageAction>
-                              <div data-destroy-arm>
-                                <StageAction
-                                  disabledReason={
-                                    coreDestroyActionDisabledReason
-                                  }
-                                >
-                                  <Button
-                                    variant={
-                                      armedDestroyStage === "core"
-                                        ? "danger"
-                                        : "ghost"
-                                    }
-                                    className={
-                                      armedDestroyStage === "core"
-                                        ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]"
-                                        : ""
-                                    }
-                                    onClick={() => void startDestroy("core")}
-                                    disabled={
-                                      isBusy ||
-                                      !hasAdminAccess ||
-                                      hasAppliedPlatformRun ||
-                                      hasAppliedPoliciesRun ||
-                                      hasAppliedApplicationsRun
-                                    }
-                                  >
-                                    Destroy core
-                                  </Button>
-                                </StageAction>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                onClick={() => void unlockState("core")}
-                                disabled={isBusy}
-                              >
-                                Unlock state
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div
-                            className={classNames(
-                              "rounded-[1.8rem] border border-border/80 bg-muted/55 p-5",
-                              platformStageLocked && "border-dashed opacity-75",
-                            )}
-                          >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-lg font-semibold">
-                                  Platform
-                                </p>
-                                <p className="mt-2 text-sm leading-6 text-neutral-400">
-                                  Namespaces, Helm add-ons, control-plane
-                                  services, CRDs, and the operator-facing
-                                  outputs for the live lab.
-                                </p>
-                              </div>
-                              <div className="shrink-0 self-start">
-                                <Badge>
-                                  {latestPlatformRun
-                                    ? latestPlatformRun.status
-                                    : "idle"}
-                                </Badge>
-                              </div>
-                            </div>
-                            {platformStageNotice ? (
-                              <div className="mt-4">
-                                <StageNotice
-                                  title="Stage Locked"
-                                  body={platformStageNotice}
-                                />
-                              </div>
-                            ) : null}
-                            <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
-                              {hasAppliedCoreRun
-                                ? "Core applied, platform stage unlocked"
-                                : "Apply core first to unlock this stage"}
-                            </p>
-                            <div className="mt-4 grid gap-3 md:grid-cols-3">
-                              <MetricTile
-                                label="Wards"
-                                value={subjectKeys.length}
-                              />
-                              <MetricTile
-                                label="Apps"
-                                value={
-                                  config.applications.ward_applications.length
-                                }
-                              />
-                              <MetricTile
-                                label="Services"
-                                value={totalAppsWithService}
-                              />
-                            </div>
-                            <div className="mt-5 flex flex-wrap gap-2">
-                              <StageAction
-                                disabledReason={platformActionDisabledReason}
-                              >
-                                <Button
-                                  onClick={() => void startPlan("platform")}
-                                  disabled={
-                                    isBusy ||
-                                    !hasAdminAccess ||
-                                    !hasAppliedCoreRun
-                                  }
-                                >
-                                  Plan platform
-                                </Button>
-                              </StageAction>
-                              <StageAction
-                                disabledReason={platformActionDisabledReason}
-                              >
-                                <Button
-                                  variant="secondary"
-                                  onClick={() => void startApply("platform")}
-                                  disabled={
-                                    isBusy ||
-                                    !hasAdminAccess ||
-                                    !hasAppliedCoreRun ||
-                                    !canQueueApplyFromPlan("platform")
-                                  }
-                                >
-                                  Apply platform
-                                </Button>
-                              </StageAction>
-                              <div data-destroy-arm>
-                                <StageAction
-                                  disabledReason={
-                                    platformDestroyActionDisabledReason
-                                  }
-                                >
-                                  <Button
-                                    variant={
-                                      armedDestroyStage === "platform"
-                                        ? "danger"
-                                        : "ghost"
-                                    }
-                                    className={
-                                      armedDestroyStage === "platform"
-                                        ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]"
-                                        : ""
-                                    }
-                                    onClick={() =>
-                                      void startDestroy("platform")
-                                    }
-                                    disabled={
-                                      isBusy ||
-                                      !hasAdminAccess ||
-                                      platformStageLocked ||
-                                      hasAppliedPoliciesRun ||
-                                      hasAppliedApplicationsRun
-                                    }
-                                  >
-                                    Destroy platform
-                                  </Button>
-                                </StageAction>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                onClick={() => void unlockState("platform")}
-                                disabled={isBusy || platformStageLocked}
-                              >
-                                Unlock state
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div
-                            className={classNames(
-                              "rounded-[1.8rem] border border-border/80 bg-muted/55 p-5",
-                              policiesStageLocked && "border-dashed opacity-75",
-                            )}
-                          >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-lg font-semibold">
-                                  Policies
-                                </p>
-                                <p className="mt-2 text-sm leading-6 text-neutral-400">
-                                  Kyverno and Tetragon custom resources applied
-                                  after platform installs the required CRDs.
-                                </p>
-                              </div>
-                              <div className="shrink-0 self-start">
-                                <Badge>
-                                  {latestPoliciesRun
-                                    ? latestPoliciesRun.status
-                                    : "idle"}
-                                </Badge>
-                              </div>
-                            </div>
-                            {policiesStageNotice ? (
-                              <div className="mt-4">
-                                <StageNotice
-                                  title="Stage Locked"
-                                  body={policiesStageNotice}
-                                />
-                              </div>
-                            ) : null}
-                            <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
-                              {hasAppliedPlatformRun
-                                ? "Platform applied, policies stage unlocked"
-                                : "Apply platform first to unlock this stage"}
-                            </p>
-                            <div className="mt-4 grid gap-3 md:grid-cols-3">
-                              <MetricTile
-                                label="Wards"
-                                value={subjectKeys.length}
-                              />
-                              <MetricTile label="Cluster Policies" value={2} />
-                              <MetricTile
-                                label="Tracing Namespaces"
-                                value={subjectKeys.length}
-                              />
-                            </div>
-                            <div className="mt-5 flex flex-wrap gap-2">
-                              <StageAction
-                                disabledReason={policiesActionDisabledReason}
-                              >
-                                <Button
-                                  onClick={() => void startPlan("policies")}
-                                  disabled={
-                                    isBusy ||
-                                    !hasAdminAccess ||
-                                    !hasAppliedPlatformRun
-                                  }
-                                >
-                                  Plan policies
-                                </Button>
-                              </StageAction>
-                              <StageAction
-                                disabledReason={policiesActionDisabledReason}
-                              >
-                                <Button
-                                  variant="secondary"
-                                  onClick={() => void startApply("policies")}
-                                  disabled={
-                                    isBusy ||
-                                    !hasAdminAccess ||
-                                    !hasAppliedPlatformRun ||
-                                    !canQueueApplyFromPlan("policies")
-                                  }
-                                >
-                                  Apply policies
-                                </Button>
-                              </StageAction>
-                              <div data-destroy-arm>
-                                <StageAction
-                                  disabledReason={
-                                    policiesDestroyActionDisabledReason
-                                  }
-                                >
-                                  <Button
-                                    variant={
-                                      armedDestroyStage === "policies"
-                                        ? "danger"
-                                        : "ghost"
-                                    }
-                                    className={
-                                      armedDestroyStage === "policies"
-                                        ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]"
-                                        : ""
-                                    }
-                                    onClick={() =>
-                                      void startDestroy("policies")
-                                    }
-                                    disabled={
-                                      isBusy ||
-                                      !hasAdminAccess ||
-                                      policiesStageLocked ||
-                                      hasAppliedApplicationsRun
-                                    }
-                                  >
-                                    Destroy policies
-                                  </Button>
-                                </StageAction>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                onClick={() => void unlockState("policies")}
-                                disabled={isBusy || policiesStageLocked}
-                              >
-                                Unlock state
-                              </Button>
-                            </div>
-                          </div>
-
-                          <div
-                            className={classNames(
-                              "rounded-[1.8rem] border border-border/80 bg-muted/55 p-5",
-                              applicationsStageLocked &&
-                                "border-dashed opacity-75",
-                            )}
-                          >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-lg font-semibold">
-                                  Applications
-                                </p>
-                                <p className="mt-2 text-sm leading-6 text-neutral-400">
-                                  Workload deployments, Services, exposure
-                                  rules, and application-specific network
-                                  policies for the live lab.
-                                </p>
-                              </div>
-                              <div className="shrink-0 self-start">
-                                <Badge>
-                                  {latestApplicationsRun
-                                    ? latestApplicationsRun.status
-                                    : "idle"}
-                                </Badge>
-                              </div>
-                            </div>
-                            {applicationsStageNotice ? (
-                              <div className="mt-4">
-                                <StageNotice
-                                  title="Stage Locked"
-                                  body={applicationsStageNotice}
-                                />
-                              </div>
-                            ) : null}
-                            <p className="mt-3 text-xs uppercase tracking-[0.22em] text-neutral-500">
-                              {hasAppliedPlatformRun
-                                ? hasAppliedPoliciesRun
-                                  ? "Policies applied, applications stage unlocked"
-                                  : "Apply policies first to unlock this stage"
-                                : "Apply platform first to unlock this stage"}
-                            </p>
-                            <div className="mt-4 grid gap-3 md:grid-cols-3">
-                              <MetricTile
-                                label="Apps"
-                                value={
-                                  config.applications.ward_applications.length
-                                }
-                              />
-                              <MetricTile
-                                label="Services"
-                                value={totalAppsWithService}
-                              />
-                              <MetricTile
-                                label="Exposure"
-                                value={totalAppsWithExposure}
-                              />
-                            </div>
-                            <div className="mt-5 flex flex-wrap gap-2">
-                              <StageAction
-                                disabledReason={
-                                  applicationsActionDisabledReason
-                                }
-                              >
-                                <Button
-                                  onClick={() => void startPlan("applications")}
-                                  disabled={
-                                    isBusy ||
-                                    !hasAdminAccess ||
-                                    !hasAppliedPoliciesRun
-                                  }
-                                >
-                                  Plan applications
-                                </Button>
-                              </StageAction>
-                              <StageAction
-                                disabledReason={
-                                  applicationsActionDisabledReason
-                                }
-                              >
-                                <Button
-                                  variant="secondary"
-                                  onClick={() =>
-                                    void startApply("applications")
-                                  }
-                                  disabled={
-                                    isBusy ||
-                                    !hasAdminAccess ||
-                                    !hasAppliedPoliciesRun ||
-                                    !canQueueApplyFromPlan("applications")
-                                  }
-                                >
-                                  Apply applications
-                                </Button>
-                              </StageAction>
-                              <div data-destroy-arm>
-                                <StageAction
-                                  disabledReason={
-                                    applicationsActionDisabledReason
-                                  }
-                                >
-                                  <Button
-                                    variant={
-                                      armedDestroyStage === "applications"
-                                        ? "danger"
-                                        : "ghost"
-                                    }
-                                    className={
-                                      armedDestroyStage === "applications"
-                                        ? "border-[#b24c63]/80 bg-[#b24c63] text-white hover:bg-[#9f4157]"
-                                        : ""
-                                    }
-                                    onClick={() =>
-                                      void startDestroy("applications")
-                                    }
-                                    disabled={
-                                      isBusy ||
-                                      !hasAdminAccess ||
-                                      !hasAppliedPoliciesRun
-                                    }
-                                  >
-                                    Destroy applications
-                                  </Button>
-                                </StageAction>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                onClick={() => void unlockState("applications")}
-                                disabled={isBusy || applicationsStageLocked}
-                              >
-                                Unlock state
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Observability Handoff</CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid gap-4">
-                          <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-lg font-semibold">
-                                  Hubble UI
-                                </p>
-                                <p className="mt-2 text-sm leading-6 text-neutral-400">
-                                  Keep flow analysis internal to the cluster and
-                                  tunnel into the native UI from the same
-                                  machine where your browser is running.
-                                </p>
-                              </div>
-                              <div className="shrink-0 self-start">
-                                <Badge>
-                                  {hasAppliedPlatformRun
-                                    ? "Internal access"
-                                    : "Pending apply"}
-                                </Badge>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-                              <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
-                                Port-Forward
-                              </p>
-                              <p className="mt-3 break-all font-mono text-sm font-medium">
-                                {hubblePortForwardCommand}
-                              </p>
-                            </div>
-
-                            <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-                              <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
-                                Local URL
-                              </p>
-                              <p className="mt-3 break-all text-sm font-medium">
-                                {hubbleLocalUrl}
-                              </p>
-                            </div>
-
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              <Button
-                                onClick={openLocalHubbleUi}
-                                disabled={!hasAppliedPlatformRun}
-                              >
-                                Open local Hubble UI
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                onClick={() => void loadInitial()}
-                                disabled={isBusy}
-                              >
-                                Refresh status
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </>
-                ) : null}
-
-                {activeTab === "assets" ? (
-                  <div className="grid gap-6">
-                    <Card className="overflow-hidden">
-                      <CardHeader>
-                        <CardTitle>Ward Studio</CardTitle>
-                      </CardHeader>
-                      <CardContent className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_340px]">
-                        <div className="rounded-[2rem] border border-border/80 bg-muted/55 p-6">
-                          <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">
-                            Selected ward
-                          </p>
-                          <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
-                            <div className="space-y-3">
-                              <p className="text-3xl font-semibold tracking-tight">
-                                {selectedSubjectKey || "No ward selected"}
-                              </p>
-                              <p className="max-w-3xl text-sm leading-7 text-neutral-500">
-                                {selectedSubject?.description ||
-                                  "Choose a ward to inspect namespace settings and the applications inside it."}
-                              </p>
-                            </div>
-                            {selectedSubject ? (
-                              <Button
-                                onClick={() => setIsSubjectModalOpen(true)}
-                              >
-                                Edit ward
-                              </Button>
-                            ) : null}
-                          </div>
-                          <div className="mt-5 flex flex-wrap gap-2">
-                            <Badge>{selectedSubject?.tier ?? "ward"}</Badge>
-                            <Badge>
-                              {appsForSelectedSubject.length} app
-                              {appsForSelectedSubject.length === 1 ? "" : "s"}
-                            </Badge>
-                            <Badge>
-                              {
-                                Object.keys(selectedSubject?.labels ?? {})
-                                  .length
-                              }{" "}
-                              label
-                              {Object.keys(selectedSubject?.labels ?? {})
-                                .length === 1
-                                ? ""
-                                : "s"}
-                            </Badge>
-                          </div>
-                          {Object.entries(selectedSubject?.labels ?? {})
-                            .length > 0 ? (
-                            <div className="mt-5 flex flex-wrap gap-2">
-                              {Object.entries(
-                                selectedSubject?.labels ?? {},
-                              ).map(([labelKey, labelValue]) => (
-                                <span
-                                  key={`${labelKey}-${labelValue}`}
-                                  className="rounded-full border border-border/70 bg-card/75 px-3 py-1.5 text-xs text-foreground/75"
-                                >
-                                  {labelKey}: {labelValue}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                          <MetricTile
-                            label="Pods quota"
-                            value={selectedSubject?.resource_quota?.pods ?? "-"}
-                          />
-                          <MetricTile
-                            label="CPU request"
-                            value={
-                              selectedSubject?.resource_quota?.requests_cpu ??
-                              "-"
-                            }
-                          />
-                          <MetricTile
-                            label="CPU limit"
-                            value={
-                              selectedSubject?.resource_quota?.limits_cpu ?? "-"
-                            }
-                          />
-                          <MetricTile
-                            label="Memory limit"
-                            value={
-                              selectedSubject?.resource_quota?.limits_memory ??
-                              "-"
-                            }
-                          />
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <div className="grid gap-6 2xl:grid-cols-[290px_minmax(0,1fr)_390px] 2xl:items-start">
-                      <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
-                        <CardHeader>
-                          <CardTitle>Wards</CardTitle>
-                        </CardHeader>
-                        <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-                          <p className="text-sm leading-6 text-neutral-500">
-                            Pick the ward you want to work in. Each ward maps to
-                            one Kubernetes namespace.
-                          </p>
-                          <div className="themed-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                            {subjectKeys.map((subjectKey) => (
-                              <button
-                                key={subjectKey}
-                                className={classNames(
-                                  "w-full rounded-[1.5rem] border px-4 py-4 text-left transition",
-                                  subjectKey === selectedSubjectKey
-                                    ? "border-accent/70 bg-accent/10"
-                                    : "border-border/80 bg-card/72 hover:bg-muted/70",
-                                )}
-                                onClick={() => selectSubject(subjectKey)}
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <p className="font-medium">{subjectKey}</p>
-                                    <p className="mt-2 text-xs uppercase tracking-[0.2em] text-neutral-500">
-                                      {config.platform.analysis_subjects[
-                                        subjectKey
-                                      ]?.tier ?? "ward"}
-                                    </p>
-                                  </div>
-                                  <Badge>
-                                    {
-                                      config.applications.ward_applications.filter(
-                                        (application) =>
-                                          application.namespace === subjectKey,
-                                      ).length
-                                    }
-                                  </Badge>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                          <div className="grid gap-2 pt-1">
-                            <Button variant="secondary" onClick={addSubject}>
-                              Add ward
-                            </Button>
-                            <Button
-                              variant="danger"
-                              onClick={removeSelectedSubject}
-                              disabled={subjectKeys.length <= 1}
-                            >
-                              Remove ward
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <div className="grid gap-6 min-w-0">
-                        <Card className="overflow-hidden">
-                          <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
-                            <div className="min-w-0 flex-1">
-                              <CardTitle>Applications In This Ward</CardTitle>
-                              <p className="mt-2 text-sm leading-6 text-neutral-500">
-                                Choose an application, then inspect and edit it
-                                on the right.
-                              </p>
-                            </div>
-                            <div className="flex w-full flex-col gap-2 sm:w-[14rem] xl:w-[14rem] xl:self-center">
-                              <Button
-                                className="w-full"
-                                variant="secondary"
-                                onClick={addApp}
-                              >
-                                Add application
-                              </Button>
-                              <Button
-                                className="w-full"
-                                variant="danger"
-                                onClick={removeSelectedApp}
-                                disabled={
-                                  config.applications.ward_applications
-                                    .length <= 1
-                                }
-                              >
-                                Remove selected app
-                              </Button>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="grid gap-4">
-                            {appsForSelectedSubject.length === 0 ? (
-                              <div className="rounded-[1.6rem] border border-dashed border-border/80 bg-muted/45 px-5 py-6 text-sm text-neutral-500">
-                                No applications in this ward yet. Start with a
-                                scenario below or add one manually.
-                              </div>
-                            ) : null}
-                            <div className="themed-scrollbar flex gap-4 overflow-x-auto pb-2">
-                              {appsForSelectedSubject.map(
-                                ({ application, index }) => {
-                                  const applicationReview = buildAppReview(
-                                    application,
-                                    subjectKeys,
-                                  );
-                                  const applicationPrimaryContainer =
-                                    primaryContainer(application);
-
-                                  return (
-                                    <button
-                                      key={`${application.name}-${index}`}
-                                      className={classNames(
-                                        "min-w-[320px] max-w-[320px] shrink-0 rounded-[1.7rem] border p-5 text-left transition",
-                                        index === selectedAppIndex
-                                          ? "border-accent/70 bg-accent/10"
-                                          : "border-border/80 bg-card/80 hover:bg-muted/65",
-                                      )}
-                                      onClick={() => setSelectedAppIndex(index)}
-                                    >
-                                      <div className="flex min-w-0 items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <p className="text-lg font-semibold tracking-tight">
-                                            {application.name}
-                                          </p>
-                                          <p className="mt-2 text-xs uppercase tracking-[0.22em] text-neutral-500">
-                                            {application.containers?.length ??
-                                              0}{" "}
-                                            containers •{" "}
-                                            {application.replicas ?? 1} replicas
-                                          </p>
-                                        </div>
-                                        <Badge>
-                                          {appExposureEnabled(application)
-                                            ? "Public"
-                                            : "Internal"}
-                                        </Badge>
-                                      </div>
-                                      <div className="mt-4 grid gap-2 text-sm text-foreground/80">
-                                        <p
-                                          className="truncate"
-                                          title={
-                                            applicationPrimaryContainer?.image ??
-                                            "No image"
-                                          }
-                                        >
-                                          Image:{" "}
-                                          {displayImageName(
-                                            applicationPrimaryContainer?.image,
-                                          )}
-                                        </p>
-                                        <p
-                                          className="truncate"
-                                          title={displayExposureSummary(
-                                            application,
-                                          )}
-                                        >
-                                          Exposure:{" "}
-                                          {displayExposureSummary(application)}
-                                        </p>
-                                        <p>
-                                          Status:{" "}
-                                          {applicationReview.errors.length > 0
-                                            ? `${applicationReview.errors.length} issue${applicationReview.errors.length === 1 ? "" : "s"}`
-                                            : applicationReview.warnings
-                                                  .length > 0
-                                              ? `${applicationReview.warnings.length} warning${applicationReview.warnings.length === 1 ? "" : "s"}`
-                                              : "Ready"}
-                                        </p>
-                                      </div>
-                                    </button>
-                                  );
-                                },
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="overflow-hidden">
-                          <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
-                            <div>
-                              <CardTitle>App Templates</CardTitle>
-                              <p className="mt-2 text-sm leading-6 text-neutral-500">
-                                Create a single workload from a safe, working
-                                starting point before you customize it in the
-                                builder.
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Badge>Builder starters</Badge>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="grid gap-4">
-                            <div className="themed-scrollbar flex gap-4 overflow-x-auto pb-2">
-                              <ScenarioTile
-                                title="Public Python API"
-                                description="Internet-exposed FastAPI with a built-in egress check."
-                                tag="Public traffic"
-                                actionLabel="Add template"
-                                onApply={() =>
-                                  addAppTemplate("public-python-api")
-                                }
-                              />
-                              <ScenarioTile
-                                title="Internal Python API"
-                                description="Cluster-only FastAPI for a quieter comparison case."
-                                tag="Internal traffic"
-                                actionLabel="Add template"
-                                onApply={() =>
-                                  addAppTemplate("internal-python-api")
-                                }
-                              />
-                              <ScenarioTile
-                                title="Static Site Probe"
-                                description="Minimal web probe for service and exposure validation."
-                                tag="Smoke test"
-                                actionLabel="Add template"
-                                onApply={() => addAppTemplate("static-site")}
-                              />
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="overflow-hidden">
-                          <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
-                            <div>
-                              <CardTitle>Scenario Library</CardTitle>
-                              <p className="mt-2 text-sm leading-6 text-neutral-500">
-                                Load an opinionated proof bundle for this ward.
-                                Choosing one replaces the ward's current
-                                applications with the scenario resources.
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Badge>Evidence packs</Badge>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="grid gap-4">
-                            <div className="themed-scrollbar flex gap-4 overflow-x-auto pb-2">
-                              {scenarioBlueprintList.map((blueprint) => (
-                                <ScenarioTile
-                                  key={blueprint.id}
-                                  title={blueprint.title}
-                                  description={blueprint.description}
-                                  tag={blueprint.tag}
-                                  actionLabel="Load scenario"
-                                  onApply={() =>
-                                    addScenarioBlueprint(blueprint.id)
-                                  }
-                                />
-                              ))}
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="overflow-hidden">
-                          <CardHeader className="flex flex-col gap-4 border-b border-border/80 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
-                            <div>
-                              <CardTitle>Scenario Playbooks</CardTitle>
-                              <p className="mt-2 text-sm leading-6 text-neutral-500">
-                                Every active scenario in this ward carries a
-                                built-in runbook so you know exactly what to
-                                curl, what to screenshot, and what to expect
-                                from Hubble, Kyverno, or Tetragon.
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Badge>
-                                {activeScenarioBundles.length} active
-                              </Badge>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="grid gap-4">
-                            {activeScenarioBundles.length === 0 ? (
-                              <div className="rounded-[1.6rem] border border-dashed border-border/80 bg-muted/45 px-5 py-6 text-sm leading-6 text-neutral-500">
-                                This ward only has standalone applications right
-                                now. Add one of the scenario bundles above when
-                                you want a repeatable Cilium, Kyverno, or
-                                Tetragon proof case.
-                              </div>
-                            ) : (
-                              activeScenarioBundles.map((bundle) => {
-                                const context = buildScenarioContext(
-                                  bundle.namespace,
-                                  bundle.bundleId,
-                                  bundle.apps,
-                                );
-                                return (
-                                  <ScenarioPlaybookCard
-                                    key={bundle.bundleId}
-                                    title={bundle.blueprint.title}
-                                    tag={bundle.blueprint.tag}
-                                    requirements={bundle.blueprint.requirements}
-                                    proofSurfaces={
-                                      bundle.blueprint.proofSurfaces
-                                    }
-                                    caution={bundle.blueprint.caution}
-                                    appNames={bundle.apps.map(
-                                      (application) => application.name,
-                                    )}
-                                    commands={bundle.blueprint.commandSteps(
-                                      context,
-                                    )}
-                                    expectedSignals={bundle.blueprint.expectedSignals(
-                                      context,
-                                    )}
-                                  />
-                                );
-                              })
-                            )}
-                          </CardContent>
-                        </Card>
-                      </div>
-
-                      <Card className="overflow-hidden">
-                        <CardHeader>
-                          <CardTitle>Application Inspector</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="rounded-[1.9rem] border border-border/80 bg-muted/55 p-5">
-                            <div className="flex flex-wrap items-start justify-between gap-4">
-                              <div className="min-w-0">
-                                <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                                  Selected application
-                                </p>
-                                <p
-                                  className="mt-3 truncate text-2xl font-semibold tracking-tight"
-                                  title={selectedApp?.name || "None"}
-                                >
-                                  {selectedApp?.name || "None"}
-                                </p>
-                                <p className="mt-3 text-sm leading-6 text-neutral-500">
-                                  {selectedApp
-                                    ? `${selectedApp.namespace} • ${selectedApp.containers?.length ?? 0} containers • ${selectedApp.replicas ?? 1} replicas`
-                                    : "Choose an application to inspect runtime and rollout readiness."}
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                {selectedApp ? (
-                                  <Badge
-                                    className={
-                                      selectedAppReview.errors.length > 0
-                                        ? "border-warning/35 bg-warning/10 text-warning"
-                                        : ""
-                                    }
-                                  >
-                                    {selectedAppReview.errors.length > 0
-                                      ? `${selectedAppReview.errors.length} blocking issue${selectedAppReview.errors.length === 1 ? "" : "s"}`
-                                      : selectedAppReview.warnings.length > 0
-                                        ? `${selectedAppReview.warnings.length} warning${selectedAppReview.warnings.length === 1 ? "" : "s"}`
-                                        : "Ready to deploy"}
-                                  </Badge>
-                                ) : null}
-                                {selectedApp ? (
-                                  <Button
-                                    onClick={() => setIsAppModalOpen(true)}
-                                  >
-                                    Open builder
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <MetricTile
-                              label="Replicas"
-                              value={selectedApp?.replicas ?? 0}
-                            />
-                            <MetricTile
-                              label="Containers"
-                              value={selectedApp?.containers?.length ?? 0}
-                            />
-                            <MetricTile
-                              label="Volumes"
-                              value={selectedApp?.volumes?.length ?? 0}
-                            />
-                            <MetricTile
-                              label="Secrets"
-                              value={
-                                selectedAppReview.secretDependencies.length
-                              }
-                            />
-                          </div>
-
-                          <div className="grid gap-3">
-                            <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-                              <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
-                                Runtime
-                              </p>
-                              <div className="mt-3 space-y-2 text-sm text-foreground/80">
-                                <p
-                                  className="truncate"
-                                  title={
-                                    selectedAppPrimaryContainer?.image ??
-                                    "Not configured"
-                                  }
-                                >
-                                  Image:{" "}
-                                  {displayImageName(
-                                    selectedAppPrimaryContainer?.image,
-                                  )}
-                                </p>
-                                <p>
-                                  Port:{" "}
-                                  {selectedAppPrimaryContainer?.port ?? "-"}
-                                </p>
-                                <p>
-                                  Health path:{" "}
-                                  {selectedAppPrimaryContainer?.probes
-                                    ?.readiness?.path ?? "/"}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-                              <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
-                                Exposure
-                              </p>
-                              <div className="mt-3 space-y-2 text-sm text-foreground/80">
-                                <p>
-                                  Service type:{" "}
-                                  {selectedApp?.service?.type ?? "ClusterIP"}
-                                </p>
-                                <p>Port: {selectedApp?.service?.port ?? "-"}</p>
-                                <p className="break-all">
-                                  Exposure host:{" "}
-                                  {appExposureHost(selectedApp) ||
-                                    "Not configured"}
-                                </p>
-                                <p>
-                                  Internet ingress:{" "}
-                                  {appInternetIngressEnabled(selectedApp)
-                                    ? "Enabled"
-                                    : "Disabled"}
-                                </p>
-                                <p>
-                                  Internet egress:{" "}
-                                  {appInternetEgressEnabled(selectedApp)
-                                    ? "Enabled"
-                                    : "Disabled"}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="rounded-[1.4rem] border border-border/80 bg-card/85 p-4">
-                              <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
-                                Terraform resources
-                              </p>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <span className="rounded-full border border-border/70 bg-muted/60 px-3 py-1 text-xs text-foreground/75">
-                                  Deployment
-                                </span>
-                                {selectedAppReview.resources.map((resource) => (
-                                  <span
-                                    key={resource}
-                                    className="rounded-full border border-border/70 bg-muted/60 px-3 py-1 text-xs text-foreground/75"
-                                  >
-                                    {resource}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-
-                          <ReviewItems
-                            title="Blocking issues"
-                            tone="error"
-                            items={selectedAppReview.errors}
-                          />
-                          <ReviewItems
-                            title="Warnings"
-                            tone="warning"
-                            items={selectedAppReview.warnings}
-                          />
-                          <ReviewItems
-                            title="Helpful notes"
-                            tone="hint"
-                            items={selectedAppReview.hints}
-                          />
-                        </CardContent>
-                      </Card>
-                    </div>
-                  </div>
-                ) : null}
-
-                {activeTab === "activity" ? (
-                  <div className="grid h-full min-h-0 gap-6 2xl:grid-cols-[340px_minmax(0,1fr)] 2xl:items-stretch">
-                    <Card className="flex h-full min-h-[24rem] flex-col overflow-hidden">
-                      <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-                        <CardTitle>Runs</CardTitle>
-                        <Button
-                          variant="ghost"
-                          className="px-3 py-1.5 text-xs"
-                          onClick={() => void pruneRunHistory(10)}
-                          disabled={isBusy || runs.length <= 10}
-                        >
-                          Keep latest 10
-                        </Button>
-                      </CardHeader>
-                      <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-                        <div className="themed-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                          {runs.length === 0 ? (
-                            <p className="text-sm text-neutral-500">No runs.</p>
-                          ) : null}
-                          {runs.map((run) => (
-                            <button
-                              key={run.id}
-                              className={classNames(
-                                "w-full rounded-[1.4rem] border px-4 py-4 text-left transition",
-                                selectedRunId === run.id
-                                  ? "border-accent/70 bg-accent/10"
-                                  : "border-border/80 bg-card/75 hover:bg-muted/70",
-                              )}
-                              onClick={() => {
-                                setSelectedRunId(run.id);
-                                setSelectedRun(run);
-                                setSelectedRunLogs([]);
-                                setOutputs(
-                                  normalizeTerraformOutputs(run.outputs),
-                                );
-                              }}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <p className="font-medium">
-                                    {stageLabel(run.stage)} {run.kind}
-                                  </p>
-                                  <p className="mt-1 text-xs text-neutral-500">
-                                    {run.id}
-                                  </p>
-                                </div>
-                                <Badge
-                                  className={
-                                    statusTone(run.status) === "danger"
-                                      ? "border-warning/30 bg-warning/10 text-warning"
-                                      : ""
-                                  }
-                                >
-                                  {run.status}
-                                  {run.queue_position
-                                    ? ` #${run.queue_position}`
-                                    : ""}
-                                </Badge>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <div className="grid min-w-0 gap-6">
-                      <Card className="flex min-h-0 flex-col">
-                        <CardHeader>
-                          <CardTitle>Run Summary</CardTitle>
-                        </CardHeader>
-                        <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
-                          {selectedRun ? (
-                            <>
-                              <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-                                <div className="min-w-0 rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                                  <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                                    Selected run
-                                  </p>
-                                  <p className="mt-3 break-words text-2xl font-semibold">
-                                    {stageLabel(selectedRun.stage)}{" "}
-                                    {selectedRun.kind}
-                                  </p>
-                                  <div className="mt-4 grid gap-3">
-                                    <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
-                                      <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-                                        Status
-                                      </span>
-                                      <span className="break-words text-sm font-medium text-foreground">
-                                        {selectedRun.status}
-                                        {selectedRun.queue_position
-                                          ? ` • Queue #${selectedRun.queue_position}`
-                                          : ""}
-                                      </span>
-                                    </div>
-                                    <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
-                                      <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-                                        Run ID
-                                      </span>
-                                      <span className="break-all text-sm text-foreground/80">
-                                        {selectedRun.id}
-                                      </span>
-                                    </div>
-                                    {selectedRun.started_at ||
-                                    selectedRun.completed_at ? (
-                                      <div className="grid gap-3 sm:grid-cols-2">
-                                        {selectedRun.started_at ? (
-                                          <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
-                                            <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-                                              Started
-                                            </span>
-                                            <span className="break-words text-sm text-foreground/80">
-                                              {formatRunTimestamp(
-                                                selectedRun.started_at,
-                                              )}
-                                            </span>
-                                          </div>
-                                        ) : null}
-                                        {selectedRun.completed_at ? (
-                                          <div className="grid gap-1 rounded-[1rem] border border-border/70 bg-card/70 px-4 py-3">
-                                            <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-                                              Completed
-                                            </span>
-                                            <span className="break-words text-sm text-foreground/80">
-                                              {formatRunTimestamp(
-                                                selectedRun.completed_at,
-                                              )}
-                                            </span>
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                  {selectedRun.error ? (
-                                    <div className="mt-4 rounded-[1.2rem] border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
-                                      <div className="mb-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.22em] text-warning/75">
-                                        <span>Details</span>
-                                        <div className="flex items-center gap-2">
-                                          <span
-                                            className={`text-[10px] tracking-[0.2em] transition-all duration-200 ${showCopiedLogsHint ? "translate-y-0 opacity-100" : "pointer-events-none -translate-y-0.5 opacity-0"}`}
-                                          >
-                                            Copied
-                                          </span>
-                                          <button
-                                            type="button"
-                                            className="shrink-0 bg-transparent p-0 text-warning/75 transition hover:text-warning"
-                                            onClick={() =>
-                                              void copySelectedRunLogs()
-                                            }
-                                            title="Copy logs"
-                                            aria-label="Copy logs"
-                                          >
-                                            <svg
-                                              viewBox="0 0 24 24"
-                                              className="h-5 w-5"
-                                              fill="none"
-                                              stroke="currentColor"
-                                              strokeWidth="2"
-                                              strokeLinecap="round"
-                                              strokeLinejoin="round"
-                                              aria-hidden="true"
-                                            >
-                                              <rect
-                                                x="9"
-                                                y="9"
-                                                width="10"
-                                                height="10"
-                                                rx="2"
-                                              />
-                                              <path d="M7 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1" />
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      </div>
-                                      <div className="themed-scrollbar max-h-48 overflow-auto break-words whitespace-pre-wrap pr-2 text-foreground/88">
-                                        {formatRunErrorText(selectedRun.error)}
-                                      </div>
-                                    </div>
-                                  ) : null}
-                                </div>
-                                <div className="grid min-w-0 gap-3">
-                                  {selectedRun.kind === "destroy" ? (
-                                    <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                                      <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                                        Destroy run
-                                      </p>
-                                      <p className="mt-3 text-sm leading-6 text-foreground/75">
-                                        This run removes the resources managed
-                                        by the{" "}
-                                        {stageLabel(
-                                          selectedRun.stage,
-                                        ).toLowerCase()}{" "}
-                                        stage directly from Terraform state and
-                                        the target platform.
-                                      </p>
-                                      <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
-                                        <MetricTile
-                                          label="Stage"
-                                          value={stageLabel(selectedRun.stage)}
-                                        />
-                                        <MetricTile
-                                          label="Mode"
-                                          value="Destroy"
-                                        />
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                                      <div className="flex flex-wrap items-start justify-between gap-3">
-                                        <div>
-                                          <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                                            {planSummaryLabel}
-                                          </p>
-                                          {selectedRun.kind === "apply" ? (
-                                            <p className="mt-2 max-w-xl text-sm text-foreground/70">
-                                              These counts come from the saved
-                                              plan that this apply executed.
-                                              They are not a record of what
-                                              finished successfully.
-                                            </p>
-                                          ) : null}
-                                        </div>
-                                        {selectedRun.kind === "apply" &&
-                                        sourcePlanRun ? (
-                                          <Badge className="whitespace-nowrap border-border/80 bg-card/80 text-foreground/75">
-                                            Source plan {sourcePlanRun.id}
-                                          </Badge>
-                                        ) : null}
-                                      </div>
-                                      <div className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                                        <MetricTile
-                                          label="Create"
-                                          value={
-                                            displayedPlanSummary?.create ?? 0
-                                          }
-                                        />
-                                        <MetricTile
-                                          label="Update"
-                                          value={
-                                            displayedPlanSummary?.update ?? 0
-                                          }
-                                        />
-                                        <MetricTile
-                                          label="Delete"
-                                          value={
-                                            displayedPlanSummary?.delete ?? 0
-                                          }
-                                        />
-                                        <MetricTile
-                                          label="Replace"
-                                          value={
-                                            displayedPlanSummary?.replace ?? 0
-                                          }
-                                        />
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              {selectedRun.kind !== "destroy" ? (
-                                <div className="flex min-h-0 flex-col rounded-[1.8rem] border border-border/80 bg-muted/55 p-5">
-                                  <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                                    {selectedRun.kind === "apply"
-                                      ? "Resources in saved plan"
-                                      : "Changed resources"}
-                                  </p>
-                                  <div className="themed-scrollbar mt-4 min-h-[12rem] max-h-[18rem] overflow-auto rounded-[1.2rem] border border-border/80 bg-card/85 p-4 text-sm text-foreground/80">
-                                    {(displayedPlanSummary?.addresses ?? [])
-                                      .length === 0 ? (
-                                      <p>No structured plan summary yet.</p>
-                                    ) : (
-                                      <ul className="space-y-1.5">
-                                        {(
-                                          displayedPlanSummary?.addresses ?? []
-                                        ).map((address) => (
-                                          <li
-                                            key={address}
-                                            className="break-all"
-                                          >
-                                            {address}
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    )}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </>
-                          ) : (
-                            <p className="text-sm text-neutral-500">
-                              Select a run.
-                            </p>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] xl:items-stretch">
-                        <Card className="flex h-full flex-col">
-                          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-                            <CardTitle>Run Logs</CardTitle>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant={autoScrollLogs ? "secondary" : "ghost"}
-                                className="px-3 py-1.5 text-xs"
-                                onClick={() =>
-                                  setAutoScrollLogs((current) => !current)
-                                }
-                              >
-                                Auto-scroll {autoScrollLogs ? "On" : "Off"}
-                              </Button>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="flex min-h-0 flex-1">
-                            <div className="flex min-h-[16rem] max-h-[40rem] flex-1 flex-col overflow-hidden rounded-[1.2rem] border border-[#ab9f9d]/45 bg-[#f5f1fb] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
-                              <div className="flex items-center justify-between gap-3 border-b border-[#ab9f9d]/35 bg-[#dddbf1]/72 px-4 py-3 text-[11px] uppercase tracking-[0.24em] text-[#383f51]/78">
-                                <span>
-                                  {selectedRun
-                                    ? `${stageLabel(selectedRun.stage)} ${selectedRun.kind}`
-                                    : "No run selected"}
-                                </span>
-                                <span>
-                                  {selectedRunLogs.length} lines •{" "}
-                                  {groupedSelectedRunLogs.length} entries
-                                </span>
-                              </div>
-                              <div
-                                ref={logsViewportRef}
-                                className="themed-scrollbar min-h-0 flex-1 overflow-auto p-4 pr-5 font-mono text-xs text-[#383f51]"
-                              >
-                                {groupedSelectedRunLogs.length > 0 ? (
-                                  <div className="space-y-2.5">
-                                    {groupedSelectedRunLogs.map(
-                                      (group, index) =>
-                                        (() => {
-                                          const entry =
-                                            group.kind === "structured"
-                                              ? group.entry
-                                              : null;
-                                          const message =
-                                            group.kind === "structured"
-                                              ? group.entry.message
-                                              : group.message;
-                                          return (
-                                            <div
-                                              key={`${index}-${group.startLineNumber}-${group.endLineNumber}`}
-                                              className="rounded-[1rem] border border-[#ab9f9d]/32 bg-white/78 px-3 py-2.5 shadow-[0_10px_24px_rgba(56,63,81,0.06)]"
-                                            >
-                                              <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.2em]">
-                                                <span className="rounded-full border border-[#3c4f76]/18 bg-[#3c4f76]/10 px-2 py-1 text-[#3c4f76]">
-                                                  {group.startLineNumber ===
-                                                  group.endLineNumber
-                                                    ? group.startLineNumber
-                                                    : `${group.startLineNumber}-${group.endLineNumber}`}
-                                                </span>
-                                                {entry?.level ? (
-                                                  <span
-                                                    className={`rounded-full border px-2 py-1 ${logLevelTone(entry.level)}`}
-                                                  >
-                                                    {entry.level}
-                                                  </span>
-                                                ) : null}
-                                                {entry?.source ? (
-                                                  <span className="text-[#3c4f76]/82">
-                                                    {entry.source}
-                                                  </span>
-                                                ) : null}
-                                                {entry?.address ? (
-                                                  <span className="break-all text-[#383f51]/62">
-                                                    {entry.address}
-                                                  </span>
-                                                ) : null}
-                                                {entry?.timestamp ? (
-                                                  <span className="text-[#383f51]/58">
-                                                    {formatRunTimestamp(
-                                                      entry.timestamp,
-                                                    )}
-                                                  </span>
-                                                ) : null}
-                                              </div>
-                                              <p className="mt-2 break-words whitespace-pre-wrap font-sans text-sm leading-6 text-[#383f51]">
-                                                {message}
-                                              </p>
-                                              {entry?.detail ? (
-                                                <p className="mt-2 break-words whitespace-pre-wrap font-sans text-xs leading-5 text-[#3c4f76]/82">
-                                                  {entry.detail}
-                                                </p>
-                                              ) : null}
-                                            </div>
-                                          );
-                                        })(),
-                                    )}
-                                  </div>
-                                ) : (
-                                  <p className="text-[#383f51]/62">
-                                    No logs yet.
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="flex h-full flex-col">
-                          <CardHeader>
-                            <CardTitle>Terraform Outputs</CardTitle>
-                          </CardHeader>
-                          <CardContent className="flex min-h-0 flex-1">
-                            <div className="themed-scrollbar min-h-[16rem] max-h-[40rem] flex-1 overflow-auto pr-2">
-                              {hasTerraformOutputs(outputs) ? (
-                                <div className="space-y-4">
-                                  {Object.entries(outputs ?? {}).map(
-                                    ([key, entry]) => {
-                                      const normalized =
-                                        formatTerraformOutputValue(entry);
-                                      return (
-                                        <div
-                                          key={key}
-                                          className="min-w-0 rounded-[1rem] border border-border/70 bg-white/48 p-4 shadow-[0_10px_24px_rgba(56,63,81,0.05)]"
-                                        >
-                                          <div className="flex flex-wrap items-start justify-between gap-3">
-                                            <p className="min-w-0 flex-1 break-all font-mono text-xs uppercase tracking-[0.2em] text-neutral-500">
-                                              {key}
-                                            </p>
-                                            <div className="flex flex-wrap items-center gap-2">
-                                              {normalized.sensitive ? (
-                                                <Badge className="border-warning/40 bg-warning/12 text-warning">
-                                                  Sensitive
-                                                </Badge>
-                                              ) : null}
-                                            </div>
-                                          </div>
-                                          <div className="mt-3 overflow-hidden rounded-[0.9rem] border border-border/60 bg-white/30 shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]">
-                                            <pre className="themed-scrollbar scrollbar-gutter-stable max-h-[18rem] w-full overflow-auto whitespace-pre px-3 py-3 font-mono text-xs leading-6 text-foreground/82">
-                                              {normalized.sensitive
-                                                ? "(sensitive output)"
-                                                : typeof normalized.value ===
-                                                    "string"
-                                                  ? normalized.value
-                                                  : prettyPrint(
-                                                      normalized.value,
-                                                    )}
-                                            </pre>
-                                          </div>
-                                        </div>
-                                      );
-                                    },
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="flex min-h-[16rem] items-center justify-center text-sm text-neutral-500">
-                                  No outputs available.
-                                </div>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {activeTab === "settings" ? (
-                  <div className="grid gap-6">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Cluster Profile</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <p className="text-sm leading-6 text-neutral-400">
-                          Read-only cluster identity and environment metadata
-                          from the shared Terraform configuration.
-                        </p>
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                          <ReadOnlyField
-                            label="Project"
-                            value={config.core.project_name}
-                          />
-                          <ReadOnlyField
-                            label="Environment"
-                            value={config.core.environment}
-                          />
-                          <ReadOnlyField
-                            label="Cluster name"
-                            value={config.core.cluster_name}
-                          />
-                          <ReadOnlyField
-                            label="Kubernetes version"
-                            value={config.core.kubernetes_version}
-                          />
-                          <ReadOnlyField
-                            label="Control plane log retention"
-                            value={`${config.core.cluster_log_retention_in_days} days`}
-                          />
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="flex h-[22rem] flex-col overflow-hidden">
-                      <CardHeader>
-                        <CardTitle>Admin Access</CardTitle>
-                      </CardHeader>
-                      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                            ARNs (
-                            {config.core.cluster_admin_principal_arns.length})
-                          </p>
-                          <Button
-                            variant="ghost"
-                            type="button"
-                            className="h-9 w-9 rounded-full px-0 text-xl leading-none"
-                            onClick={addClusterAdminArn}
-                          >
-                            +
-                          </Button>
-                        </div>
-                        <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
-                          <div className="grid gap-2">
-                            {config.core.cluster_admin_principal_arns.map(
-                              (arn, index) => (
-                                <div
-                                  key={`admin-arn-${index}`}
-                                  className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]"
-                                >
-                                  <Input
-                                    value={arn}
-                                    onChange={(event) =>
-                                      updateClusterAdminArn(
-                                        index,
-                                        event.target.value,
-                                      )
-                                    }
-                                    placeholder="arn:aws:iam::123456789012:role/example"
-                                  />
-                                  <Button
-                                    variant="danger"
-                                    type="button"
-                                    onClick={() => removeClusterAdminArn(index)}
-                                  >
-                                    Remove
-                                  </Button>
-                                </div>
-                              ),
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Modal>
 
         <Modal
           title="Edit Ward"
@@ -6043,9 +7239,13 @@ export default function App() {
                 label="Labels"
                 value={selectedSubject.labels}
                 onChange={(labels) =>
-                  updateSelectedSubject((current) => ({ ...current, labels }))
+                  updateSelectedSubject((current) => ({
+                    ...current,
+                    labels,
+                  }))
                 }
                 addLabel="Add label"
+                rowsClassName="themed-scrollbar max-h-[16rem] overflow-y-auto pr-2"
               />
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                 <label className="grid gap-1 text-sm">
@@ -6435,7 +7635,7 @@ export default function App() {
                       state.
                     </p>
                     {selectedAppReview.secretDependencies.length > 0 ? (
-                      <div className="mt-3 rounded-[1.2rem] border border-[#ab9f9d]/50 bg-[#ab9f9d]/14 px-4 py-3 text-sm text-foreground">
+                      <div className="mt-3 rounded-[1.2rem] border border-border/50 bg-border/14 px-4 py-3 text-sm text-foreground">
                         {selectedAppReview.secretDependencies.join(", ")}
                       </div>
                     ) : null}

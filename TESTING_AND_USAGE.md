@@ -29,6 +29,7 @@ Endpoints:
 
 - frontend: `http://127.0.0.1:5173`
 - backend: `http://127.0.0.1:8000`
+- runner: background Terraform worker process used for queued plan/apply/destroy runs
 
 ## Backend Smoke Tests
 

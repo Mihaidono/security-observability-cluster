@@ -5,17 +5,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: "#dddbf1",
-        foreground: "#383f51",
-        card: "#f6f4fb",
-        border: "#ab9f9d",
-        muted: "#d1beb0",
-        accent: "#3c4f76",
-        accentForeground: "#f8f7fc",
-        warning: "#8f7673",
+        background: "rgb(var(--color-background) / <alpha-value>)",
+        foreground: "rgb(var(--color-foreground) / <alpha-value>)",
+        card: "rgb(var(--color-card) / <alpha-value>)",
+        border: "rgb(var(--color-border) / <alpha-value>)",
+        muted: "rgb(var(--color-muted) / <alpha-value>)",
+        accent: "rgb(var(--color-accent) / <alpha-value>)",
+        accentForeground: "rgb(var(--color-accent-foreground) / <alpha-value>)",
+        warning: "rgb(var(--color-warning) / <alpha-value>)",
       },
       boxShadow: {
-        panel: "0 22px 48px rgba(56, 63, 81, 0.16)",
+        panel: "var(--shadow-panel)",
       },
       fontFamily: {
         sans: ["'Space Grotesk'", "ui-sans-serif", "system-ui", "sans-serif"],

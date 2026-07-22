@@ -12,7 +12,9 @@ resource "time_sleep" "cluster_access_ready" {
 module "policy_manifests" {
   source = "../../modules/policies-stack"
 
-  analysis_subjects = var.analysis_subjects
+  analysis_subjects         = var.analysis_subjects
+  kyverno_cluster_policies  = var.kyverno_cluster_policies
+  tetragon_tracing_policies = var.tetragon_tracing_policies
 
   depends_on = [time_sleep.cluster_access_ready]
 }

@@ -41,6 +41,33 @@ services:
       - ${HOME}/.aws:/home/backend/.aws
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
+  runner:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    init: true
+    user: "${BACKEND_UID:-1000}:${BACKEND_GID:-1000}"
+    working_dir: /app/backend
+    env_file:
+      - backend/.env
+    environment:
+      HOME: /home/backend
+      AWS_SDK_LOAD_CONFIG: ${AWS_SDK_LOAD_CONFIG:-true}
+      AWS_CONFIG_FILE: /home/backend/.aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /home/backend/.aws/credentials
+      ISOLENS_DATABASE_URL: postgresql://isolens:isolens-dev-password-change-me@postgres:5432/isolens
+      ISOLENS_WORKER_ID: compose-runner
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    volumes:
+      - ./backend:/app/backend
+      - ./infrastructure:/app/infrastructure
+      - ${HOME}/.aws:/home/backend/.aws
+    command: python -m app.runner_main
+
   frontend:
     build:
       context: .

@@ -51,3 +51,15 @@ variable "analysis_subjects" {
     error_message = "Each analysis_subjects key must be a valid Kubernetes namespace name."
   }
 }
+
+variable "kyverno_cluster_policies" {
+  description = "Kyverno ClusterPolicy manifests managed by the policies stage."
+  type        = any
+  default     = []
+}
+
+variable "tetragon_tracing_policies" {
+  description = "Tetragon tracing policy manifests managed by the policies stage."
+  type        = any
+  default     = []
+}

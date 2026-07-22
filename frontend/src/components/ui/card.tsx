@@ -4,30 +4,30 @@ export function Card({
   children,
   className = "",
 }: PropsWithChildren<{ className?: string }>) {
-  return <section className={`panel ${className}`}>{children}</section>;
+  return <section className={`panel isolate ${className}`}>{children}</section>;
 }
 
 export function CardHeader({
   children,
   className = "",
 }: PropsWithChildren<{ className?: string }>) {
-  return (
-    <div className={`border-b border-border/80 px-5 py-4 ${className}`}>
-      {children}
-    </div>
-  );
+  return <div className={`px-6 pt-6 ${className}`}>{children}</div>;
 }
 
 export function CardTitle({
   children,
   className = "",
 }: PropsWithChildren<{ className?: string }>) {
-  return <h2 className={`text-lg font-semibold ${className}`}>{children}</h2>;
+  return (
+    <h2 className={`text-lg font-semibold tracking-tight ${className}`}>
+      {children}
+    </h2>
+  );
 }
 
 export function CardContent({
   children,
   className = "",
 }: PropsWithChildren<{ className?: string }>) {
-  return <div className={`px-5 py-4 ${className}`}>{children}</div>;
+  return <div className={`px-6 py-5 ${className}`}>{children}</div>;
 }

@@ -46,6 +46,12 @@ This stage expects:
 - the EKS cluster to be reachable
 - at least one configured cluster-admin IAM principal to already have access through the core stage
 
+## Operational Ownership
+
+- This stage is infrastructure-owned and is no longer executable from the Isolens control-plane UI.
+- The repository workflow [deploy-infrastructure.yml](/home/mihandrei/work/security-observability-cluster/.github/workflows/deploy-infrastructure.yml) always plans this stage after the core job and applies it only when Terraform reports a real platform change.
+- When `core` changes, the same workflow still replans `platform` afterwards so shared services are checked against the updated foundation before any apply decision is made.
+
 ## Cilium Bootstrap Notes
 
 - The platform now expects the `core` stage node group to be tainted with `node.cilium.io/agent-not-ready=true:NoExecute` before any application workloads are scheduled.

@@ -1,149 +1,66 @@
-resource "kubernetes_manifest" "kyverno_require_subject_label" {
-  manifest = {
-    apiVersion = "kyverno.io/v1"
-    kind       = "ClusterPolicy"
-    metadata = {
-      name = "require-ward-subject-label"
-    }
-    spec = {
-      background = true
-      rules = [
-        {
-          name = "pods-in-wards-must-carry-subject-label"
-          match = {
-            any = [
-              {
-                resources = {
-                  kinds = ["Pod"]
-                  namespaceSelector = {
-                    matchExpressions = [
-                      {
-                        key      = "analysis-tier"
-                        operator = "Exists"
-                      }
-                    ]
-                  }
-                }
-              }
-            ]
+locals {
+  enabled_kyverno_cluster_policies = {
+    for policy in var.kyverno_cluster_policies : policy.id => merge(policy, {
+      manifest = merge(policy.manifest, {
+        metadata = merge(try(policy.manifest.metadata, {}), {
+          name = try(policy.manifest.metadata.name, policy.id)
+        })
+      })
+    })
+    if try(policy.enabled, true)
+  }
+
+  tetragon_tracing_policy_instances = {
+    for instance in flatten([
+      for policy in var.tetragon_tracing_policies : (
+        !try(policy.enabled, true) ? [] :
+        try(policy.scope, "all-wards") == "cluster" ? [
+          {
+            key = policy.id
+            manifest = merge(policy.manifest, {
+              metadata = merge(try(policy.manifest.metadata, {}), {
+                name = try(policy.manifest.metadata.name, policy.id)
+              })
+            })
+            namespace = null
           }
-          validate = {
-            failureAction = "Enforce"
-            message       = "Pods deployed into ward namespaces must declare the isolens.io/subject label."
-            pattern = {
-              metadata = {
-                labels = {
-                  "isolens.io/subject" = "?*"
-                }
-              }
-            }
+        ] :
+        try(policy.scope, "all-wards") == "namespace" && trimspace(try(policy.namespace, "")) != "" ? [
+          {
+            key = "${policy.id}::${trimspace(policy.namespace)}"
+            manifest = merge(policy.manifest, {
+              metadata = merge(try(policy.manifest.metadata, {}), {
+                name      = try(policy.manifest.metadata.name, policy.id)
+                namespace = trimspace(policy.namespace)
+              })
+            })
+            namespace = trimspace(policy.namespace)
           }
-        }
-      ]
-    }
+          ] : [
+          for namespace in sort(keys(var.analysis_subjects)) : {
+            key = "${policy.id}::${namespace}"
+            manifest = merge(policy.manifest, {
+              metadata = merge(try(policy.manifest.metadata, {}), {
+                name      = try(policy.manifest.metadata.name, policy.id)
+                namespace = namespace
+              })
+            })
+            namespace = namespace
+          }
+        ]
+      )
+    ]) : instance.key => instance
   }
 }
 
-resource "kubernetes_manifest" "kyverno_disallow_latest_tag" {
-  manifest = {
-    apiVersion = "kyverno.io/v1"
-    kind       = "ClusterPolicy"
-    metadata = {
-      name = "disallow-latest-tag-in-wards"
-    }
-    spec = {
-      background = true
-      rules = [
-        {
-          name = "disallow-latest-image-tags"
-          match = {
-            any = [
-              {
-                resources = {
-                  kinds = ["Pod"]
-                  namespaceSelector = {
-                    matchExpressions = [
-                      {
-                        key      = "analysis-tier"
-                        operator = "Exists"
-                      }
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-          validate = {
-            failureAction = "Enforce"
-            message       = "Ward workloads must pin container images and may not use the latest tag."
-            foreach = [
-              {
-                list = "request.object.spec.containers"
-                deny = {
-                  conditions = {
-                    any = [
-                      {
-                        key      = "{{ contains(element.image, ':latest') }}"
-                        operator = "Equals"
-                        value    = true
-                      }
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-        }
-      ]
-    }
-  }
+resource "kubernetes_manifest" "kyverno_cluster_policy" {
+  for_each = local.enabled_kyverno_cluster_policies
+
+  manifest = each.value.manifest
 }
 
-resource "kubernetes_manifest" "tetragon_suspicious_exec" {
-  for_each = var.analysis_subjects
+resource "kubernetes_manifest" "tetragon_tracing_policy" {
+  for_each = local.tetragon_tracing_policy_instances
 
-  manifest = {
-    apiVersion = "cilium.io/v1alpha1"
-    kind       = "TracingPolicyNamespaced"
-    metadata = {
-      name      = "suspicious-exec"
-      namespace = each.key
-    }
-    spec = {
-      kprobes = [
-        {
-          call    = "sys_execve"
-          syscall = true
-          selectors = [
-            {
-              matchBinaries = [
-                {
-                  operator = "In"
-                  values   = local.suspicious_network_binaries
-                }
-              ]
-              matchActions = [
-                {
-                  action = "Post"
-                }
-              ]
-            },
-            {
-              matchBinaries = [
-                {
-                  operator = "In"
-                  values   = local.suspicious_shell_binaries
-                }
-              ]
-              matchActions = [
-                {
-                  action = "Post"
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }
-  }
+  manifest = each.value.manifest
 }

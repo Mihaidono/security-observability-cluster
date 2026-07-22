@@ -26,6 +26,185 @@
       }
     }
   },
+  "policies": {
+    "kyverno_cluster_policies": [
+      {
+        "id": "require-ward-subject-label",
+        "name": "Require ward subject label",
+        "description": "Require pods deployed into ward namespaces to carry the isolens.io/subject label.",
+        "enabled": true,
+        "manifest": {
+          "apiVersion": "kyverno.io/v1",
+          "kind": "ClusterPolicy",
+          "metadata": {
+            "name": "require-ward-subject-label"
+          },
+          "spec": {
+            "background": true,
+            "rules": [
+              {
+                "name": "pods-in-wards-must-carry-subject-label",
+                "match": {
+                  "any": [
+                    {
+                      "resources": {
+                        "kinds": [
+                          "Pod"
+                        ],
+                        "namespaceSelector": {
+                          "matchExpressions": [
+                            {
+                              "key": "analysis-tier",
+                              "operator": "Exists"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "validate": {
+                  "failureAction": "Enforce",
+                  "message": "Pods deployed into ward namespaces must declare the isolens.io/subject label.",
+                  "pattern": {
+                    "metadata": {
+                      "labels": {
+                        "isolens.io/subject": "?*"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "disallow-latest-tag-in-wards",
+        "name": "Disallow latest image tags",
+        "description": "Deny ward workloads that use mutable latest tags.",
+        "enabled": true,
+        "manifest": {
+          "apiVersion": "kyverno.io/v1",
+          "kind": "ClusterPolicy",
+          "metadata": {
+            "name": "disallow-latest-tag-in-wards"
+          },
+          "spec": {
+            "background": true,
+            "rules": [
+              {
+                "name": "disallow-latest-image-tags",
+                "match": {
+                  "any": [
+                    {
+                      "resources": {
+                        "kinds": [
+                          "Pod"
+                        ],
+                        "namespaceSelector": {
+                          "matchExpressions": [
+                            {
+                              "key": "analysis-tier",
+                              "operator": "Exists"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "validate": {
+                  "failureAction": "Enforce",
+                  "message": "Ward workloads must pin container images and may not use the latest tag.",
+                  "foreach": [
+                    {
+                      "list": "request.object.spec.containers",
+                      "deny": {
+                        "conditions": {
+                          "any": [
+                            {
+                              "key": "{{ contains(element.image, ':latest') }}",
+                              "operator": "Equals",
+                              "value": true
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "tetragon_tracing_policies": [
+      {
+        "id": "suspicious-exec",
+        "name": "Suspicious exec tracing",
+        "description": "Trace suspicious network and shell executions in every ward namespace.",
+        "enabled": true,
+        "scope": "all-wards",
+        "manifest": {
+          "apiVersion": "cilium.io/v1alpha1",
+          "kind": "TracingPolicyNamespaced",
+          "metadata": {
+            "name": "suspicious-exec"
+          },
+          "spec": {
+            "kprobes": [
+              {
+                "call": "sys_execve",
+                "syscall": true,
+                "selectors": [
+                  {
+                    "matchBinaries": [
+                      {
+                        "operator": "In",
+                        "values": [
+                          "/usr/bin/curl",
+                          "/usr/bin/wget",
+                          "/bin/wget",
+                          "/bin/curl",
+                          "/usr/bin/nc",
+                          "/bin/nc"
+                        ]
+                      }
+                    ],
+                    "matchActions": [
+                      {
+                        "action": "Post"
+                      }
+                    ]
+                  },
+                  {
+                    "matchBinaries": [
+                      {
+                        "operator": "In",
+                        "values": [
+                          "/bin/sh",
+                          "/bin/bash",
+                          "/usr/bin/bash",
+                          "/usr/bin/sh"
+                        ]
+                      }
+                    ],
+                    "matchActions": [
+                      {
+                        "action": "Post"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
   "applications": {
     "ward_applications": [
       {

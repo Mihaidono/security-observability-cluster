@@ -3,7 +3,7 @@
 The backend is a FastAPI service that owns three things:
 
 - the editable Terraform input model used by the UI
-- queued execution of `terraform plan`, `apply`, and `destroy`
+- queued execution of `terraform plan`, `apply`, and `destroy` for the app-managed stages
 - persisted run history, logs, outputs, and live event streaming
 
 The managed config model now includes `cluster_log_retention_in_days`, so the backend preserves that Terraform input across load, reset, save, and run operations instead of relying on an implicit Terraform-only default.
@@ -47,6 +47,13 @@ The token comes from `ISOLENS_API_TOKEN` in `backend/.env`.
 
 ## Runtime Behavior
 
+The backend only executes the app-managed stages:
+
+- `policies`
+- `applications`
+
+The `core` and `platform` stages remain part of the configuration model and output aggregation, but new runs for those stages are intentionally rejected. They are owned by dedicated infrastructure workflows.
+
 The backend does not apply Terraform directly from browser input. The flow is:
 
 1. the frontend edits a JSON config model
@@ -72,8 +79,6 @@ Supported run kinds:
 
 Supported stages:
 
-- `core`
-- `platform`
 - `policies`
 - `applications`
 
@@ -92,15 +97,11 @@ Run statuses:
 
 Important guardrails implemented in `app/terraform_runner.py`:
 
-- at least one non-empty cluster admin ARN is required before plan/apply/destroy
-- `platform` plan/apply is blocked until there is a successful `core` apply
-- `policies` plan/apply is blocked until there is a successful `platform` apply
-- `applications` plan/apply is blocked until there is a successful `policies` apply
+- `policies` and `applications` plan/apply are both independently queueable from the control plane
 - `apply` can be created from the latest plan while that source plan is `queued`, `running`, or `planned`, but it only executes if the plan finishes successfully as `planned`
 - each saved plan is single-use once an apply attempt exists
 - `policies` destroy is blocked while the latest applications-stage apply is still active
-- `platform` destroy is blocked while the latest policies-stage or applications-stage apply is still active
-- `core` destroy is blocked while the latest platform-stage, policies-stage, or applications-stage apply is still active
+- `core` and `platform` plan/apply/destroy requests are rejected with a control-boundary error
 - stale queued/running runs are reconciled on backend startup
 
 ## Cancellation Semantics
@@ -149,9 +150,12 @@ Current routes:
 - `POST /api/runs/plan/{stage}`
 - `POST /api/runs/{run_id}/apply`
 - `POST /api/runs/destroy/{stage}`
+- `POST /api/state/unlock/{stage}`
 - `POST /api/runs/{run_id}/cancel`
 - `GET /api/outputs`
 - `WS /api/runs/{run_id}/events?token=...`
+
+For stage-mutating routes, only `policies` and `applications` are supported by the control plane. `core` and `platform` must be reconciled through the infrastructure workflow.
 
 ## Environment Variables
 
@@ -197,5 +201,5 @@ Container images are intentionally split:
 
 - The backend is intentionally single-worker and only executes one Terraform run at a time.
 - Successful apply output collection is best-effort. If `terraform output -json` fails after the apply itself succeeded, the run still remains `applied`.
-- `platform` and `applications` depend on a live cluster connection, so out-of-band cluster access issues can still interrupt destroy flows.
+- `policies` and `applications` depend on a live cluster connection, so out-of-band cluster access issues can still interrupt destroy flows.
 - The backend stores raw configuration and run metadata, but it does not store scenario evidence such as screenshots or operator notes.

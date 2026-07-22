@@ -100,6 +100,15 @@ class PostgresStore:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS config_state (
+                    key TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
 
             columns = {
                 str(row["column_name"])
@@ -122,6 +131,20 @@ class PostgresStore:
         return TerraformConfig.model_validate_json(self.settings.default_config_path.read_text())
 
     def load_config(self) -> TerraformConfig:
+        config_from_db = self._load_config_from_database()
+        if config_from_db is not None:
+            if not all(
+                stage_path.exists()
+                for stage_path in [
+                    self.settings.core_tfvars_path,
+                    self.settings.platform_tfvars_path,
+                    self.settings.policies_tfvars_path,
+                    self.settings.applications_tfvars_path,
+                ]
+            ):
+                self.save_config(config_from_db)
+            return config_from_db
+
         path = self.settings.managed_config_path
         if not path.exists():
             legacy_path = self.settings.infrastructure_root / "frontend-managed.auto.tfvars.json"
@@ -147,6 +170,17 @@ class PostgresStore:
 
     def save_config(self, config: TerraformConfig) -> None:
         payload = json.dumps(config.model_dump(mode="json"), indent=2)
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO config_state (key, payload_json, updated_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT(key) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                ("managed-config", payload, utc_now().isoformat()),
+            )
         self.settings.managed_config_path.write_text(f"{payload}\n")
         self.settings.core_tfvars_path.write_text(f"{json.dumps(core_tfvars_payload(config), indent=2)}\n")
         self.settings.platform_tfvars_path.write_text(f"{json.dumps(platform_tfvars_payload(config), indent=2)}\n")
@@ -154,6 +188,16 @@ class PostgresStore:
         self.settings.applications_tfvars_path.write_text(
             f"{json.dumps(applications_tfvars_payload(config), indent=2)}\n"
         )
+
+    def _load_config_from_database(self) -> TerraformConfig | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM config_state WHERE key = %s",
+                ("managed-config",),
+            ).fetchone()
+        if row is None:
+            return None
+        return TerraformConfig.model_validate_json(row["payload_json"])
 
     def reset_config(self) -> TerraformConfig:
         config = self.load_default_config()
@@ -244,10 +288,14 @@ class PostgresStore:
 
         run_ids_to_delete = [run.id for run in runs_to_delete]
         with self._connection() as connection:
-            connection.executemany(
-                "DELETE FROM run_logs WHERE run_id = %s", [(run_id,) for run_id in run_ids_to_delete]
+            connection.execute(
+                "DELETE FROM run_logs WHERE run_id = ANY(%s)",
+                (run_ids_to_delete,),
             )
-            connection.executemany("DELETE FROM runs WHERE id = %s", [(run_id,) for run_id in run_ids_to_delete])
+            connection.execute(
+                "DELETE FROM runs WHERE id = ANY(%s)",
+                (run_ids_to_delete,),
+            )
 
         for run_id in run_ids_to_delete:
             shutil.rmtree(self.settings.runs_dir / run_id, ignore_errors=True)
@@ -450,9 +498,11 @@ class PostgresStore:
             for line in cleaned_lines:
                 handle.write(f"{line}\n")
         with self._connection() as connection:
-            connection.executemany(
-                "INSERT INTO run_logs (run_id, line) VALUES (%s, %s)", [(run_id, line) for line in cleaned_lines]
-            )
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    "INSERT INTO run_logs (run_id, line) VALUES (%s, %s)",
+                    [(run_id, line) for line in cleaned_lines],
+                )
 
     def read_logs(self, run_id: str) -> list[str]:
         with self._connection() as connection:
@@ -559,4 +609,6 @@ def policies_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
         "cluster_name": config.core.cluster_name,
         "cluster_admin_principal_arns": config.core.cluster_admin_principal_arns,
         "analysis_subjects": config.platform.analysis_subjects,
+        "kyverno_cluster_policies": config.policies.kyverno_cluster_policies,
+        "tetragon_tracing_policies": config.policies.tetragon_tracing_policies,
     }

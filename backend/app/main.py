@@ -14,8 +14,9 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import require_api_token, require_websocket_token
-from .config import Settings, get_settings
+from .config import get_settings
 from .models import (
+    APP_CONTROL_PLANE_RUN_STAGES,
     HealthResponse,
     OutputsResponse,
     RunListResponse,
@@ -64,6 +65,12 @@ app.add_middleware(
 async def health() -> HealthResponse:
     run_service.reconcile_stale_workers()
     worker_running, active_run_id = run_service.worker_snapshot()
+    cluster_status = "healthy" if worker_running else "degraded"
+    cluster_message = (
+        "Backend API is reachable and the worker is running."
+        if worker_running
+        else "Backend API is reachable, but the worker is not running."
+    )
     return HealthResponse(
         status="ok" if worker_running else "degraded",
         active_run_id=active_run_id,
@@ -80,7 +87,12 @@ async def health() -> HealthResponse:
         ),
         queue_depth=run_service.queue_depth(),
         auth_enabled=True,
-        stages=[RunStage.core, RunStage.platform, RunStage.policies, RunStage.applications],
+        stages=APP_CONTROL_PLANE_RUN_STAGES,
+        cluster_status=cluster_status,
+        cluster_message=cluster_message,
+        cluster_context=None,
+        cluster_nodes_ready=None,
+        cluster_nodes_total=None,
     )
 
 
@@ -213,9 +225,7 @@ async def cancel_run(run_id: str) -> TerraformRun:
 )
 async def get_outputs() -> OutputsResponse:
     outputs = store.latest_outputs()
-    if outputs is None:
-        raise HTTPException(status_code=404, detail="No outputs are available yet.")
-    return OutputsResponse(outputs=outputs)
+    return OutputsResponse(outputs=outputs or {})
 
 
 @app.websocket("/api/runs/{run_id}/events")

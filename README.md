@@ -129,6 +129,7 @@ This exposes:
 
 - frontend: `http://127.0.0.1:5173`
 - backend: `http://127.0.0.1:8000`
+- runner: background Terraform worker process used to execute queued runs
 
 ### 4. Operate in stage order
 

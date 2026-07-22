@@ -1,6 +1,10 @@
 export type JsonValue =
   string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
 export interface SubjectResourceQuota {
   pods?: string;
   requests_cpu?: string;
@@ -167,9 +171,33 @@ export interface ApplicationsConfig {
   ward_applications: WardApplication[];
 }
 
+export interface KyvernoClusterPolicyConfig {
+  id: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  manifest: JsonObject;
+}
+
+export interface TetragonTracingPolicyConfig {
+  id: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  scope?: "all-wards" | "namespace" | "cluster";
+  namespace?: string;
+  manifest: JsonObject;
+}
+
+export interface PoliciesConfig {
+  kyverno_cluster_policies: KyvernoClusterPolicyConfig[];
+  tetragon_tracing_policies: TetragonTracingPolicyConfig[];
+}
+
 export interface TerraformConfig {
   core: CoreConfig;
   platform: PlatformConfig;
+  policies: PoliciesConfig;
   applications: ApplicationsConfig;
 }
 
@@ -222,6 +250,11 @@ export interface HealthResponse {
   queue_depth: number;
   auth_enabled: boolean;
   stages: RunStage[];
+  cluster_status: string;
+  cluster_message: string;
+  cluster_context?: string | null;
+  cluster_nodes_ready?: number | null;
+  cluster_nodes_total?: number | null;
 }
 
 export interface StateLockInfo {

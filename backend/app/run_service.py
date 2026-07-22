@@ -6,8 +6,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from .config import Settings
-from .models import RunKind, RunStage, RunStatus, TerraformRun
-from .run_messages import canceled_run_message
+from .models import APP_CONTROL_PLANE_RUN_STAGES, RunKind, RunStage, RunStatus, TerraformRun
 from .store import PostgresStore
 
 
@@ -30,7 +29,7 @@ class RunService:
         return self.store.has_nonterminal_runs()
 
     async def start_plan(self, stage: RunStage) -> TerraformRun:
-        self._require_cluster_admin_access()
+        self._require_app_managed_stage(stage)
 
         dependency = self._plan_dependency_for_stage(stage)
         if dependency is not None and not self._stage_is_applied(dependency):
@@ -61,11 +60,10 @@ class RunService:
         return self.store.enqueue_run(run)
 
     async def start_apply(self, run_id: str) -> TerraformRun:
-        self._require_cluster_admin_access()
-
         source_run = self.store.load_run(run_id)
         if source_run is None:
             raise HTTPException(status_code=404, detail="Run not found.")
+        self._require_app_managed_stage(source_run.stage)
         if source_run.kind != RunKind.plan:
             raise HTTPException(status_code=409, detail="Only a plan run can be used as the source for apply.")
         if source_run.status not in {RunStatus.queued, RunStatus.running, RunStatus.planned}:
@@ -97,7 +95,7 @@ class RunService:
         return self.store.enqueue_run(apply_run)
 
     async def start_destroy(self, stage: RunStage) -> TerraformRun:
-        self._require_cluster_admin_access()
+        self._require_app_managed_stage(stage)
 
         for blocking_stage in self._destroy_blockers_for_stage(stage):
             if self._stage_is_applied(blocking_stage):
@@ -181,35 +179,22 @@ class RunService:
         return False
 
     def _plan_dependency_for_stage(self, stage: RunStage) -> RunStage | None:
-        if stage == RunStage.platform:
-            return RunStage.core
-        if stage == RunStage.policies:
-            return RunStage.platform
-        if stage == RunStage.applications:
-            return RunStage.policies
         return None
 
     def _destroy_blockers_for_stage(self, stage: RunStage) -> list[RunStage]:
-        if stage == RunStage.core:
-            return [RunStage.applications, RunStage.policies, RunStage.platform]
-        if stage == RunStage.platform:
-            return [RunStage.applications, RunStage.policies]
         if stage == RunStage.policies:
             return [RunStage.applications]
         return []
 
-    def _require_cluster_admin_access(self) -> None:
-        config = self.store.load_config()
-        admin_arns = [arn.strip() for arn in config.core.cluster_admin_principal_arns if arn.strip()]
-        if admin_arns:
+    def _require_app_managed_stage(self, stage: RunStage) -> None:
+        if stage in APP_CONTROL_PLANE_RUN_STAGES:
             return
 
         raise HTTPException(
-            status_code=409,
+            status_code=403,
             detail=(
-                "Add at least one cluster admin IAM principal ARN in Settings -> Admin Access before planning or "
-                "applying. Without an admin ARN, core can create the cluster, but the later platform "
-                "stages may not be able to manage or destroy in-cluster Kubernetes and Helm resources safely."
+                f"The {stage.value} stage is managed by infrastructure workflows, not by the Isolens control plane. "
+                "Use the dedicated infrastructure pipeline for core/platform changes."
             ),
         )
 

@@ -51,8 +51,10 @@ terraform apply
 | cluster_admin_principal_arns | IAM principal ARNs granted cluster-admin access in the core stage. Used here to keep the readiness wait tied to access configuration changes. | `list(string)` | `[]` | no |
 | cluster_name | Name of the existing EKS cluster targeted by the policies stage. | `string` | `"forensic-lab"` | no |
 | environment | Environment name used for tags and naming. | `string` | `"lab"` | no |
+| kyverno_cluster_policies | Kyverno ClusterPolicy manifests managed by the policies stage. | `any` | `[]` | no |
 | project_name | Logical project name used for tagging and naming. | `string` | `"isolens"` | no |
 | region | AWS region of the existing EKS cluster targeted by the policies stage. | `string` | `"eu-north-1"` | no |
+| tetragon_tracing_policies | Tetragon tracing policy manifests managed by the policies stage. | `any` | `[]` | no |
 
 ## Outputs
 
