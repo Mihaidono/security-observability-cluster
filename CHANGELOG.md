@@ -1,3 +1,9 @@
+## [0.8.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.7.0...v0.8.0) (2026-07-22)
+
+### Features
+
+* **repo:** update control plane ui and policies stage configuration ([edc9e10](https://github.com/Mihaidono/security-observability-cluster/commit/edc9e10203dccdf333dfb2710ac436dba15e613c))
+
 ## [0.7.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.6.3...v0.7.0) (2026-07-14)
 
 ### Features
