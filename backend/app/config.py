@@ -29,10 +29,53 @@ class Settings:
     default_config_path: Path
     terraform_bin: str
     cors_origins: list[str]
-    api_token: str
+    public_app_url: str
+    oidc_internal_base_url: str
+    oidc_realm: str
+    oidc_client_id: str
+    oidc_client_secret: str
+    session_cookie_name: str
+    session_cookie_secure: bool
+    session_ttl_seconds: int
     worker_poll_interval_seconds: float
     worker_heartbeat_interval_seconds: float
     worker_heartbeat_ttl_seconds: int
+
+    @property
+    def oidc_public_base_url(self) -> str:
+        return f"{self.public_app_url.rstrip('/')}/auth"
+
+    @property
+    def oidc_public_realm_url(self) -> str:
+        return f"{self.oidc_public_base_url}/realms/{self.oidc_realm}"
+
+    @property
+    def oidc_internal_realm_url(self) -> str:
+        return f"{self.oidc_internal_base_url.rstrip('/')}/realms/{self.oidc_realm}"
+
+    @property
+    def oidc_authorization_endpoint(self) -> str:
+        return f"{self.oidc_public_realm_url}/protocol/openid-connect/auth"
+
+    @property
+    def oidc_logout_endpoint(self) -> str:
+        return f"{self.oidc_public_realm_url}/protocol/openid-connect/logout"
+
+    @property
+    def oidc_token_endpoint(self) -> str:
+        return f"{self.oidc_internal_realm_url}/protocol/openid-connect/token"
+
+    @property
+    def oidc_jwks_endpoint(self) -> str:
+        return f"{self.oidc_internal_realm_url}/protocol/openid-connect/certs"
+
+    @property
+    def oidc_redirect_uri(self) -> str:
+        return f"{self.public_app_url.rstrip('/')}/auth/callback"
+
+    @property
+    def oidc_post_logout_redirect_uri(self) -> str:
+        return self.public_app_url.rstrip("/")
 
     def tfvars_path_for_stage(self, stage: RunStage) -> Path:
         if stage == RunStage.core:
@@ -92,7 +135,14 @@ def get_settings() -> Settings:
         default_config_path=default_config_path,
         terraform_bin=os.getenv("TERRAFORM_BIN", "terraform"),
         cors_origins=cors_origins,
-        api_token=os.getenv("ISOLENS_API_TOKEN", "dev-token"),
+        public_app_url=os.getenv("ISOLENS_PUBLIC_APP_URL", "http://localhost:5173").rstrip("/"),
+        oidc_internal_base_url=os.getenv("ISOLENS_OIDC_INTERNAL_BASE_URL", "http://keycloak:8080/auth").rstrip("/"),
+        oidc_realm=os.getenv("ISOLENS_OIDC_REALM", "isolens"),
+        oidc_client_id=os.getenv("ISOLENS_OIDC_CLIENT_ID", "isolens-web"),
+        oidc_client_secret=os.getenv("ISOLENS_OIDC_CLIENT_SECRET", ""),
+        session_cookie_name=os.getenv("ISOLENS_SESSION_COOKIE_NAME", "isolens_session"),
+        session_cookie_secure=os.getenv("ISOLENS_SESSION_COOKIE_SECURE", "false").lower() == "true",
+        session_ttl_seconds=int(os.getenv("ISOLENS_SESSION_TTL_SECONDS", "28800")),
         worker_poll_interval_seconds=float(os.getenv("ISOLENS_WORKER_POLL_INTERVAL_SECONDS", "2")),
         worker_heartbeat_interval_seconds=float(os.getenv("ISOLENS_WORKER_HEARTBEAT_INTERVAL_SECONDS", "5")),
         worker_heartbeat_ttl_seconds=int(os.getenv("ISOLENS_WORKER_HEARTBEAT_TTL_SECONDS", "20")),

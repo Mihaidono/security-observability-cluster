@@ -22,3 +22,13 @@ output "runner_name" {
   description = "Deployment name for the Terraform runner workload."
   value       = kubernetes_deployment_v1.runner.metadata[0].name
 }
+
+output "keycloak_service_name" {
+  description = "ClusterIP Service name for the control-plane Keycloak workload."
+  value       = kubernetes_service_v1.keycloak.metadata[0].name
+}
+
+output "keycloak_service_fqdn" {
+  description = "Cluster-local DNS name for the control-plane Keycloak service."
+  value       = local.keycloak_service_fqdn
+}

@@ -38,6 +38,16 @@ output "control_plane_runner_name" {
   value       = module.control_plane.runner_name
 }
 
+output "control_plane_keycloak_service_name" {
+  description = "ClusterIP Service name for the control-plane Keycloak workload."
+  value       = module.control_plane.keycloak_service_name
+}
+
+output "control_plane_keycloak_service_fqdn" {
+  description = "Cluster-local DNS name for the control-plane Keycloak service."
+  value       = module.control_plane.keycloak_service_fqdn
+}
+
 output "postgresql_endpoint" {
   description = "Endpoint of the RDS PostgreSQL instance used by the control plane."
   value       = module.postgresql.endpoint
@@ -61,4 +71,19 @@ output "postgresql_database_name" {
 output "postgresql_username" {
   description = "Application username provisioned for the control plane database."
   value       = module.postgresql.username
+}
+
+output "keycloak_database_name" {
+  description = "Database name provisioned for Keycloak on the shared PostgreSQL instance."
+  value       = var.keycloak_database_name
+}
+
+output "keycloak_database_username" {
+  description = "Database username provisioned for Keycloak on the shared PostgreSQL instance."
+  value       = var.keycloak_database_username
+}
+
+output "keycloak_realm" {
+  description = "Keycloak realm used by the Isolens control plane."
+  value       = var.keycloak_realm
 }

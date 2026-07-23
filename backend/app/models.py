@@ -266,6 +266,41 @@ class RunPruneResponse(BaseModel):
     kept_count: int
 
 
+class AuthConfigResponse(BaseModel):
+    authorization_endpoint: str
+    client_id: str
+    redirect_uri: str
+    scope: str = "openid profile email"
+    response_type: str = "code"
+    code_challenge_method: str = "S256"
+    issuer: str
+
+
+class AuthExchangeRequest(BaseModel):
+    code: str
+    code_verifier: str
+    redirect_uri: str
+
+
+class AuthenticatedUser(BaseModel):
+    id: str
+    subject: str
+    username: str
+    email: str | None = None
+    display_name: str | None = None
+    roles: list[str] = Field(default_factory=list)
+
+
+class SessionResponse(BaseModel):
+    authenticated: bool
+    user: AuthenticatedUser | None = None
+
+
+class LogoutResponse(BaseModel):
+    logged_out: bool = True
+    logout_url: str | None = None
+
+
 class OutputsResponse(BaseModel):
     outputs: dict[str, Any]
 

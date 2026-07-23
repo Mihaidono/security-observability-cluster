@@ -26,5 +26,13 @@ locals {
     "app.kubernetes.io/managed-by" = "terraform"
   }
 
-  backend_service_fqdn = "${var.backend_service_name}.${local.namespace_name}.svc.cluster.local"
+  keycloak_labels = {
+    "app.kubernetes.io/name"       = var.keycloak_name
+    "app.kubernetes.io/component"  = "auth"
+    "app.kubernetes.io/part-of"    = "isolens"
+    "app.kubernetes.io/managed-by" = "terraform"
+  }
+
+  backend_service_fqdn  = "${var.backend_service_name}.${local.namespace_name}.svc.cluster.local"
+  keycloak_service_fqdn = "${var.keycloak_name}.${local.namespace_name}.svc.cluster.local"
 }

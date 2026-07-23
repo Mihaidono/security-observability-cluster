@@ -1,227 +1,167 @@
 # Testing and Usage
 
-This guide matches the current implementation in the repository.
+This guide matches the current implementation as of July 23, 2026.
 
-## Prerequisites
+## Local Stack
 
-- Docker and Docker Compose, or local Python/Node toolchains
-- Terraform installed if you want to run stage commands outside the backend
-- AWS credentials that the backend process can use
-- remote state bucket bootstrapped in `infrastructure/bootstrap`
+The local Docker Compose stack now includes:
 
-## Local Bring-Up
+- PostgreSQL
+- Keycloak
+- backend
+- runner
+- frontend
 
-### 1. Prepare backend environment
+The local `postgres` container is shared. It hosts:
 
-```bash
-cp backend/.env.example backend/.env
-```
+- the `isolens` database for the backend
+- the `keycloak` database for Keycloak
 
-Edit `backend/.env` so the backend can actually reach AWS.
-
-### 2. Start the control plane
+Start it with:
 
 ```bash
 docker compose up --build
 ```
 
-Endpoints:
+If you are switching from an older local stack where Keycloak used `dev-file`, reset the local volume first so the init SQL runs on a clean database directory:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+Expected local endpoints:
 
 - frontend: `http://127.0.0.1:5173`
-- backend: `http://127.0.0.1:8000`
-- runner: background Terraform worker process used for queued plan/apply/destroy runs
+- backend: proxied through frontend at `/api`
+- Keycloak: proxied through frontend at `/auth`
+- direct Keycloak debug port: `http://127.0.0.1:8081`
 
-## Backend Smoke Tests
+## Local Login
 
-All API requests need:
+The Keycloak bootstrap admin is also available locally:
 
-```http
-Authorization: Bearer <token>
-```
+- username: `admin`
+- password: `admin-password-change-me`
 
-Using the default token:
+Those credentials are for local development only.
 
-```bash
-TOKEN=dev-token
-```
+Before login works, create these in Keycloak:
 
-### Health
+- realm: `isolens`
+- client: `isolens-web`
+- redirect URI: `http://localhost:5173/auth/callback`
+- web origin: `http://localhost:5173`
+- client type: public with PKCE if `ISOLENS_OIDC_CLIENT_SECRET` is empty
+- at least one user you can sign in with
 
-```bash
-curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/health | jq
-```
+## Local Smoke Test
 
-Expected:
+1. Open `http://127.0.0.1:5173`
+2. Sign in to the Keycloak admin console at `http://127.0.0.1:8081/auth`
+3. Create the realm, client, and test user listed above
+4. Click `Sign in` in the Isolens UI
+5. Authenticate with the user you created
+6. Confirm the UI loads the control-plane state
+7. Open the `Accounts` tab and confirm the authenticated username and roles are visible
 
-- `status: "ok"`
-- `stages: ["core", "platform", "policies"]`
+## Backend API Checks
 
-### Config load
+Because auth is now cookie-backed, use a browser session for the easiest validation.
 
-```bash
-curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/config | jq
-```
+Important routes:
 
-Expected:
-
-- cluster metadata
-- `analysis_subjects`
-- `ward_applications`
-
-### Run list
-
-```bash
-curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/runs | jq
-```
-
-## Terraform Stage Flow
-
-The intended operational order is:
-
-1. save config
-2. plan `core`
-3. apply the saved `core` plan
-4. plan `platform`
-5. apply the saved `platform` plan
-6. plan `policies`
-7. apply the saved `policies` plan
-
-### Plan core
-
-```bash
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/runs/plan/core | jq
-```
+- `GET /api/auth/config`
+- `GET /api/auth/session`
+- `POST /api/auth/exchange`
+- `POST /api/auth/logout`
+- `GET /api/health`
+- `GET /api/config`
+- `GET /api/runs`
 
 Expected behavior:
 
-- run starts `queued`
-- later moves to `running`
-- ends as `planned`, `failed`, or `canceled`
+- unauthenticated requests to protected routes return `401`
+- `GET /api/auth/session` returns `{"authenticated": false}` before login
+- after login, `GET /api/auth/session` returns the mapped user profile
+- WebSocket run streaming works without a token query parameter
 
-### Apply a saved plan
+## Frontend Validation
 
-Use the run ID from the latest stage plan:
+Verify:
 
-```bash
-PLAN_RUN_ID=<plan_run_id>
+- the login screen appears before authentication
+- redirect to Keycloak uses `/auth`
+- callback returns to `/auth/callback` and then back to `/`
+- `Accounts` shows the signed-in identity
+- `Stages`, `Assets`, and `Activity` load only after the session is established
+- sign-out clears access and returns the UI to the login screen
 
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/runs/$PLAN_RUN_ID/apply | jq
-```
+## Terraform Validation
 
-Important current rules:
-
-- apply can be queued from a source plan while that plan is `queued`, `running`, or `planned`
-- the apply only executes if the source plan finishes successfully as `planned`
-- the saved plan file must still exist
-- each saved plan is single-use once an apply attempt exists
-
-If you need another apply attempt, create a fresh plan first.
-
-### Plan platform
+Static checks:
 
 ```bash
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/runs/plan/platform | jq
+python3 -m py_compile backend/app/*.py
 ```
-
-Expected current behavior:
-
-- blocked with `409` until a successful `core` apply exists
-
-### Plan policies
 
 ```bash
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/runs/plan/policies | jq
+cd frontend
+npm run build
 ```
-
-Expected current behavior:
-
-- blocked with `409` until a successful `platform` apply exists
-
-### Cancel a run
 
 ```bash
-RUN_ID=<run_id>
-
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/runs/$RUN_ID/cancel | jq
+terraform fmt infrastructure/modules/control-plane \
+  infrastructure/stages/platform
 ```
 
-Expected:
-
-- queued run -> `canceled`
-- active run -> `canceling` then `canceled`
-
-For `apply` and `destroy`, cancellation warning text should mention possible partial remote changes.
-
-## Logs, Summaries, and Outputs
-
-### Run details
+For live Terraform checks against AWS:
 
 ```bash
-curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/runs/$RUN_ID | jq
+cd infrastructure/stages/platform
+terraform init -reconfigure -backend-config=backend.hcl
+terraform validate
+terraform plan
 ```
 
-### Run logs
+## Cluster Validation
+
+After the platform stage is applied, verify:
 
 ```bash
-curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/runs/$RUN_ID/logs | jq
+kubectl -n isolens-system get deploy,po,svc
 ```
-
-### Latest outputs
 
 ```bash
-curl -s \
-  -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:8000/api/outputs | jq
+kubectl -n isolens-system get statefulset isolens-keycloak
 ```
 
-Current behavior:
+```bash
+kubectl -n isolens-system logs statefulset/isolens-keycloak
+```
 
-- returns the latest effective combined outputs from the applied `core`, `platform`, and `policies` stages
-- returns `404` if no successful apply has produced outputs yet
+```bash
+kubectl -n isolens-system exec deploy/isolens-backend -- printenv | grep '^ISOLENS_OIDC_'
+```
 
-## Frontend Smoke Tests
+```bash
+kubectl -n isolens-system exec deploy/isolens-backend -- nc -vz <control-plane-rds-endpoint> 5432
+```
 
-After opening `http://127.0.0.1:5173`, confirm:
+```bash
+kubectl -n isolens-system logs job/isolens-keycloak-database-bootstrap
+```
 
-- the app loads without auth errors when the token matches the backend
-- `Overview` shows stage cards for `core`, `platform`, and `policies`
-- `Assets` shows editable subjects and applications
-- `Activity` shows run history and per-run details
-- `Settings` shows cluster profile and editable admin ARNs
+Expected results:
 
-Specific behavior to verify:
+- backend, frontend, runner, and Keycloak are running
+- Keycloak is healthy and ready for manual realm/client configuration
+- backend has OIDC environment configured
+- backend can reach the shared PostgreSQL instance
 
-- `Plan platform` stays disabled until core has been applied
-- `Plan policies` stays disabled until platform has been applied
-- `Destroy core` is visually blocked while platform or policies are still effectively applied
-- `Cancel run` is only enabled for queued or active runs
-- selecting a run with no outputs clears the outputs panel instead of showing stale values
-- `Keep latest 10` prunes older run history once no active or queued run is in progress
-- loading a scenario in `Assets` replaces the selected ward's current applications and creates a matching `Scenario Playbook`
+## Hubble
 
-## Hubble Handoff
-
-For the current internal-only Hubble path, run:
+Hubble remains an internal handoff:
 
 ```bash
 kubectl -n kube-system port-forward svc/hubble-ui 12000:80
@@ -232,84 +172,3 @@ Then open:
 ```text
 http://127.0.0.1:12000
 ```
-
-If you want to look only at one ward, append the namespace query parameter:
-
-```text
-http://127.0.0.1:12000/?namespace=ward-public-api
-```
-
-## Scenario Validation
-
-The frontend now distinguishes between:
-
-- `App Templates`
-  single workloads you can keep editing freely
-- `Scenario Library`
-  repeatable demo bundles that replace the selected ward's current applications
-
-After loading a scenario in `Assets`, verify:
-
-- the ward app list now contains only that scenario's resources
-- the `Scenario Playbooks` card appears for the ward
-- the playbook lists the expected `kubectl` or `curl` commands
-- the playbook explains what proof should appear in Hubble, Tetragon, Kyverno, or Terraform logs
-
-High-value scenarios to test:
-
-- `Public Ingress Proof`
-  prove the ingress path with a host-header curl and a matching Hubble flow
-- `Allowed East-West Call`
-  prove same-namespace traffic can succeed when explicitly allowed
-- `Blocked East-West Call`
-  prove same-namespace traffic is dropped when that allow path is removed
-- `Blocked Internet Egress`
-  prove default-deny egress and runtime exec visibility
-- `Kyverno Latest Tag Deny`
-  prove the policy layer blocks a violating workload and leaves evidence in run logs and Kyverno logs
-
-## Direct Terraform Validation
-
-These are useful sanity checks independent of the UI:
-
-```bash
-cd infrastructure/core
-terraform validate
-
-cd ../platform
-terraform validate
-
-cd ../policies
-terraform validate
-```
-
-## Troubleshooting
-
-### AWS auth failures
-
-If a run fails with missing credentials or SSO expiration:
-
-- refresh the AWS credentials used by the backend process
-- restart the backend if necessary so the new environment is picked up
-
-### Platform apply fails on bootstrap Kubernetes auth
-
-The current backend intentionally stops rather than retrying a reviewed plan with a fresh unreviewed apply. If you see the EKS access propagation error:
-
-1. wait briefly
-2. create a fresh reviewed plan
-3. apply that new plan
-2. create a fresh plan
-3. apply that new plan
-
-### CloudWatch log group already exists
-
-If the apply reports the EKS control-plane log group already exists, you are usually dealing with a partial earlier apply. Either:
-
-- import the log group into the current Terraform state with:
-  `terraform import aws_cloudwatch_log_group.eks_cluster '/aws/eks/<cluster-name>/cluster'`
-- or delete the orphaned log group in AWS and create a fresh plan
-
-### Provider/plugin schema loading errors
-
-If `terraform validate` fails before schema loading, the local provider binaries or runtime environment are the problem rather than the control plane code. Re-run `terraform init` in a clean environment or validate outside restrictive sandboxes.

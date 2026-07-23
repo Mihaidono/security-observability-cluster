@@ -1,145 +1,88 @@
 # Platform Terraform Stage
 
-The `platform` stage owns only the shared cluster resources that sit on top of an already-created EKS cluster.
+The `platform` stage owns the shared in-cluster layer that sits on top of an existing EKS cluster.
 
 ## Ownership Boundary
 
 This stage owns:
 
-- shared networking and security add-ons
-- shared policy and runtime components
-- the Isolens control-plane namespace and workloads
-- the private Amazon RDS for PostgreSQL instance used by the control plane
+- Cilium, Hubble, Tetragon, Kyverno, and optional `ingress-nginx`
+- the `isolens-system` namespace
+- backend, frontend, runner, and Keycloak workloads
+- the control-plane PostgreSQL RDS instance
 
 This stage does not own:
 
-- ward namespaces for user scenarios
-- application Deployments, Services, Ingresses, or per-ward network policies
+- ward application workloads
+- ward-specific Services, exposures, and workload policies
+- policy CR instances from the `policies` stage
 
-Those application-scoped resources belong to the `applications` stage.
+## Authentication Architecture
 
-## What This Stage Creates
+The platform stage now deploys:
 
-### Platform add-ons
+- in-cluster Keycloak under the control-plane namespace
+- frontend reverse-proxy access for `/auth`
+- backend OIDC configuration pointing to the internal Keycloak service
+- a generated bootstrap admin password
 
-- Cilium as the primary EKS networking datapath using AWS ENI IPAM
-- Hubble for flow visibility
-- CoreDNS EKS add-on after Cilium is ready enough to remove the node taint
-- Tetragon
-- Kyverno
-- optional `ingress-nginx` only when explicitly enabled
+Identity is handled by Keycloak. The backend still owns:
 
-### Control-plane resources
+- control-plane sessions
+- authorization checks
+- audit logging
 
-- `isolens-system` namespace
-- backend Deployment and Service
-- frontend Deployment and Service
-- runner Deployment
-- private Amazon RDS for PostgreSQL
-- RDS subnet group and security group
+The platform stage does not bootstrap the Keycloak realm, client, or users. It only brings up the service cleanly so you can configure identity afterwards.
 
-## Prerequisites
+## Database Layout
 
-This stage expects:
+This stage provisions one private RDS PostgreSQL instance and uses it for two logical databases:
 
-- the `core` stage to have been applied successfully
-- the EKS cluster to be reachable
-- at least one configured cluster-admin IAM principal to already have access through the core stage
+1. the control-plane backend database
+2. the Keycloak database
 
-## Operational Ownership
-
-- This stage is infrastructure-owned and is no longer executable from the Isolens control-plane UI.
-- The repository workflow [deploy-infrastructure.yml](/home/mihandrei/work/security-observability-cluster/.github/workflows/deploy-infrastructure.yml) always plans this stage after the core job and applies it only when Terraform reports a real platform change.
-- When `core` changes, the same workflow still replans `platform` afterwards so shared services are checked against the updated foundation before any apply decision is made.
-
-## Cilium Bootstrap Notes
-
-- The platform now expects the `core` stage node group to be tainted with `node.cilium.io/agent-not-ready=true:NoExecute` before any application workloads are scheduled.
-- The Cilium install uses AWS ENI IPAM and `kubeProxyReplacement=true` so Cilium becomes the primary Kubernetes networking layer on EKS instead of chaining on top of the AWS VPC CNI datapath.
-- The EKS `aws-node` daemonset still exists because the `vpc-cni` add-on is installed, but it must be patched before the platform apply so it no longer schedules onto worker nodes.
-- Platform bootstrap order is intentionally `Cilium -> CoreDNS -> remaining add-ons -> control-plane resources` to avoid the unschedulable CoreDNS deadlock caused by the node taint.
-- Kyverno and Tetragon CRDs are installed here, while the custom policy resources themselves are applied later by the dedicated `policies` stage.
-
-## Database Notes
-
-- PostgreSQL is no longer scheduled inside the cluster.
-- The control plane connects to a private RDS PostgreSQL instance using the endpoint exported by the PostgreSQL module.
-- The platform stage generates a PostgreSQL application password with Terraform and injects a password-based connection string into the backend runtime secret.
-- That generated password is stored in Terraform state, so access to the state backend must be treated as sensitive.
-- The backend PostgreSQL client still enforces TLS with `sslmode=require`.
-- RDS ingress is restricted through a security group reference to the EKS worker-node security group, not by a broad VPC CIDR allow rule.
-- This limits AWS-side access to traffic originating from worker-node ENIs. Pod-level restriction should still be enforced separately with Cilium policy.
-
-## Inputs
-
-This stage actively uses:
-
-- `project_name`
-- `environment`
-- `region`
-- `cluster_name`
-- `kubernetes_version`
-- `cluster_admin_principal_arns`
-- `control_plane_namespace`
-- `postgresql_*`
-
-## Outputs
-
-Current outputs include:
-
-- `kyverno_namespace`
-- `update_kubeconfig_command`
-- `ingress_controller_namespace`
-- `control_plane_namespace`
-- `control_plane_backend_service_name`
-- `control_plane_backend_service_fqdn`
-- `control_plane_frontend_service_name`
-- `control_plane_runner_name`
-- `postgresql_endpoint`
-- `postgresql_address`
-- `postgresql_port`
-- `postgresql_database_name`
-- `postgresql_username`
-
-Those outputs are most useful for:
-
-- checking the shared namespaces and service names Terraform created
-- inspecting the RDS endpoint and control-plane namespace
-- updating local kubeconfig for Hubble access and workload debugging
-
-## Backend and State
-
-This stage uses the committed backend config in `backend.hcl`.
-
-```hcl
-bucket       = "isolens-lab"
-key          = "dev/platform/terraform.tfstate"
-region       = "eu-north-1"
-encrypt      = true
-use_lockfile = true
-```
-
-## Provider Behavior
-
-- AWS lookups are still done through the AWS provider.
-- Kubernetes and Helm authenticate with `aws eks get-token` through provider `exec` auth instead of a single static token, which is more resilient for long-running Helm installs.
+The instance is private, SG-restricted to the EKS worker-node security group, and both database users use generated passwords stored in Terraform state.
 
 ## Direct Terraform Usage
 
 ```bash
 cd infrastructure/stages/platform
 terraform init -reconfigure -backend-config=backend.hcl
+terraform validate
 terraform plan
 terraform apply
 ```
 
+## Important Inputs
+
+- `cluster_admin_principal_arns`
+- `control_plane_public_app_url`
+- `control_plane_session_cookie_secure`
+- `control_plane_backend_*`
+- `control_plane_frontend_*`
+- `control_plane_runner_*`
+- `postgresql_*`
+- `keycloak_*`
+
+## Important Outputs
+
+- `control_plane_namespace`
+- `control_plane_backend_service_name`
+- `control_plane_backend_service_fqdn`
+- `control_plane_frontend_service_name`
+- `control_plane_runner_name`
+- `control_plane_keycloak_service_name`
+- `control_plane_keycloak_service_fqdn`
+- `postgresql_endpoint`
+- `postgresql_database_name`
+- `postgresql_username`
+- `keycloak_database_name`
+- `keycloak_database_username`
+- `keycloak_realm`
+
 ## Validation
 
 After apply:
-
-```bash
-kubectl get pods -A
-```
 
 ```bash
 kubectl -n kube-system get pods -l k8s-app=cilium
@@ -150,40 +93,49 @@ kubectl -n kube-system get deploy coredns
 ```
 
 ```bash
-kubectl -n isolens-system get deploy,svc
+kubectl -n isolens-system get deploy,po,svc,statefulset
 ```
+
+```bash
+kubectl -n isolens-system logs statefulset/isolens-keycloak
+```
+
+```bash
+kubectl -n isolens-system exec deploy/isolens-backend -- printenv | grep '^ISOLENS_OIDC_'
+```
+
+After Keycloak is healthy, configure:
+
+- the realm named by `keycloak_realm`
+- the client named by `keycloak_client_id`
+- redirect URI `${control_plane_public_app_url}/auth/callback`
+- web origin `control_plane_public_app_url`
+- a public PKCE client if `keycloak_client_secret` is empty, or a confidential client if you set a secret explicitly
 
 ```bash
 aws rds describe-db-instances --db-instance-identifier isolens-postgresql
 ```
 
-```bash
-kubectl exec -n isolens-system deploy/isolens-backend -- nc -vz <rds-endpoint> 5432
-```
-
 Expected results:
 
-- Cilium agents are `Ready`
-- CoreDNS is `Available`
-- backend, frontend, and runner are running in `isolens-system`
-- the RDS instance is `available`
-- the backend can open a TCP connection to PostgreSQL
+- Cilium agents are ready
+- CoreDNS is available
+- backend, frontend, runner, and Keycloak are healthy in `isolens-system`
+- the shared RDS instance is available
 
-## Current Hubble Access Model
+## Hubble
 
-Hubble is currently intended to be used internally through the cluster API path, not through a public ingress. The normal operator flow is:
+Hubble access remains internal:
 
 ```bash
 kubectl -n kube-system port-forward svc/hubble-ui 12000:80
 ```
 
-and then:
+Then open:
 
 ```text
 http://127.0.0.1:12000
 ```
-
-## Terraform Reference
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -213,6 +165,8 @@ http://127.0.0.1:12000
 | [aws_iam_role.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_role_policy_attachment) | resource |
 | [kubernetes_namespace_v1.control_plane](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
+| [random_password.keycloak_admin_password](https://registry.terraform.io/providers/hashicorp/random/3.7.2/docs/resources/password) | resource |
+| [random_password.keycloak_database_password](https://registry.terraform.io/providers/hashicorp/random/3.7.2/docs/resources/password) | resource |
 | [random_password.postgresql_password](https://registry.terraform.io/providers/hashicorp/random/3.7.2/docs/resources/password) | resource |
 | [time_sleep.cluster_access_ready](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
 | [aws_eks_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/eks_cluster) | data source |
@@ -228,7 +182,6 @@ http://127.0.0.1:12000
 | ---- | ----------- | ---- | ------- | :------: |
 | cluster_admin_principal_arns | IAM principal ARNs granted cluster-admin access in the core stage. Used here to keep the post-core readiness wait tied to access configuration changes. | `list(string)` | `[]` | no |
 | cluster_name | Name of the existing EKS cluster targeted by the platform stage. | `string` | `"forensic-lab"` | no |
-| control_plane_backend_api_token | Bearer token required by the control-plane backend API. | `string` | `"dev-token"` | no |
 | control_plane_backend_container_port | Container port for the control-plane backend workload. | `number` | `8000` | no |
 | control_plane_backend_image | Container image for the control-plane backend workload. | `string` | `"401262697743.dkr.ecr.eu-north-1.amazonaws.com/isolens-backend:latest"` | no |
 | control_plane_backend_image_pull_policy | Image pull policy for the control-plane backend workload. | `string` | `"IfNotPresent"` | no |
@@ -246,11 +199,21 @@ http://127.0.0.1:12000
 | control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. | `string` | `"isolens-system"` | no |
 | control_plane_namespace_annotations | Additional annotations applied to the control-plane namespace. | `map(string)` | `{}` | no |
 | control_plane_namespace_labels | Additional labels applied to the control-plane namespace. | `map(string)` | `{}` | no |
+| control_plane_public_app_url | Public base URL of the control-plane frontend, used for Keycloak redirects and issuer URLs. | `string` | `"http://localhost:5173"` | no |
 | control_plane_runner_name | Deployment name for the control-plane Terraform runner. | `string` | `"isolens-runner"` | no |
 | control_plane_runner_replicas | Replica count for the control-plane Terraform runner. | `number` | `1` | no |
 | control_plane_runner_resources | Resource requests and limits for the control-plane Terraform runner container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
+| control_plane_session_cookie_secure | Whether the backend session cookie should require HTTPS. | `bool` | `true` | no |
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |
 | environment | Environment name used for tags and naming. | `string` | `"lab"` | no |
+| keycloak_client_id | OIDC client identifier used by the Isolens control plane. | `string` | `"isolens-web"` | no |
+| keycloak_client_secret | Optional OIDC client secret used by the Isolens control plane. Leave empty for a public PKCE client. | `string` | `""` | no |
+| keycloak_database_name | Database name created for Keycloak on the shared PostgreSQL instance. | `string` | `"keycloak"` | no |
+| keycloak_database_username | Database username created for Keycloak on the shared PostgreSQL instance. | `string` | `"keycloak"` | no |
+| keycloak_image | Container image for the in-cluster Keycloak deployment. | `string` | `"quay.io/keycloak/keycloak:26.6.4"` | no |
+| keycloak_image_pull_policy | Image pull policy for the Keycloak container. | `string` | `"IfNotPresent"` | no |
+| keycloak_name | Service and StatefulSet name for the control-plane Keycloak deployment. | `string` | `"isolens-keycloak"` | no |
+| keycloak_realm | Keycloak realm used by the Isolens control plane. | `string` | `"isolens"` | no |
 | kubernetes_version | Cluster Kubernetes version used to label shared namespaces with the matching PSA version. | `string` | `"1.35"` | no |
 | postgresql_allocated_storage | Allocated storage in GiB for PostgreSQL. | `number` | `20` | no |
 | postgresql_apply_immediately | Whether PostgreSQL modifications should be applied immediately. | `bool` | `true` | no |
@@ -279,9 +242,14 @@ http://127.0.0.1:12000
 | control_plane_backend_service_fqdn | Cluster-local DNS name for the control-plane backend service. |
 | control_plane_backend_service_name | ClusterIP Service name for the control-plane backend. |
 | control_plane_frontend_service_name | Service name for the control-plane frontend. |
+| control_plane_keycloak_service_fqdn | Cluster-local DNS name for the control-plane Keycloak service. |
+| control_plane_keycloak_service_name | ClusterIP Service name for the control-plane Keycloak workload. |
 | control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. |
 | control_plane_runner_name | Deployment name for the control-plane Terraform runner. |
 | ingress_controller_namespace | Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled. |
+| keycloak_database_name | Database name provisioned for Keycloak on the shared PostgreSQL instance. |
+| keycloak_database_username | Database username provisioned for Keycloak on the shared PostgreSQL instance. |
+| keycloak_realm | Keycloak realm used by the Isolens control plane. |
 | kyverno_namespace | Namespace containing the Kyverno policy engine. |
 | postgresql_address | DNS address of the RDS PostgreSQL instance used by the control plane. |
 | postgresql_database_name | Database name provisioned for the control plane. |

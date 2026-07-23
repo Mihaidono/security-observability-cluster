@@ -257,6 +257,41 @@ export interface HealthResponse {
   cluster_nodes_total?: number | null;
 }
 
+export interface AuthConfigResponse {
+  authorization_endpoint: string;
+  client_id: string;
+  redirect_uri: string;
+  scope: string;
+  response_type: string;
+  code_challenge_method: string;
+  issuer: string;
+}
+
+export interface AuthExchangeRequest {
+  code: string;
+  code_verifier: string;
+  redirect_uri: string;
+}
+
+export interface AuthenticatedUser {
+  id: string;
+  subject: string;
+  username: string;
+  email?: string | null;
+  display_name?: string | null;
+  roles: string[];
+}
+
+export interface SessionResponse {
+  authenticated: boolean;
+  user?: AuthenticatedUser | null;
+}
+
+export interface LogoutResponse {
+  logged_out: boolean;
+  logout_url?: string | null;
+}
+
 export interface StateLockInfo {
   id: string;
   path?: string | null;

@@ -14,6 +14,29 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6.4
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin-password-change-me
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_PORT: 5432
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak-dev-password-change-me
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: http://localhost:5173/auth
+      KC_PROXY_HEADERS: xforwarded
+    command:
+      - start-dev
+    ports:
+      - "8081:8080"
 
   backend:
     build:
@@ -30,9 +53,17 @@ services:
       AWS_CONFIG_FILE: /home/backend/.aws/config
       AWS_SHARED_CREDENTIALS_FILE: /home/backend/.aws/credentials
       ISOLENS_DATABASE_URL: postgresql://isolens:isolens-dev-password-change-me@postgres:5432/isolens
+      ISOLENS_PUBLIC_APP_URL: http://localhost:5173
+      ISOLENS_OIDC_INTERNAL_BASE_URL: http://keycloak:8080/auth
+      ISOLENS_OIDC_REALM: isolens
+      ISOLENS_OIDC_CLIENT_ID: isolens-web
+      ISOLENS_OIDC_CLIENT_SECRET: ""
+      ISOLENS_SESSION_COOKIE_SECURE: "false"
     depends_on:
       postgres:
         condition: service_healthy
+      keycloak:
+        condition: service_started
     ports:
       - "8000:8000"
     volumes:
@@ -56,10 +87,18 @@ services:
       AWS_CONFIG_FILE: /home/backend/.aws/config
       AWS_SHARED_CREDENTIALS_FILE: /home/backend/.aws/credentials
       ISOLENS_DATABASE_URL: postgresql://isolens:isolens-dev-password-change-me@postgres:5432/isolens
+      ISOLENS_PUBLIC_APP_URL: http://localhost:5173
+      ISOLENS_OIDC_INTERNAL_BASE_URL: http://keycloak:8080/auth
+      ISOLENS_OIDC_REALM: isolens
+      ISOLENS_OIDC_CLIENT_ID: isolens-web
+      ISOLENS_OIDC_CLIENT_SECRET: ""
+      ISOLENS_SESSION_COOKIE_SECURE: "false"
       ISOLENS_WORKER_ID: compose-runner
     depends_on:
       postgres:
         condition: service_healthy
+      keycloak:
+        condition: service_started
       backend:
         condition: service_started
     volumes:
@@ -75,9 +114,10 @@ services:
     working_dir: /app/frontend
     depends_on:
       - backend
+      - keycloak
     environment:
-      VITE_API_TOKEN: ${VITE_API_TOKEN:-dev-token}
-      VITE_API_BASE_URL: http://localhost:8000
+      VITE_DEV_BACKEND_PROXY_TARGET: http://backend:8000
+      VITE_DEV_KEYCLOAK_PROXY_TARGET: http://keycloak:8080
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "5173:5173"

@@ -104,13 +104,6 @@ variable "control_plane_backend_container_port" {
   default     = 8000
 }
 
-variable "control_plane_backend_api_token" {
-  description = "Bearer token required by the control-plane backend API."
-  type        = string
-  sensitive   = true
-  default     = "dev-token"
-}
-
 variable "control_plane_backend_resources" {
   description = "Resource requests and limits for the control-plane backend container."
   type = object({
@@ -204,6 +197,77 @@ variable "control_plane_runner_resources" {
     requests_memory = "512Mi"
     limits_cpu      = "1000m"
     limits_memory   = "1Gi"
+  }
+}
+
+variable "control_plane_public_app_url" {
+  description = "Public base URL of the control-plane frontend, used for Keycloak redirects and issuer URLs."
+  type        = string
+  default     = "http://localhost:5173"
+}
+
+variable "control_plane_session_cookie_secure" {
+  description = "Whether the backend session cookie should require HTTPS."
+  type        = bool
+  default     = true
+}
+
+variable "keycloak_name" {
+  description = "Service and StatefulSet name for the control-plane Keycloak deployment."
+  type        = string
+  default     = "isolens-keycloak"
+}
+
+variable "keycloak_image" {
+  description = "Container image for the in-cluster Keycloak deployment."
+  type        = string
+  default     = "quay.io/keycloak/keycloak:26.6.4"
+}
+
+variable "keycloak_image_pull_policy" {
+  description = "Image pull policy for the Keycloak container."
+  type        = string
+  default     = "IfNotPresent"
+}
+
+variable "keycloak_realm" {
+  description = "Keycloak realm used by the Isolens control plane."
+  type        = string
+  default     = "isolens"
+}
+
+variable "keycloak_client_id" {
+  description = "OIDC client identifier used by the Isolens control plane."
+  type        = string
+  default     = "isolens-web"
+}
+
+variable "keycloak_client_secret" {
+  description = "Optional OIDC client secret used by the Isolens control plane. Leave empty for a public PKCE client."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "keycloak_database_name" {
+  description = "Database name created for Keycloak on the shared PostgreSQL instance."
+  type        = string
+  default     = "keycloak"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_]+$", var.keycloak_database_name))
+    error_message = "keycloak_database_name must contain only letters, numbers, and underscores."
+  }
+}
+
+variable "keycloak_database_username" {
+  description = "Database username created for Keycloak on the shared PostgreSQL instance."
+  type        = string
+  default     = "keycloak"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_]+$", var.keycloak_database_username))
+    error_message = "keycloak_database_username must contain only letters, numbers, and underscores."
   }
 }
 

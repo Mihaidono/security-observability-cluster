@@ -1,12 +1,44 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
-import { api, buildRunEventsUrl, getApiToken } from "./lib/api";
+import {
+  AccountIcon,
+  BrandGlyph,
+  ClusterStatusIcon,
+  CommandBlock,
+  ContextTag,
+  EditorSection,
+  FilterIcon,
+  IconActionButton,
+  MetricTile,
+  Modal,
+  MoonIcon,
+  PolicyManifestEditor,
+  ReadOnlyField,
+  ReviewItems,
+  ScenarioPlaybookCard,
+  ScenarioTile,
+  StageAction,
+  StageNotice,
+  SunIcon,
+  TrashIcon,
+  isTerminalRunStatus,
+  statusTone,
+} from "./components/workspace/chrome";
+import {
+  ContainerEditor,
+  KeyValueEditor,
+  NetworkRulesEditor,
+  StringListEditor,
+} from "./components/workspace/config-editors";
+import { api, buildRunEventsUrl } from "./lib/api";
 import type {
   AnalysisSubject,
+  AuthConfigResponse,
+  AuthenticatedUser,
   ContainerConfig,
   ConnectivityConfig,
   ExposureConfig,
@@ -86,6 +118,8 @@ const SCENARIO_ID_LABEL = "isolens.io/scenario-id";
 const SCENARIO_BUNDLE_LABEL = "isolens.io/scenario-bundle";
 const SCENARIO_ROLE_LABEL = "isolens.io/scenario-role";
 const themeStorageKey = "isolens-theme-mode";
+const authStateStorageKey = "isolens-auth-state";
+const authVerifierStorageKey = "isolens-auth-verifier";
 
 function getInitialThemeMode(): ThemeMode {
   if (typeof window === "undefined") {
@@ -102,6 +136,36 @@ function getInitialThemeMode(): ThemeMode {
   }
 
   return "light";
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let value = "";
+  for (const byte of bytes) {
+    value += String.fromCharCode(byte);
+  }
+
+  return btoa(value)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function randomBase64Url(bytesLength = 32): string {
+  const bytes = new Uint8Array(bytesLength);
+  window.crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+async function createPkceChallenge(verifier: string): Promise<string> {
+  const digest = await window.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(verifier),
+  );
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof Error && error.message.trim() === "Unauthorized";
 }
 
 function stageIsEffectivelyApplied(
@@ -1960,1483 +2024,11 @@ function displayExposureSummary(
   return "Cluster-internal";
 }
 
-function KeyValueEditor({
-  label,
-  value,
-  onChange,
-  addLabel = "Add row",
-  rowsClassName,
-}: {
-  label: string;
-  value?: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
-  addLabel?: string;
-  rowsClassName?: string;
-}) {
-  const entries = Object.entries(value ?? {});
-
-  function updateRow(index: number, nextKey: string, nextValue: string) {
-    const rows = entries.map(([key, currentValue], rowIndex) =>
-      rowIndex === index ? [nextKey, nextValue] : [key, currentValue],
-    );
-    onChange(
-      Object.fromEntries(
-        rows.filter(
-          ([key, currentValue]) =>
-            key.trim() !== "" || currentValue.trim() !== "",
-        ),
-      ),
-    );
-  }
-
-  function addRow() {
-    const nextKey = uniqueName(
-      "key",
-      entries.map(([key]) => key),
-    );
-    onChange({
-      ...(value ?? {}),
-      [nextKey]: "",
-    });
-  }
-
-  function removeRow(index: number) {
-    const rows = entries.filter((_, rowIndex) => rowIndex !== index);
-    onChange(Object.fromEntries(rows));
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-          {label}
-        </p>
-        <Button
-          variant="ghost"
-          type="button"
-          className="px-3 py-1.5 text-xs"
-          onClick={addRow}
-        >
-          {addLabel}
-        </Button>
-      </div>
-      {entries.length === 0 ? (
-        <p className="text-sm text-neutral-500">No entries.</p>
-      ) : null}
-      <div className={classNames("grid gap-2", rowsClassName)}>
-        {entries.map(([entryKey, entryValue], index) => (
-          <div
-            key={`kv-row-${index}`}
-            className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
-          >
-            <Input
-              value={entryKey}
-              onChange={(event) =>
-                updateRow(index, event.target.value, entryValue)
-              }
-              placeholder="Key"
-            />
-            <Input
-              value={entryValue}
-              onChange={(event) =>
-                updateRow(index, entryKey, event.target.value)
-              }
-              placeholder="Value"
-            />
-            <Button
-              variant="danger"
-              type="button"
-              onClick={() => removeRow(index)}
-            >
-              Remove
-            </Button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StringListEditor({
-  label,
-  value,
-  onChange,
-  addLabel = "Add item",
-}: {
-  label: string;
-  value?: string[];
-  onChange: (next: string[]) => void;
-  addLabel?: string;
-}) {
-  const items = value ?? [];
-
-  function updateItem(index: number, nextValue: string) {
-    const next = items.map((item, itemIndex) =>
-      itemIndex === index ? nextValue : item,
-    );
-    onChange(next.filter((item) => item.trim() !== ""));
-  }
-
-  function addItem() {
-    onChange([...items, ""]);
-  }
-
-  function removeItem(index: number) {
-    onChange(items.filter((_, itemIndex) => itemIndex !== index));
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-          {label}
-        </p>
-        <Button
-          variant="ghost"
-          type="button"
-          className="px-3 py-1.5 text-xs"
-          onClick={addItem}
-        >
-          {addLabel}
-        </Button>
-      </div>
-      {items.length === 0 ? (
-        <p className="text-sm text-neutral-500">No entries.</p>
-      ) : null}
-      <div className="grid gap-2">
-        {items.map((item, index) => (
-          <div
-            key={`string-row-${index}`}
-            className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_auto]"
-          >
-            <Input
-              value={item}
-              onChange={(event) => updateItem(index, event.target.value)}
-            />
-            <Button
-              variant="danger"
-              type="button"
-              onClick={() => removeItem(index)}
-            >
-              Remove
-            </Button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProbeEditor({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value?: ProbeConfig;
-  onChange: (next: ProbeConfig) => void;
-}) {
-  const probe = value ?? emptyProbe();
-
-  return (
-    <div className="rounded-2xl border border-border bg-muted/60 p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <p className="font-medium">{label}</p>
-        <label className="flex items-center gap-2 text-sm text-neutral-600">
-          <input
-            type="checkbox"
-            checked={probe.enabled ?? false}
-            onChange={(event) =>
-              onChange({ ...probe, enabled: event.target.checked })
-            }
-          />
-          Enabled
-        </label>
-      </div>
-      <div className="grid gap-3 xl:grid-cols-2">
-        <label className="grid gap-1 text-sm">
-          <span>Path</span>
-          <Input
-            value={probe.path ?? ""}
-            onChange={(event) =>
-              onChange({ ...probe, path: event.target.value })
-            }
-          />
-        </label>
-        <label className="grid gap-1 text-sm">
-          <span>Port</span>
-          <Input
-            type="number"
-            value={String(probe.port ?? 8080)}
-            onChange={(event) =>
-              onChange({ ...probe, port: Number(event.target.value) })
-            }
-          />
-        </label>
-        <label className="grid gap-1 text-sm">
-          <span>Initial delay</span>
-          <Input
-            type="number"
-            value={String(probe.initial_delay_seconds ?? 5)}
-            onChange={(event) =>
-              onChange({
-                ...probe,
-                initial_delay_seconds: Number(event.target.value),
-              })
-            }
-          />
-        </label>
-        <label className="grid gap-1 text-sm">
-          <span>Period</span>
-          <Input
-            type="number"
-            value={String(probe.period_seconds ?? 10)}
-            onChange={(event) =>
-              onChange({ ...probe, period_seconds: Number(event.target.value) })
-            }
-          />
-        </label>
-      </div>
-    </div>
-  );
-}
-
-function VolumeMountEditor({
-  value,
-  onChange,
-}: {
-  value?: VolumeMountConfig[];
-  onChange: (next: VolumeMountConfig[]) => void;
-}) {
-  const mounts = value ?? [];
-
-  function updateMount(index: number, next: VolumeMountConfig) {
-    onChange(
-      mounts.map((mount, mountIndex) => (mountIndex === index ? next : mount)),
-    );
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-          Volume mounts
-        </p>
-        <Button
-          variant="ghost"
-          type="button"
-          className="px-3 py-1.5 text-xs"
-          onClick={() =>
-            onChange([...mounts, { name: "shared-data", mount_path: "/data" }])
-          }
-        >
-          Add mount
-        </Button>
-      </div>
-      {mounts.length === 0 ? (
-        <p className="text-sm text-neutral-500">No mounts.</p>
-      ) : null}
-      <div className="grid gap-2">
-        {mounts.map((mount, index) => (
-          <div
-            key={`mount-row-${index}`}
-            className="grid gap-2 rounded-2xl border border-border bg-muted/60 p-3"
-          >
-            <div className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_160px_auto]">
-              <Input
-                value={mount.name}
-                onChange={(event) =>
-                  updateMount(index, { ...mount, name: event.target.value })
-                }
-                placeholder="Volume name"
-              />
-              <Input
-                value={mount.mount_path}
-                onChange={(event) =>
-                  updateMount(index, {
-                    ...mount,
-                    mount_path: event.target.value,
-                  })
-                }
-                placeholder="/mount/path"
-              />
-              <Input
-                value={mount.sub_path ?? ""}
-                onChange={(event) =>
-                  updateMount(index, {
-                    ...mount,
-                    sub_path: event.target.value || undefined,
-                  })
-                }
-                placeholder="subPath (optional)"
-              />
-              <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2 text-sm text-neutral-600">
-                <input
-                  type="checkbox"
-                  checked={mount.read_only ?? true}
-                  onChange={(event) =>
-                    updateMount(index, {
-                      ...mount,
-                      read_only: event.target.checked,
-                    })
-                  }
-                />
-                Read only
-              </label>
-              <Button
-                variant="danger"
-                type="button"
-                onClick={() =>
-                  onChange(
-                    mounts.filter((_, mountIndex) => mountIndex !== index),
-                  )
-                }
-              >
-                Remove
-              </Button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NetworkPortsEditor({
-  value,
-  onChange,
-}: {
-  value?: NetworkPolicyPort[];
-  onChange: (next: NetworkPolicyPort[]) => void;
-}) {
-  const ports = value ?? [];
-
-  function updatePort(index: number, next: NetworkPolicyPort) {
-    onChange(
-      ports.map((port, portIndex) => (portIndex === index ? next : port)),
-    );
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-          Ports
-        </p>
-        <Button
-          variant="ghost"
-          type="button"
-          className="px-3 py-1.5 text-xs"
-          onClick={() => onChange([...ports, emptyPolicyPort()])}
-        >
-          Add port
-        </Button>
-      </div>
-      {ports.length === 0 ? (
-        <p className="text-sm text-neutral-500">No ports.</p>
-      ) : null}
-      <div className="grid gap-2">
-        {ports.map((port, index) => (
-          <div
-            key={`port-row-${index}`}
-            className="grid gap-2 2xl:grid-cols-[minmax(0,1fr)_160px_auto]"
-          >
-            <Input
-              type="number"
-              value={String(port.port)}
-              onChange={(event) =>
-                updatePort(index, { ...port, port: Number(event.target.value) })
-              }
-            />
-            <Input
-              value={port.protocol ?? "TCP"}
-              onChange={(event) =>
-                updatePort(index, { ...port, protocol: event.target.value })
-              }
-            />
-            <Button
-              variant="danger"
-              type="button"
-              onClick={() =>
-                onChange(ports.filter((_, portIndex) => portIndex !== index))
-              }
-            >
-              Remove
-            </Button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NetworkPeersEditor({
-  direction,
-  value,
-  onChange,
-}: {
-  direction: Direction;
-  value?: NetworkPolicyPeer[];
-  onChange: (next: NetworkPolicyPeer[]) => void;
-}) {
-  const peers = value ?? [];
-
-  function updatePeer(index: number, next: NetworkPolicyPeer) {
-    onChange(
-      peers.map((peer, peerIndex) => (peerIndex === index ? next : peer)),
-    );
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-          {direction === "ingress" ? "Sources" : "Destinations"}
-        </p>
-        <Button
-          variant="ghost"
-          type="button"
-          className="px-3 py-1.5 text-xs"
-          onClick={() => onChange([...peers, emptyPolicyPeer()])}
-        >
-          Add peer
-        </Button>
-      </div>
-      {peers.length === 0 ? (
-        <p className="text-sm text-neutral-500">No peers.</p>
-      ) : null}
-      <div className="grid gap-3">
-        {peers.map((peer, index) => (
-          <div
-            key={index}
-            className="rounded-2xl border border-border bg-muted/60 p-4"
-          >
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="font-medium">Peer {index + 1}</p>
-              <Button
-                variant="danger"
-                type="button"
-                onClick={() =>
-                  onChange(peers.filter((_, peerIndex) => peerIndex !== index))
-                }
-              >
-                Remove
-              </Button>
-            </div>
-            <div className="grid gap-4">
-              <KeyValueEditor
-                label="Pod selector"
-                value={peer.pod_selector ?? {}}
-                onChange={(next) =>
-                  updatePeer(index, {
-                    ...peer,
-                    pod_selector: compactRecord(next),
-                  })
-                }
-                addLabel="Add label"
-              />
-              <KeyValueEditor
-                label="Namespace selector"
-                value={peer.namespace_selector ?? {}}
-                onChange={(next) =>
-                  updatePeer(index, {
-                    ...peer,
-                    namespace_selector: compactRecord(next),
-                  })
-                }
-                addLabel="Add label"
-              />
-              <label className="grid gap-1 text-sm">
-                <span>IP block CIDR</span>
-                <Input
-                  value={peer.ip_block?.cidr ?? ""}
-                  placeholder="0.0.0.0/0"
-                  onChange={(event) =>
-                    updatePeer(index, {
-                      ...peer,
-                      ip_block:
-                        event.target.value.trim() === ""
-                          ? undefined
-                          : { cidr: event.target.value },
-                    })
-                  }
-                />
-              </label>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function NetworkRulesEditor({
-  direction,
-  value,
-  onChange,
-}: {
-  direction: Direction;
-  value?: NetworkPolicyRule[];
-  onChange: (next: NetworkPolicyRule[]) => void;
-}) {
-  const rules = value ?? [];
-
-  function updateRule(index: number, next: NetworkPolicyRule) {
-    onChange(
-      rules.map((rule, ruleIndex) => (ruleIndex === index ? next : rule)),
-    );
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm font-semibold">
-          {direction === "ingress" ? "Ingress rules" : "Egress rules"}
-        </p>
-        <Button
-          variant="ghost"
-          type="button"
-          className="px-3 py-1.5 text-xs"
-          onClick={() => onChange([...rules, emptyPolicyRule(direction)])}
-        >
-          Add rule
-        </Button>
-      </div>
-      {rules.length === 0 ? (
-        <p className="text-sm text-neutral-500">No rules.</p>
-      ) : null}
-      <div className="grid gap-4">
-        {rules.map((rule, index) => (
-          <div key={index} className="rounded-2xl border border-border p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <p className="font-medium">Rule {index + 1}</p>
-              <Button
-                variant="danger"
-                type="button"
-                onClick={() =>
-                  onChange(rules.filter((_, ruleIndex) => ruleIndex !== index))
-                }
-              >
-                Remove
-              </Button>
-            </div>
-            <div className="grid gap-4">
-              <NetworkPortsEditor
-                value={rule.ports}
-                onChange={(ports) => updateRule(index, { ...rule, ports })}
-              />
-              <NetworkPeersEditor
-                direction={direction}
-                value={direction === "ingress" ? rule.from : rule.to}
-                onChange={(peers) =>
-                  updateRule(index, {
-                    ...rule,
-                    [direction === "ingress" ? "from" : "to"]: peers,
-                  })
-                }
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ContainerEditor({
-  container,
-  onChange,
-  onRemove,
-  index,
-}: {
-  container: ContainerConfig;
-  onChange: (next: ContainerConfig) => void;
-  onRemove: () => void;
-  index: number;
-}) {
-  return (
-    <div className="rounded-2xl border border-border p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="font-medium">Container {index + 1}</p>
-          <p className="text-sm text-neutral-500">{container.name}</p>
-        </div>
-        <Button variant="danger" type="button" onClick={onRemove}>
-          Remove
-        </Button>
-      </div>
-
-      <div className="grid gap-4">
-        <div className="grid gap-3 xl:grid-cols-3">
-          <label className="grid gap-1 text-sm">
-            <span>Name</span>
-            <Input
-              value={container.name}
-              onChange={(event) =>
-                onChange({ ...container, name: event.target.value })
-              }
-            />
-          </label>
-          <label className="grid gap-1 text-sm xl:col-span-2">
-            <span>Image</span>
-            <Input
-              value={container.image}
-              onChange={(event) =>
-                onChange({ ...container, image: event.target.value })
-              }
-            />
-          </label>
-        </div>
-
-        <div className="grid gap-3 2xl:grid-cols-3">
-          <label className="grid gap-1 text-sm">
-            <span>Port</span>
-            <Input
-              type="number"
-              value={String(container.port ?? 8080)}
-              onChange={(event) =>
-                onChange({ ...container, port: Number(event.target.value) })
-              }
-            />
-          </label>
-          <StringListEditor
-            label="Command"
-            value={container.command}
-            onChange={(command) => onChange({ ...container, command })}
-            addLabel="Add command"
-          />
-          <StringListEditor
-            label="Args"
-            value={container.args}
-            onChange={(args) => onChange({ ...container, args })}
-            addLabel="Add arg"
-          />
-        </div>
-
-        <KeyValueEditor
-          label="Environment variables"
-          value={container.env ?? {}}
-          onChange={(env) =>
-            onChange({ ...container, env: compactRecord(env) })
-          }
-          addLabel="Add env"
-        />
-
-        <StringListEditor
-          label="Secret env sources"
-          value={container.env_from_secret_names}
-          onChange={(env_from_secret_names) =>
-            onChange({ ...container, env_from_secret_names })
-          }
-          addLabel="Add secret"
-        />
-
-        <div className="grid gap-4 2xl:grid-cols-3">
-          <ProbeEditor
-            label="Readiness probe"
-            value={container.probes?.readiness}
-            onChange={(readiness) =>
-              onChange({
-                ...container,
-                probes: { ...container.probes, readiness },
-              })
-            }
-          />
-          <ProbeEditor
-            label="Liveness probe"
-            value={container.probes?.liveness}
-            onChange={(liveness) =>
-              onChange({
-                ...container,
-                probes: { ...container.probes, liveness },
-              })
-            }
-          />
-          <ProbeEditor
-            label="Startup probe"
-            value={container.probes?.startup}
-            onChange={(startup) =>
-              onChange({
-                ...container,
-                probes: { ...container.probes, startup },
-              })
-            }
-          />
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
-          <label className="grid gap-1 text-sm">
-            <span>Image pull policy</span>
-            <Input
-              value={container.image_pull_policy ?? "IfNotPresent"}
-              onChange={(event) =>
-                onChange({
-                  ...container,
-                  image_pull_policy: event.target.value,
-                })
-              }
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>CPU request</span>
-            <Input
-              value={container.resources?.requests_cpu ?? ""}
-              onChange={(event) =>
-                onChange({
-                  ...container,
-                  resources: {
-                    ...container.resources,
-                    requests_cpu: event.target.value,
-                  },
-                })
-              }
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>Memory request</span>
-            <Input
-              value={container.resources?.requests_memory ?? ""}
-              onChange={(event) =>
-                onChange({
-                  ...container,
-                  resources: {
-                    ...container.resources,
-                    requests_memory: event.target.value,
-                  },
-                })
-              }
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>CPU limit</span>
-            <Input
-              value={container.resources?.limits_cpu ?? ""}
-              onChange={(event) =>
-                onChange({
-                  ...container,
-                  resources: {
-                    ...container.resources,
-                    limits_cpu: event.target.value,
-                  },
-                })
-              }
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>Memory limit</span>
-            <Input
-              value={container.resources?.limits_memory ?? ""}
-              onChange={(event) =>
-                onChange({
-                  ...container,
-                  resources: {
-                    ...container.resources,
-                    limits_memory: event.target.value,
-                  },
-                })
-              }
-            />
-          </label>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-3">
-          <label className="grid gap-1 text-sm">
-            <span>Run as user</span>
-            <Input
-              type="number"
-              value={String(container.security_context?.run_as_user ?? 101)}
-              onChange={(event) =>
-                onChange({
-                  ...container,
-                  security_context: {
-                    ...container.security_context,
-                    run_as_user: Number(event.target.value),
-                  },
-                })
-              }
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>Run as group</span>
-            <Input
-              type="number"
-              value={String(container.security_context?.run_as_group ?? 101)}
-              onChange={(event) =>
-                onChange({
-                  ...container,
-                  security_context: {
-                    ...container.security_context,
-                    run_as_group: Number(event.target.value),
-                  },
-                })
-              }
-            />
-          </label>
-          <label className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-neutral-600">
-            <input
-              type="checkbox"
-              checked={
-                container.security_context?.read_only_root_filesystem ?? false
-              }
-              onChange={(event) =>
-                onChange({
-                  ...container,
-                  security_context: {
-                    ...container.security_context,
-                    read_only_root_filesystem: event.target.checked,
-                  },
-                })
-              }
-            />
-            Read-only root filesystem
-          </label>
-        </div>
-
-        <VolumeMountEditor
-          value={container.volume_mounts}
-          onChange={(volume_mounts) =>
-            onChange({ ...container, volume_mounts })
-          }
-        />
-      </div>
-    </div>
-  );
-}
-
-function Modal({
-  title,
-  open,
-  onClose,
-  children,
-}: {
-  title: string;
-  open: boolean;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  if (!open) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-foreground/28 p-4 backdrop-blur-md"
-      onClick={onClose}
-    >
-      <div
-        className="panel flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-[2.2rem]"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-5">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.3em] text-neutral-500">
-              Workspace Context
-            </p>
-            <h2 className="mt-2 text-xl font-semibold tracking-tight">
-              {title}
-            </h2>
-          </div>
-          <Button variant="ghost" type="button" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-        <div className="overflow-y-auto px-6 pb-6">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function statusTone(
-  status?: TerraformRun["status"],
-): "primary" | "secondary" | "ghost" | "danger" {
-  if (status === "planned" || status === "applied" || status === "destroyed")
-    return "primary";
-  if (status === "failed" || status === "canceled") return "danger";
-  if (
-    status === "running" ||
-    status === "applying" ||
-    status === "destroying" ||
-    status === "canceling"
-  )
-    return "secondary";
-  return "ghost";
-}
-
 function stageLabel(stage: RunStage): string {
   if (stage === "core") return "Core";
   if (stage === "platform") return "Platform";
   if (stage === "policies") return "Policies";
   return "Applications";
-}
-
-function isTerminalRunStatus(status?: TerraformRun["status"]): boolean {
-  return (
-    status === "planned" ||
-    status === "applied" ||
-    status === "destroyed" ||
-    status === "failed" ||
-    status === "canceled"
-  );
-}
-
-function MetricTile({
-  label,
-  value,
-  hint,
-  className,
-}: {
-  label: string;
-  value: string | number;
-  hint?: string;
-  className?: string;
-}) {
-  return (
-    <div
-      className={classNames(
-        "relative overflow-hidden rounded-[1.55rem] border border-border/55 bg-card/82 px-4 py-4 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.14)]",
-        className,
-      )}
-    >
-      <div className="absolute inset-x-4 top-0 h-px bg-card/60" />
-      <p className="metric-label text-[11px] uppercase tracking-[0.24em]">
-        {label}
-      </p>
-      <p className="metric-value mt-4 text-2xl font-semibold tracking-tight">
-        {value}
-      </p>
-      {hint ? (
-        <p className="metric-hint mt-2 text-sm leading-6">{hint}</p>
-      ) : null}
-    </div>
-  );
-}
-
-function BrandGlyph({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M5 6.5h14" />
-      <path d="M5 12h14" />
-      <path d="M5 17.5h9" />
-      <circle cx="17.5" cy="17.5" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function SunIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2.5v2.2" />
-      <path d="M12 19.3v2.2" />
-      <path d="m4.9 4.9 1.6 1.6" />
-      <path d="m17.5 17.5 1.6 1.6" />
-      <path d="M2.5 12h2.2" />
-      <path d="M19.3 12h2.2" />
-      <path d="m4.9 19.1 1.6-1.6" />
-      <path d="m17.5 6.5 1.6-1.6" />
-    </svg>
-  );
-}
-
-function MoonIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M20 14.2A7.8 7.8 0 1 1 9.8 4a6.6 6.6 0 0 0 10.2 10.2Z" />
-    </svg>
-  );
-}
-
-function ClusterStatusIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <rect x="4" y="5" width="16" height="5" rx="1.5" />
-      <rect x="4" y="14" width="16" height="5" rx="1.5" />
-      <path d="M8 7.5h.01" />
-      <path d="M8 16.5h.01" />
-      <path d="M11 7.5h5" />
-      <path d="M11 16.5h5" />
-    </svg>
-  );
-}
-
-function AccountIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M20 21a8 8 0 0 0-16 0" />
-      <circle cx="12" cy="8" r="4" />
-    </svg>
-  );
-}
-
-function TrashIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M4 7h16" />
-      <path d="M9.5 4h5" />
-      <path d="M18 7l-1 12a2 2 0 0 1-2 1H9a2 2 0 0 1-2-1L6 7" />
-      <path d="M10 11v5" />
-      <path d="M14 11v5" />
-    </svg>
-  );
-}
-
-function FilterIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M4 6h16" />
-      <path d="M7 12h10" />
-      <path d="M10 18h4" />
-    </svg>
-  );
-}
-
-function IconActionButton({
-  label,
-  active = false,
-  onClick,
-  children,
-}: {
-  label: string;
-  active?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className={classNames(
-        "inline-flex h-11 w-11 items-center justify-center rounded-full border transition duration-200",
-        active
-          ? "border-accent/45 bg-accent/16 text-accent shadow-[0_12px_28px_rgb(var(--color-accent)_/_0.22)]"
-          : "border-border/50 bg-card/76 text-foreground/72 hover:bg-accent/10 hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ContextTag({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="surface-soft shrink-0 flex items-center gap-2 rounded-full px-3 py-2">
-      <span className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-        {label}
-      </span>
-      <span className="context-value text-sm font-medium">{value}</span>
-    </div>
-  );
-}
-
-function ReviewItems({
-  title,
-  tone,
-  items,
-}: {
-  title: string;
-  tone: "error" | "warning" | "hint";
-  items: string[];
-}) {
-  if (items.length === 0) return null;
-
-  const toneClass =
-    tone === "error"
-      ? "border-warning/35 bg-warning/10 text-warning"
-      : tone === "warning"
-        ? "border-border/55 bg-border/14 text-foreground"
-        : "border-accent/25 bg-accent/10 text-foreground";
-
-  return (
-    <div className={`rounded-[1.25rem] border px-4 py-3 ${toneClass}`}>
-      <p className="text-[11px] uppercase tracking-[0.22em]">{title}</p>
-      <div className="mt-3 space-y-2 text-sm leading-6">
-        {items.map((item, index) => (
-          <p key={`${tone}-${index}`}>{item}</p>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ScenarioTile({
-  title,
-  description,
-  tag,
-  actionLabel = "Apply to selected application",
-  compact = false,
-  onApply,
-}: {
-  title: string;
-  description: string;
-  tag: string;
-  actionLabel?: string;
-  compact?: boolean;
-  onApply: () => void;
-}) {
-  const compactDescription =
-    compact && description.length > 82
-      ? `${description.slice(0, 79).trimEnd()}...`
-      : description;
-
-  return (
-    <div
-      className={classNames(
-        "flex shrink-0 snap-start flex-col justify-between rounded-[1.5rem] border border-border/80 bg-card/80 p-4",
-        compact
-          ? "min-h-[188px] min-w-[220px] max-w-[220px]"
-          : "min-h-[232px] min-w-[280px] max-w-[280px]",
-      )}
-    >
-      <div className="flex-1">
-        <p className="font-semibold">{title}</p>
-        <p className="mt-2 inline-flex rounded-full border border-border/75 bg-muted/70 px-2.5 py-1 text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-          {tag}
-        </p>
-        <p
-          className={classNames(
-            "mt-3 text-neutral-500",
-            compact ? "text-[13px] leading-5" : "text-sm leading-6",
-          )}
-        >
-          {compact ? compactDescription : description}
-        </p>
-      </div>
-      <Button
-        className={classNames("self-start", compact ? "mt-4" : "mt-5")}
-        variant="secondary"
-        type="button"
-        onClick={onApply}
-      >
-        {actionLabel}
-      </Button>
-    </div>
-  );
-}
-
-function ScenarioPlaybookCard({
-  title,
-  tag,
-  requirements,
-  proofSurfaces,
-  caution,
-  appNames,
-  commands,
-  expectedSignals,
-}: {
-  title: string;
-  tag: string;
-  requirements: string;
-  proofSurfaces: string[];
-  caution?: string;
-  appNames: string[];
-  commands: string[];
-  expectedSignals: string[];
-}) {
-  return (
-    <div className="rounded-[1.5rem] border border-border/80 bg-card/80 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-semibold">{title}</p>
-          <p className="mt-2 text-sm leading-6 text-neutral-500">
-            {requirements}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge>{tag}</Badge>
-          {proofSurfaces.map((surface) => (
-            <Badge
-              key={surface}
-              className="border-border/70 bg-muted/60 text-foreground/75"
-            >
-              {surface}
-            </Badge>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-4 space-y-4">
-        <div className="rounded-[1rem] border border-border/70 bg-muted/45 p-4">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-            Provisioned apps
-          </p>
-          <p className="mt-2 text-sm text-foreground/80">
-            {appNames.join(", ")}
-          </p>
-        </div>
-
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-            Run these
-          </p>
-          <div className="mt-3 grid gap-3">
-            {commands.map((command) => (
-              <pre
-                key={command}
-                className="themed-scrollbar overflow-auto rounded-[1rem] border border-border/70 bg-card/82 px-4 py-3 font-mono text-xs leading-6 text-foreground"
-              >
-                {command}
-              </pre>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <p className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-            Capture this proof
-          </p>
-          <div className="mt-3 space-y-2 text-sm leading-6 text-foreground/80">
-            {expectedSignals.map((signal, index) => (
-              <p key={`${title}-signal-${index}`}>{signal}</p>
-            ))}
-          </div>
-        </div>
-
-        {caution ? (
-          <div className="rounded-[1rem] border border-warning/35 bg-warning/10 px-4 py-3 text-sm leading-6 text-warning">
-            {caution}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function EditorSection({
-  title,
-  summary,
-  defaultOpen = false,
-  children,
-}: {
-  title: string;
-  summary: string;
-  defaultOpen?: boolean;
-  children: ReactNode;
-}) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
-
-  return (
-    <div className="rounded-2xl border border-border p-4">
-      <button
-        type="button"
-        className="w-full rounded-[1.4rem] bg-muted/55 px-4 py-4 text-left transition hover:bg-muted/75"
-        onClick={() => setIsOpen((current) => !current)}
-      >
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
-          <div className="min-w-0">
-            <p className="font-semibold">{title}</p>
-            <p className="mt-2 text-sm leading-6 text-neutral-500">{summary}</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2 sm:justify-self-end">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/80 bg-card/80 text-lg leading-none text-foreground/70">
-              {isOpen ? "−" : "+"}
-            </span>
-          </div>
-        </div>
-      </button>
-      {isOpen ? <div className="mt-5 grid gap-4">{children}</div> : null}
-    </div>
-  );
-}
-
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[1.35rem] border border-border/55 bg-card/76 px-4 py-3 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.14)]">
-      <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
-        {label}
-      </p>
-      <p className="mt-2 text-sm font-medium leading-6 text-foreground">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function CommandBlock({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-}) {
-  return (
-    <div className="rounded-[1.35rem] border border-border/55 bg-card/76 px-4 py-4 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.14)]">
-      <p className="text-[11px] uppercase tracking-[0.24em] text-neutral-500">
-        {label}
-      </p>
-      <pre className="themed-scrollbar mt-3 overflow-x-auto whitespace-pre-wrap break-words rounded-[1rem] border border-border/55 bg-background/58 px-3 py-3 font-mono text-xs leading-6 text-foreground/85">
-        {value}
-      </pre>
-      {hint ? (
-        <p className="mt-2 text-sm leading-6 text-neutral-500">{hint}</p>
-      ) : null}
-    </div>
-  );
-}
-
-function PolicyManifestEditor({
-  value,
-  onCommit,
-}: {
-  value: JsonObject;
-  onCommit: (next: JsonObject) => void;
-}) {
-  const [draft, setDraft] = useState(prettyPrint(value));
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    setDraft(prettyPrint(value));
-    setError("");
-  }, [value]);
-
-  function commitDraft() {
-    try {
-      const parsed = JSON.parse(draft) as unknown;
-      if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-        setError("Manifest must be a JSON object.");
-        return;
-      }
-      onCommit(parsed as JsonObject);
-      setError("");
-    } catch {
-      setError("Manifest must be valid JSON before it can be saved.");
-    }
-  }
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-          Manifest JSON
-        </p>
-        <Button variant="secondary" type="button" onClick={commitDraft}>
-          Update draft
-        </Button>
-      </div>
-      <Textarea
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        className="min-h-[24rem] font-mono text-xs leading-6"
-      />
-      {error ? (
-        <p className="text-sm leading-6 text-warning">{error}</p>
-      ) : (
-        <p className="text-sm leading-6 text-neutral-500">
-          Edit the full manifest when you need fields beyond the guided
-          controls. This only updates the managed config draft.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function StageAction({
-  disabledReason,
-  children,
-}: {
-  disabledReason?: string;
-  children: ReactNode;
-}) {
-  if (!disabledReason) {
-    return <>{children}</>;
-  }
-
-  return (
-    <div className="group relative inline-flex">
-      {children}
-      <div className="pointer-events-none absolute bottom-[calc(100%+0.45rem)] left-0 z-20 hidden w-56 rounded-[0.95rem] border border-border/45 bg-foreground px-3 py-2 text-left text-xs leading-5 text-background shadow-[0_16px_40px_rgb(15_23_42_/_0.28)] group-hover:block">
-        {disabledReason}
-      </div>
-    </div>
-  );
-}
-
-function StageNotice({
-  title,
-  body,
-  tone = "neutral",
-}: {
-  title: string;
-  body: string;
-  tone?: "neutral" | "warning";
-}) {
-  const toneClass =
-    tone === "warning"
-      ? "border-warning/35 bg-warning/10 text-warning"
-      : "border-border/80 bg-card/85 text-foreground";
-
-  return (
-    <div
-      className={`rounded-[1.4rem] border px-4 py-3.5 shadow-[inset_0_1px_0_rgb(var(--color-card)_/_0.12)] ${toneClass}`}
-    >
-      <p className="text-[11px] uppercase tracking-[0.22em]">{title}</p>
-      <p className="mt-2 text-sm leading-6">{body}</p>
-    </div>
-  );
 }
 
 function clusterStatusTone(status?: string): "neutral" | "warning" {
@@ -3483,6 +2075,12 @@ function formatRunTimestamp(value: string | null | undefined) {
 
 export default function App() {
   const [config, setConfig] = useState<TerraformConfig | null>(null);
+  const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(
+    null,
+  );
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isAuthExchanging, setIsAuthExchanging] = useState(false);
   const [activeTab, setActiveTab] = useState<AppTab>("deployment");
   const [isWardsAssetsOpen, setIsWardsAssetsOpen] = useState(true);
   const [isPoliciesAssetsOpen, setIsPoliciesAssetsOpen] = useState(true);
@@ -3747,7 +2345,6 @@ export default function App() {
     selectedRun?.kind === "apply"
       ? "Plan behind this apply"
       : "Planned changes";
-  const apiTokenValue = getApiToken();
   const toggleThemeMode = () => {
     setThemeMode((current) => (current === "light" ? "dark" : "light"));
   };
@@ -3865,6 +2462,135 @@ export default function App() {
     totalAppsWithService,
   ]);
 
+  async function beginLogin() {
+    try {
+      setIsBusy(true);
+      const resolvedAuthConfig = authConfig ?? (await api.getAuthConfig());
+      setAuthConfig(resolvedAuthConfig);
+
+      const verifier = randomBase64Url(64);
+      const state = randomBase64Url(24);
+      const challenge = await createPkceChallenge(verifier);
+
+      window.sessionStorage.setItem(authStateStorageKey, state);
+      window.sessionStorage.setItem(authVerifierStorageKey, verifier);
+
+      const authorizationUrl = new URL(
+        resolvedAuthConfig.authorization_endpoint,
+      );
+      authorizationUrl.searchParams.set(
+        "client_id",
+        resolvedAuthConfig.client_id,
+      );
+      authorizationUrl.searchParams.set(
+        "redirect_uri",
+        resolvedAuthConfig.redirect_uri,
+      );
+      authorizationUrl.searchParams.set(
+        "response_type",
+        resolvedAuthConfig.response_type,
+      );
+      authorizationUrl.searchParams.set("scope", resolvedAuthConfig.scope);
+      authorizationUrl.searchParams.set("code_challenge", challenge);
+      authorizationUrl.searchParams.set(
+        "code_challenge_method",
+        resolvedAuthConfig.code_challenge_method,
+      );
+      authorizationUrl.searchParams.set("state", state);
+
+      window.location.assign(authorizationUrl.toString());
+    } catch (error) {
+      setErrorMessage((error as Error).message);
+      setIsBusy(false);
+    }
+  }
+
+  async function finishAuthCallback(resolvedAuthConfig: AuthConfigResponse) {
+    const currentUrl = new URL(window.location.href);
+    const code = currentUrl.searchParams.get("code");
+    const state = currentUrl.searchParams.get("state");
+    const expectedState = window.sessionStorage.getItem(authStateStorageKey);
+    const verifier = window.sessionStorage.getItem(authVerifierStorageKey);
+
+    if (
+      !code ||
+      !state ||
+      !expectedState ||
+      !verifier ||
+      state !== expectedState
+    ) {
+      throw new Error("Invalid Keycloak callback state.");
+    }
+
+    setIsAuthExchanging(true);
+    try {
+      const session = await api.exchangeAuthCode({
+        code,
+        code_verifier: verifier,
+        redirect_uri: resolvedAuthConfig.redirect_uri,
+      });
+
+      window.sessionStorage.removeItem(authStateStorageKey);
+      window.sessionStorage.removeItem(authVerifierStorageKey);
+      window.history.replaceState({}, "", "/");
+      setCurrentUser(session.user ?? null);
+    } finally {
+      setIsAuthExchanging(false);
+    }
+  }
+
+  async function bootstrapAuthAndData() {
+    setIsAuthLoading(true);
+    try {
+      const resolvedAuthConfig = await api.getAuthConfig();
+      setAuthConfig(resolvedAuthConfig);
+
+      if (window.location.pathname === "/auth/callback") {
+        await finishAuthCallback(resolvedAuthConfig);
+      }
+
+      const session = await api.getSession();
+      setCurrentUser(session.authenticated ? (session.user ?? null) : null);
+      if (!session.authenticated) {
+        return;
+      }
+
+      await loadInitial();
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        setCurrentUser(null);
+        return;
+      }
+      setErrorMessage((error as Error).message);
+    } finally {
+      setIsAuthLoading(false);
+      setIsBusy(false);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      setIsBusy(true);
+      const result = await api.logout();
+      setCurrentUser(null);
+      setConfig(null);
+      setRuns([]);
+      setSelectedRun(null);
+      setSelectedRunId("");
+      setSelectedRunLogs([]);
+      setOutputs(null);
+      setHealthSnapshot(null);
+      if (result.logout_url) {
+        window.location.assign(result.logout_url);
+        return;
+      }
+    } catch (error) {
+      setErrorMessage((error as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (stageAvailability[selectedDeploymentStage]) {
       return;
@@ -3954,7 +2680,13 @@ export default function App() {
   }, [isPolicyFilterMenuOpen, isPolicyTypeMenuOpen]);
 
   useEffect(() => {
-    void loadInitial();
+    void bootstrapAuthAndData();
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
 
     const intervalId = window.setInterval(() => {
       void refreshHealth();
@@ -3963,7 +2695,7 @@ export default function App() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     return () => {
@@ -4169,6 +2901,10 @@ export default function App() {
         await refreshOutputs();
       }
     } catch (error) {
+      if (isUnauthorizedError(error)) {
+        setCurrentUser(null);
+        return;
+      }
       setErrorMessage((error as Error).message);
     }
   }
@@ -4178,8 +2914,10 @@ export default function App() {
       const health = await api.getHealth();
       setHealthSnapshot(health);
       setStatusMessage(buildHealthStatusMessage(health));
-    } catch {
-      // Keep the last known health snapshot when refresh fails.
+    } catch (error) {
+      if (isUnauthorizedError(error)) {
+        setCurrentUser(null);
+      }
     }
   }
 
@@ -4990,6 +3728,62 @@ export default function App() {
     } finally {
       setIsBusy(false);
     }
+  }
+
+  if (isAuthLoading || isAuthExchanging) {
+    return (
+      <div className="app-shell">
+        <div className="mx-auto max-w-7xl">
+          <Card>
+            <CardContent className="py-10 text-sm text-neutral-600">
+              {isAuthExchanging
+                ? "Completing Keycloak sign-in..."
+                : "Checking your control-plane session..."}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="app-shell">
+        <div className="mx-auto max-w-5xl">
+          {errorMessage ? (
+            <div className="mb-4 rounded-[1.4rem] border border-warning/30 bg-warning/92 px-4 py-3 text-sm text-accentForeground shadow-[0_18px_48px_rgb(0_0_0_/_0.24)]">
+              {errorMessage}
+            </div>
+          ) : null}
+          <Card>
+            <CardContent className="space-y-6 py-12">
+              <div className="space-y-3">
+                <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
+                  Isolens Control Plane
+                </p>
+                <h1 className="text-4xl font-semibold tracking-tight text-foreground">
+                  Sign in with Keycloak to manage policies, workloads, and run
+                  history.
+                </h1>
+                <p className="max-w-3xl text-sm leading-7 text-neutral-500">
+                  The control plane now uses Keycloak-backed identity with
+                  backend-managed sessions so every action can be tied to a real
+                  user and audited safely.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button disabled={isBusy} onClick={() => void beginLogin()}>
+                  {isBusy ? "Redirecting..." : "Sign in"}
+                </Button>
+                <Badge>OIDC</Badge>
+                <Badge>Cookie session</Badge>
+                <Badge>Audited actions</Badge>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   }
 
   if (!config) {
@@ -6977,41 +5771,48 @@ export default function App() {
                   <CardContent className="space-y-4">
                     <div className="surface-strong rounded-[1.8rem] p-6">
                       <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
-                        Accounts Preview
+                        Current Session
                       </p>
                       <h2 className="mt-3 text-3xl font-semibold tracking-tight">
-                        User accounts will replace the old infrastructure access
-                        model here.
+                        Identity and access now come from Keycloak.
                       </h2>
                       <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
-                        This page is reserved for sign-in state, user profiles,
-                        membership, and role-based access once the managed
-                        sign-in flow is in place. Infrastructure ARNs are no
-                        longer edited from the control plane.
+                        The backend keeps a control-plane session after Keycloak
+                        sign-in so every API call and workload action can be
+                        tied to your user identity for auditing.
                       </p>
                     </div>
 
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       <MetricTile
-                        label="Identity"
-                        value="Coming soon"
-                        hint="Managed session-backed login"
+                        label="Username"
+                        value={currentUser.username}
+                        hint={currentUser.display_name ?? "Keycloak identity"}
                       />
                       <MetricTile
                         label="Roles"
-                        value="Planned"
-                        hint="Viewer, operator, admin"
+                        value={currentUser.roles.length}
+                        hint={currentUser.roles.join(", ") || "No roles"}
                       />
                       <MetricTile
-                        label="Provisioning"
-                        value="Pending"
-                        hint="Organization-scoped user access"
+                        label="Email"
+                        value={currentUser.email ?? "Not set"}
+                        hint="Mapped from the OIDC profile"
                       />
                       <MetricTile
-                        label="Current Auth"
-                        value="Shared token"
-                        hint="Temporary model until accounts land"
+                        label="Session"
+                        value="Active"
+                        hint="Cookie-backed control-plane session"
                       />
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        variant="ghost"
+                        disabled={isBusy}
+                        onClick={() => void handleLogout()}
+                      >
+                        Sign out
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -7086,8 +5887,8 @@ export default function App() {
                     value={selectedApp?.name ?? "None"}
                   />
                   <ReadOnlyField
-                    label="API Token"
-                    value={apiTokenValue || "Not set"}
+                    label="Signed-in User"
+                    value={currentUser.username}
                   />
                 </div>
               </div>

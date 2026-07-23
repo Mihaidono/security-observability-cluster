@@ -1,148 +1,55 @@
 # Frontend Operator UI
 
-The frontend is a Vite + React operator console for the backend control plane. It does not talk to Terraform directly. All cluster changes go through the backend API.
+The frontend is a Vite + React control plane for the Isolens backend. It does not talk to Terraform directly.
 
-## Stack
+## Authentication Model
 
-- React 19
-- TypeScript
-- Vite 6
-- Tailwind CSS
+The frontend no longer stores or sends a shared bearer token.
+
+Current flow:
+
+1. the UI calls `GET /api/auth/config`
+2. the browser is redirected to Keycloak with Authorization Code + PKCE
+3. Keycloak redirects back to `/auth/callback`
+4. the frontend posts the authorization code and PKCE verifier to `POST /api/auth/exchange`
+5. the backend sets an `HttpOnly` session cookie
+6. later `fetch` and WebSocket requests use `credentials: "include"` and the same session
+
+Because the session cookie is `HttpOnly`, frontend JavaScript does not read raw auth credentials.
 
 ## Runtime Model
 
-The UI works with four tabs:
+Tabs:
 
-- `Overview`
-  shared-infrastructure context, policy/application stage actions, and Hubble handoff
+- `Stages`
 - `Assets`
-  ward editing, application editing, app templates, scenarios, and scenario playbooks
 - `Activity`
-  run history, plan summary, logs, and Terraform outputs
-- `Settings`
-  read-only cluster profile
+- `Accounts`
 
 The UI loads:
 
+- auth session from `GET /api/auth/session`
 - config from `GET /api/config`
 - run history from `GET /api/runs`
 - health from `GET /api/health`
 
-## Authentication
+## Proxy Model
 
-The frontend sends:
+The frontend is the public web edge for both:
 
-```http
-Authorization: Bearer <token>
-```
+- `/api` -> backend
+- `/auth` -> Keycloak
 
-Token lookup order:
+That applies to:
 
-1. `localStorage["isolens-api-token"]`
-2. `VITE_API_TOKEN`
-3. fallback `dev-token`
+- local development through the Vite dev server proxy
+- production container runtime through the bundled NGINX proxy
 
-This means the browser can override the build-time token by setting a new one through the UI flow that writes local storage.
-
-## API Base URL Resolution
-
-Current behavior in `src/lib/api.ts`:
-
-- if `VITE_API_BASE_URL` is set, use it
-- otherwise, if the page is served from port `5173`, assume backend is on `:8000`
-- otherwise, use `window.location.origin`
-
-The WebSocket run stream uses the same base URL and switches protocol automatically:
-
-- `http` -> `ws`
-- `https` -> `wss`
-
-## What the UI Edits
-
-The frontend edits the managed config model returned by the backend:
-
-- cluster metadata is read-only
-- `analysis_subjects` can be added, renamed, edited, and removed
-- `ward_applications` can be added, edited, and removed
-
-The `core` and `platform` portions of the configuration stay visible for context, but they are not executed from the UI.
-
-The `Assets` tab now has three distinct layers:
-
-- `Wards`
-  choose the namespace-like subject you want to work in
-- `App Templates`
-  add one standalone workload without disturbing the rest of the ward
-- `Scenario Library`
-  replace the selected ward's current applications with a curated proof bundle
-
-When a scenario is active in the selected ward, the UI also renders `Scenario Playbooks`. Those playbooks are runbooks, not automations: they list the commands you should execute and the evidence you should expect to capture.
-
-Current read-only cluster metadata includes:
-
-- project
-- environment
-- cluster name
-- Kubernetes version
-- EKS control-plane log retention in days
-
-After editing, `Save config` persists the entire config back to the backend.
-
-The UI is editing structured JSON, not freeform HCL.
-
-## Stage Actions
-
-The UI exposes:
-
-- `Plan policies`
-- `Apply policies`
-- `Destroy policies`
-- `Plan applications`
-- `Apply applications`
-- `Destroy applications`
-- `Cancel run`
-
-Important behavior:
-
-- apply buttons operate on the latest planned run for that stage
-- apply can be queued behind the latest stage plan while that plan is still running, and it will fail closed if the source plan does not finish successfully
-- policies are expected to run only after the dedicated infrastructure pipeline has reconciled `core` and `platform`
-- applications-stage actions stay disabled until a successful policies apply exists
-- cancel is only enabled for queued or active runs
-- destroy uses a two-click arming pattern in the UI, but the backend still enforces the real safety checks
-
-## Activity View
-
-The Activity tab shows:
-
-- selected run metadata
-- structured plan summary
-- source plan reference for apply runs
-- live and persisted logs
-- Terraform outputs
-- a run-history cleanup action that can keep only the latest 10 runs
-
-Output behavior reflects the current implementation:
-
-- if the selected run has outputs, they are shown
-- if the selected run has no outputs, the outputs panel is cleared
-- if the app loads with no run selected, it falls back to `GET /api/outputs`
-
-This prevents stale outputs from a different run from staying visible.
-
-## Observability Handoff
-
-The UI does not embed Hubble. It shows the local `kubectl port-forward` command and opens the local forwarded URL:
-
-```text
-http://127.0.0.1:12000
-```
-
-Hubble itself is part of the infra-managed shared platform, so the UI treats it as externally owned context rather than an app-stage capability.
+The WebSocket run stream uses the same origin and no longer appends a token query parameter.
 
 ## Local Development
 
-Run directly:
+Direct run:
 
 ```bash
 cd frontend
@@ -150,22 +57,17 @@ npm install
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
-Environment variables commonly used during local development:
+Local Vite proxy variables:
 
-- `VITE_API_TOKEN`
+- `VITE_DEV_BACKEND_PROXY_TARGET`
+- `VITE_DEV_KEYCLOAK_PROXY_TARGET`
+
+Optional override:
+
 - `VITE_API_BASE_URL`
 
-Or use the repo-level Docker Compose setup.
-
-Dockerfiles are intentionally split:
-
-- `frontend/Dockerfile`
-  - local development image used by Docker Compose
-  - runs the Vite dev server with bind-mounted source
-- `frontend/Dockerfile.prod`
-  - production image used by CI/CD publishing
-  - builds the static frontend and serves it through an NGINX reverse proxy
-  - proxies `/api` and WebSocket backend traffic so only the frontend needs public exposure
+The normal local stack is still the repo-level Docker Compose flow.
+Keycloak starts without a preloaded realm, so sign-in works only after you create the realm/client/user in Keycloak.
 
 ## Build
 
@@ -174,22 +76,21 @@ cd frontend
 npm run build
 ```
 
-Production container build:
+## Production Runtime
 
-```bash
-docker build -f frontend/Dockerfile.prod .
-```
-
-Production runtime environment:
+The production frontend container expects:
 
 - `BACKEND_HOST`
-  - defaults to `backend`
 - `BACKEND_PORT`
-  - defaults to `8000`
+- `KEYCLOAK_HOST`
+- `KEYCLOAK_PORT`
 
-## Current Limitations
+## Accounts View
 
-- The UI is intentionally backend-driven. It cannot operate offline or apply Terraform locally in the browser.
-- The Hubble button assumes you already started the local `kubectl port-forward`; there is no embedded observability dashboard in this app.
-- The UI does not currently expose every Terraform input for editing. For example, `cluster_log_retention_in_days` is visible as read-only metadata, but changing it still requires editing the managed config file or extending the form.
-- Scenario playbooks explain how to capture proof, but the UI does not yet mark scenarios as completed or store screenshots and output artifacts for you.
+The `Accounts` tab now reflects the active authenticated user instead of the old shared-token placeholder. It shows:
+
+- username
+- display name
+- email
+- mapped Keycloak roles
+- sign-out action

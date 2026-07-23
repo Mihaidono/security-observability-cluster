@@ -1,36 +1,20 @@
 import type {
+  AuthConfigResponse,
+  AuthExchangeRequest,
   HealthResponse,
+  LogoutResponse,
   RunPruneResponse,
   RunStage,
+  SessionResponse,
   TerraformConfig,
   TerraformRun,
   UnlockStateResponse,
 } from "./types";
 
-const tokenStorageKey = "isolens-api-token";
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim().replace(
   /\/$/,
   "",
 );
-
-export function getApiToken(): string {
-  return (
-    window.localStorage.getItem(tokenStorageKey) ??
-    import.meta.env.VITE_API_TOKEN ??
-    "dev-token"
-  );
-}
-
-export function setApiToken(token: string): void {
-  window.localStorage.setItem(tokenStorageKey, token);
-}
-
-function authHeaders(headers?: HeadersInit): HeadersInit {
-  return {
-    Authorization: `Bearer ${getApiToken()}`,
-    ...(headers ?? {}),
-  };
-}
 
 function getApiBaseUrl(): string {
   if (configuredApiBaseUrl) {
@@ -38,7 +22,7 @@ function getApiBaseUrl(): string {
   }
 
   if (window.location.port === "5173") {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    return `${window.location.protocol}//${window.location.host}`;
   }
 
   return window.location.origin;
@@ -64,10 +48,11 @@ function parseErrorPayload(payload: string): string {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    headers: authHeaders({
+    credentials: "include",
+    headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
-    }),
+    },
     ...init,
   });
 
@@ -85,11 +70,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export function buildRunEventsUrl(runId: string): string {
   const apiBaseUrl = new URL(getApiBaseUrl());
   const protocol = apiBaseUrl.protocol === "https:" ? "wss:" : "ws:";
-  const token = encodeURIComponent(getApiToken());
-  return `${protocol}//${apiBaseUrl.host}/api/runs/${runId}/events?token=${token}`;
+  return `${protocol}//${apiBaseUrl.host}/api/runs/${runId}/events`;
 }
 
 export const api = {
+  getAuthConfig: () => request<AuthConfigResponse>("/api/auth/config"),
+  getSession: () => request<SessionResponse>("/api/auth/session"),
+  exchangeAuthCode: (payload: AuthExchangeRequest) =>
+    request<SessionResponse>("/api/auth/exchange", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  logout: () =>
+    request<LogoutResponse>("/api/auth/logout", {
+      method: "POST",
+    }),
   getConfig: () => request<TerraformConfig>("/api/config"),
   saveConfig: (config: TerraformConfig) =>
     request<TerraformConfig>("/api/config", {
