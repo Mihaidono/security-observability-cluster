@@ -68,7 +68,7 @@ No modules.
 | max_allocated_storage | Upper limit in GiB for PostgreSQL storage autoscaling. | `number` | `100` | no |
 | multi_az | Whether to provision a Multi-AZ standby for the PostgreSQL instance. | `bool` | `true` | no |
 | name | Base name used for the RDS PostgreSQL resources. | `string` | `"isolens-postgresql"` | no |
-| password | Application password used by the RDS PostgreSQL instance. | `string` | `"isolens-dev-password-change-me"` | no |
+| password | Application password used by the RDS PostgreSQL instance. | `string` | n/a | yes |
 | port | PostgreSQL listener port. | `number` | `5432` | no |
 | skip_final_snapshot | Whether to skip the final snapshot when destroying the PostgreSQL instance. | `bool` | `true` | no |
 | storage_encrypted | Whether to enable storage encryption for PostgreSQL. | `bool` | `true` | no |

@@ -225,13 +225,6 @@ variable "postgresql_username" {
   default     = "isolens"
 }
 
-variable "postgresql_password" {
-  description = "Application password stored in the PostgreSQL Secret."
-  type        = string
-  sensitive   = true
-  default     = "isolens-dev-password-change-me"
-}
-
 variable "postgresql_port" {
   description = "Port exposed by PostgreSQL."
   type        = number

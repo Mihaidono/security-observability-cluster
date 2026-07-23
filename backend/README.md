@@ -24,7 +24,8 @@ At startup the backend resolves paths relative to the repo root:
   - `infrastructure/stages/platform`
   - `infrastructure/stages/policies`
   - `infrastructure/stages/applications`
-- PostgreSQL database: configured by `ISOLENS_DATABASE_URL`
+- PostgreSQL database:
+  - password-based connection string: `ISOLENS_DATABASE_URL`
 - per-run artifacts and logs: `backend/state/runs/<run_id>/`
 
 If the managed config file does not exist yet, the backend seeds it from the default JSON template and regenerates the four stage-local tfvars files. A legacy `infrastructure/frontend-managed.auto.tfvars.json` file is still migrated automatically on first load if it exists from an older repo layout.
@@ -162,6 +163,7 @@ For stage-mutating routes, only `policies` and `applications` are supported by t
 `backend/.env.example` is the current reference:
 
 - `ISOLENS_API_TOKEN`: bearer token for API and WebSocket auth
+- `ISOLENS_DATABASE_URL`: PostgreSQL connection string used by the backend
 - `TERRAFORM_BIN`: Terraform executable name or path
 - `ISOLENS_CORS_ORIGINS`: comma-separated frontend origins
 - AWS credential variables:

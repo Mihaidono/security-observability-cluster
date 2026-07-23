@@ -20,7 +20,6 @@ variable "password" {
   description = "Application password used by the RDS PostgreSQL instance."
   type        = string
   sensitive   = true
-  default     = "isolens-dev-password-change-me"
 }
 
 variable "port" {

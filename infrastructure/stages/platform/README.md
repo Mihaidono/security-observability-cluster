@@ -64,7 +64,9 @@ This stage expects:
 
 - PostgreSQL is no longer scheduled inside the cluster.
 - The control plane connects to a private RDS PostgreSQL instance using the endpoint exported by the PostgreSQL module.
-- The backend connection string currently enforces TLS with `sslmode=require`.
+- The platform stage generates a PostgreSQL application password with Terraform and injects a password-based connection string into the backend runtime secret.
+- That generated password is stored in Terraform state, so access to the state backend must be treated as sensitive.
+- The backend PostgreSQL client still enforces TLS with `sslmode=require`.
 - RDS ingress is restricted through a security group reference to the EKS worker-node security group, not by a broad VPC CIDR allow rule.
 - This limits AWS-side access to traffic originating from worker-node ENIs. Pod-level restriction should still be enforced separately with Cilium policy.
 
@@ -89,13 +91,15 @@ Current outputs include:
 - `update_kubeconfig_command`
 - `ingress_controller_namespace`
 - `control_plane_namespace`
+- `control_plane_backend_service_name`
+- `control_plane_backend_service_fqdn`
+- `control_plane_frontend_service_name`
+- `control_plane_runner_name`
 - `postgresql_endpoint`
 - `postgresql_address`
 - `postgresql_port`
 - `postgresql_database_name`
 - `postgresql_username`
-- `kyverno_cluster_policies`
-- `tetragon_policy_namespaces`
 
 Those outputs are most useful for:
 
@@ -190,6 +194,7 @@ http://127.0.0.1:12000
 | aws | 5.100.0 |
 | helm | 2.17.0 |
 | kubernetes | 2.37.1 |
+| random | 3.7.2 |
 | time | 0.13.1 |
 
 ## Modules
@@ -208,6 +213,7 @@ http://127.0.0.1:12000
 | [aws_iam_role.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_role_policy_attachment) | resource |
 | [kubernetes_namespace_v1.control_plane](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
+| [random_password.postgresql_password](https://registry.terraform.io/providers/hashicorp/random/3.7.2/docs/resources/password) | resource |
 | [time_sleep.cluster_access_ready](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
 | [aws_eks_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/eks_cluster) | data source |
 | [aws_iam_openid_connect_provider.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/iam_openid_connect_provider) | data source |
@@ -258,7 +264,6 @@ http://127.0.0.1:12000
 | postgresql_max_allocated_storage | Upper limit in GiB for PostgreSQL storage autoscaling. | `number` | `100` | no |
 | postgresql_multi_az | Whether to provision a Multi-AZ standby for PostgreSQL. | `bool` | `true` | no |
 | postgresql_name | Base name used for the RDS PostgreSQL resources. | `string` | `"isolens-postgresql"` | no |
-| postgresql_password | Application password stored in the PostgreSQL Secret. | `string` | `"isolens-dev-password-change-me"` | no |
 | postgresql_port | Port exposed by PostgreSQL. | `number` | `5432` | no |
 | postgresql_skip_final_snapshot | Whether to skip the final snapshot when destroying PostgreSQL. | `bool` | `true` | no |
 | postgresql_storage_encrypted | Whether to enable storage encryption for PostgreSQL. | `bool` | `true` | no |

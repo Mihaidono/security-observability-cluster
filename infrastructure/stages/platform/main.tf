@@ -86,6 +86,12 @@ resource "aws_iam_role_policy_attachment" "cilium_operator" {
   policy_arn = aws_iam_policy.cilium_operator.arn
 }
 
+resource "random_password" "postgresql_password" {
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
 resource "time_sleep" "cluster_access_ready" {
   create_duration = "45s"
 
@@ -143,7 +149,7 @@ module "control_plane" {
   backend_service_port      = var.control_plane_backend_service_port
   backend_container_port    = var.control_plane_backend_container_port
   backend_api_token         = var.control_plane_backend_api_token
-  backend_database_url      = "postgresql://${var.postgresql_username}:${var.postgresql_password}@${module.postgresql.address}:${module.postgresql.port}/${var.postgresql_database_name}?sslmode=require"
+  backend_database_url      = "postgresql://${var.postgresql_username}:${random_password.postgresql_password.result}@${module.postgresql.address}:${module.postgresql.port}/${var.postgresql_database_name}?sslmode=require"
   backend_resources         = var.control_plane_backend_resources
 
   frontend_image             = var.control_plane_frontend_image
@@ -171,7 +177,7 @@ module "postgresql" {
   name                       = var.postgresql_name
   database_name              = var.postgresql_database_name
   username                   = var.postgresql_username
-  password                   = var.postgresql_password
+  password                   = random_password.postgresql_password.result
   port                       = var.postgresql_port
   vpc_id                     = data.aws_vpc.cluster.id
   subnet_ids                 = data.aws_eks_cluster.this.vpc_config[0].subnet_ids
