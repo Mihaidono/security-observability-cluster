@@ -1,3 +1,9 @@
+## [0.8.5](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.4...v0.8.5) (2026-07-27)
+
+### Bug Fixes
+
+* **docs:** referenced a local file I wasn't going to push ([520d87a](https://github.com/Mihaidono/security-observability-cluster/commit/520d87ac663a7215674e6405e77136c1a4ddae4b))
+
 ## [0.8.4](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.3...v0.8.4) (2026-07-27)
 
 ### Bug Fixes
