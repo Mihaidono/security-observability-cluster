@@ -83,6 +83,8 @@ resource "kubernetes_job_v1" "keycloak_database_bootstrap" {
                 psql -c "ALTER ROLE \"$${KEYCLOAK_DATABASE_USERNAME}\" WITH LOGIN PASSWORD '$${KEYCLOAK_DATABASE_PASSWORD}';"
               fi
 
+              psql -c "GRANT \"$${KEYCLOAK_DATABASE_USERNAME}\" TO \"$${PGUSER}\";"
+
               if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$${KEYCLOAK_DATABASE_NAME}'" | grep -q 1; then
                 psql -c "CREATE DATABASE \"$${KEYCLOAK_DATABASE_NAME}\" OWNER \"$${KEYCLOAK_DATABASE_USERNAME}\";"
               else

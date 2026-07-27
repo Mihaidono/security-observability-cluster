@@ -25,7 +25,8 @@ from .models import (
     UnlockStateResponse,
 )
 from .run_messages import canceled_run_message, interrupted_run_message
-from .store import PostgresStore, normalize_log_lines, strip_ansi
+from .repositories.base import normalize_log_lines, strip_ansi
+from .store import PostgresStore
 
 
 def utc_now() -> datetime:

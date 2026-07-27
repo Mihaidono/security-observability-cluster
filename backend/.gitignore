@@ -1,5 +1,7 @@
 .venv/
 .env
+build/
+dist/
 state/
 state/managed-config.json
 **/__pycache__/
