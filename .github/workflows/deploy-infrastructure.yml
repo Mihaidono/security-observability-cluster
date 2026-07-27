@@ -1,16 +1,6 @@
 name: Deploy Infrastructure
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/deploy-infrastructure.yml"
-      - "infrastructure/stages/core/**"
-      - "infrastructure/stages/platform/**"
-      - "infrastructure/modules/control-plane/**"
-      - "infrastructure/modules/platform-addons/**"
-      - "infrastructure/modules/platform-postgresql/**"
   workflow_dispatch:
 
 concurrency:
@@ -44,6 +34,8 @@ jobs:
 
       - name: Set Up Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       - name: Write Core CI Tfvars
         shell: bash
@@ -62,6 +54,7 @@ jobs:
           terraform plan -detailed-exitcode -input=false -no-color -out=core.tfplan
           exit_code=$?
           set -e
+          echo "Terraform core plan exit code: $exit_code"
 
           if [[ "$exit_code" == "0" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -97,6 +90,8 @@ jobs:
 
       - name: Set Up Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
       - name: Write Platform CI Tfvars
         shell: bash
@@ -115,6 +110,7 @@ jobs:
           terraform plan -detailed-exitcode -input=false -no-color -out=platform.tfplan
           exit_code=$?
           set -e
+          echo "Terraform platform plan exit code: $exit_code"
 
           if [[ "$exit_code" == "0" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
