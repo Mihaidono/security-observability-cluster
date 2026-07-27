@@ -1,3 +1,9 @@
+## [0.8.4](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.3...v0.8.4) (2026-07-27)
+
+### Bug Fixes
+
+* **repo:** fixed documentation split, put it all in order in the same spot ([8781a08](https://github.com/Mihaidono/security-observability-cluster/commit/8781a0812a0d4a2e08e7c8dddb694be4d4017a89))
+
 ## [0.8.3](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.2...v0.8.3) (2026-07-27)
 
 ### Bug Fixes
