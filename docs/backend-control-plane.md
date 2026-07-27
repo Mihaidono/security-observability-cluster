@@ -123,4 +123,4 @@ Minimum backend validation after changes:
 python3 -m py_compile backend/app/*.py
 ```
 
-For end-to-end auth validation, use [TESTING_AND_USAGE.md](/home/mihandrei/work/security-observability-cluster/TESTING_AND_USAGE.md).
+For end-to-end auth validation, use [testing-and-validation.md](testing-and-validation.md).
