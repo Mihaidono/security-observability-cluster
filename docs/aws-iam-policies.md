@@ -43,7 +43,7 @@ Example:
 
 ## Infrastructure Deployment Policy
 
-The infrastructure deployment policy is currently stored in [policy.json](../policy.json).
+The infrastructure deployment policy is not committed as a canonical repo artifact. Keep the applied AWS policy in IAM as the source of truth, and use this document as the tracked reference for required permissions and scope.
 
 This policy is attached to:
 
@@ -147,7 +147,6 @@ Then rerun the backend or frontend image publish workflow and confirm the push c
 
 ## Related Files
 
-- [policy.json](../policy.json)
 - [repository-overview.md](repository-overview.md)
 - [infrastructure/stages/core/main.tf](../infrastructure/stages/core/main.tf)
 - [infrastructure/stages/platform/main.tf](../infrastructure/stages/platform/main.tf)
