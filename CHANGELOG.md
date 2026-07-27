@@ -1,3 +1,9 @@
+## [0.8.2](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.1...v0.8.2) (2026-07-27)
+
+### Bug Fixes
+
+* **ci:** concurrency wasn't present in release jobs ([9317df2](https://github.com/Mihaidono/security-observability-cluster/commit/9317df26790e26007954e16633977ac3b2082c4d))
+
 ## [0.8.1](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.0...v0.8.1) (2026-07-27)
 
 ### Bug Fixes
