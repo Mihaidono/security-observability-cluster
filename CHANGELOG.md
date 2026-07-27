@@ -1,3 +1,9 @@
+## [0.8.3](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.2...v0.8.3) (2026-07-27)
+
+### Bug Fixes
+
+* **backend:** old bad imports fixed ([bfe8785](https://github.com/Mihaidono/security-observability-cluster/commit/bfe8785b90c1b4920072584c186a8a122fb02a0e))
+
 ## [0.8.2](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.1...v0.8.2) (2026-07-27)
 
 ### Bug Fixes
