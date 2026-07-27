@@ -1,3 +1,9 @@
+## [0.8.1](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.0...v0.8.1) (2026-07-27)
+
+### Bug Fixes
+
+* **ci:** terraform skipped core even if there were things to apply so platform would fail as well ([eb11ba6](https://github.com/Mihaidono/security-observability-cluster/commit/eb11ba6b19709734e1904420194a7f5fff39683c))
+
 ## [0.8.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.7.0...v0.8.0) (2026-07-22)
 
 ### Features
