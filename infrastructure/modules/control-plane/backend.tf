@@ -7,6 +7,7 @@ resource "kubernetes_secret_v1" "backend_runtime" {
 
   data = {
     ISOLENS_DATABASE_URL           = var.backend_database_url
+    ISOLENS_TERRAFORM_VARIABLE_SET = var.terraform_variable_set
     ISOLENS_PUBLIC_APP_URL         = var.public_app_url
     ISOLENS_OIDC_INTERNAL_BASE_URL = "http://${local.keycloak_service_fqdn}:${var.keycloak_service_port}/auth"
     ISOLENS_OIDC_REALM             = var.keycloak_realm

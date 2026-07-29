@@ -18,7 +18,7 @@ output "ward_kubectl_commands" {
   value       = module.workloads.ward_kubectl_commands
 }
 
-output "ward_ingress_hosts" {
-  description = "Hosts configured for ward application ingress resources."
-  value       = module.workloads.ward_ingress_hosts
+output "ward_exposure_routes" {
+  description = "Gateway exposure routes configured for ward applications."
+  value       = module.workloads.ward_exposure_routes
 }

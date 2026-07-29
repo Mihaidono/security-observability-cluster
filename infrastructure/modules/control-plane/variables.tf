@@ -72,6 +72,12 @@ variable "public_app_url" {
   type        = string
 }
 
+variable "terraform_variable_set" {
+  description = "Committed Terraform variable-set directory name consumed by the backend and runner."
+  type        = string
+  default     = "lab"
+}
+
 variable "session_cookie_secure" {
   description = "Whether the backend session cookie should require HTTPS."
   type        = bool
@@ -234,6 +240,12 @@ variable "keycloak_client_secret" {
   sensitive   = true
 }
 
+variable "keycloak_bootstrap_realm" {
+  description = "Whether the control-plane module should bootstrap the Keycloak realm and client configuration."
+  type        = bool
+  default     = true
+}
+
 variable "keycloak_database_host" {
   description = "Hostname of the PostgreSQL instance used by Keycloak."
   type        = string
@@ -295,6 +307,22 @@ variable "keycloak_resources" {
 
 variable "keycloak_database_bootstrap_resources" {
   description = "Resource requests and limits for the one-time Keycloak database bootstrap job."
+  type = object({
+    requests_cpu    = string
+    requests_memory = string
+    limits_cpu      = string
+    limits_memory   = string
+  })
+  default = {
+    requests_cpu    = "50m"
+    requests_memory = "128Mi"
+    limits_cpu      = "250m"
+    limits_memory   = "256Mi"
+  }
+}
+
+variable "keycloak_realm_bootstrap_resources" {
+  description = "Resource requests and limits for the one-time Keycloak realm bootstrap job."
   type = object({
     requests_cpu    = string
     requests_memory = string

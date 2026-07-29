@@ -35,8 +35,11 @@ services:
       KC_PROXY_HEADERS: xforwarded
     command:
       - start-dev
+      - --import-realm
     ports:
       - "8081:8080"
+    volumes:
+      - ./docker/keycloak-import:/opt/keycloak/data/import:ro
 
   backend:
     build:
@@ -52,6 +55,7 @@ services:
       AWS_SDK_LOAD_CONFIG: ${AWS_SDK_LOAD_CONFIG:-true}
       AWS_CONFIG_FILE: /home/backend/.aws/config
       AWS_SHARED_CREDENTIALS_FILE: /home/backend/.aws/credentials
+      ISOLENS_TERRAFORM_VARIABLE_SET: lab
       ISOLENS_DATABASE_URL: postgresql://isolens:isolens-dev-password-change-me@postgres:5432/isolens
       ISOLENS_PUBLIC_APP_URL: http://localhost:5173
       ISOLENS_OIDC_INTERNAL_BASE_URL: http://keycloak:8080/auth
@@ -86,6 +90,7 @@ services:
       AWS_SDK_LOAD_CONFIG: ${AWS_SDK_LOAD_CONFIG:-true}
       AWS_CONFIG_FILE: /home/backend/.aws/config
       AWS_SHARED_CREDENTIALS_FILE: /home/backend/.aws/credentials
+      ISOLENS_TERRAFORM_VARIABLE_SET: lab
       ISOLENS_DATABASE_URL: postgresql://isolens:isolens-dev-password-change-me@postgres:5432/isolens
       ISOLENS_PUBLIC_APP_URL: http://localhost:5173
       ISOLENS_OIDC_INTERNAL_BASE_URL: http://keycloak:8080/auth

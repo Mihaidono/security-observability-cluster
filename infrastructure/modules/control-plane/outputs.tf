@@ -32,3 +32,14 @@ output "keycloak_service_fqdn" {
   description = "Cluster-local DNS name for the control-plane Keycloak service."
   value       = local.keycloak_service_fqdn
 }
+
+output "keycloak_admin_username" {
+  description = "Bootstrap Keycloak admin username."
+  value       = var.keycloak_admin_username
+}
+
+output "keycloak_admin_password" {
+  description = "Bootstrap Keycloak admin password."
+  value       = var.keycloak_admin_password
+  sensitive   = true
+}

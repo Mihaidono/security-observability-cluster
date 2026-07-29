@@ -1,3 +1,26 @@
+data "http" "gateway_api_standard" {
+  url = "https://github.com/kubernetes-sigs/gateway-api/releases/download/v${var.gateway_api_crds_version}/standard-install.yaml"
+}
+
+locals {
+  gateway_api_standard_manifests_list = [
+    for document in split("\n---\n", data.http.gateway_api_standard.response_body) :
+    yamldecode(document)
+    if trimspace(document) != "" && can(yamldecode(document).kind)
+  ]
+
+  gateway_api_standard_manifests = {
+    for manifest in local.gateway_api_standard_manifests_list :
+    manifest.metadata.name => manifest
+  }
+}
+
+resource "kubernetes_manifest" "gateway_api_standard" {
+  for_each = local.gateway_api_standard_manifests
+
+  manifest = each.value
+}
+
 resource "helm_release" "cilium" {
   name            = "cilium"
   repository      = "https://helm.cilium.io/"
@@ -61,6 +84,11 @@ resource "helm_release" "cilium" {
 
   set {
     name  = "hubble.ui.enabled"
+    value = "true"
+  }
+
+  set {
+    name  = "gatewayAPI.enabled"
     value = "true"
   }
 
@@ -168,6 +196,8 @@ resource "helm_release" "cilium" {
     name  = "hubble.ui.frontend.resources.limits.memory"
     value = "256Mi"
   }
+
+  depends_on = [kubernetes_manifest.gateway_api_standard]
 }
 
 resource "aws_eks_addon" "coredns" {

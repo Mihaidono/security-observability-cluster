@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import TerraformConfig
+from .models import RunStage, TerraformConfig
 
 
 def core_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
@@ -46,4 +46,13 @@ def policies_tfvars_payload(config: TerraformConfig) -> dict[str, Any]:
         "analysis_subjects": config.platform.analysis_subjects,
         "kyverno_cluster_policies": config.policies.kyverno_cluster_policies,
         "tetragon_tracing_policies": config.policies.tetragon_tracing_policies,
+    }
+
+
+def generated_tfvars_payloads(config: TerraformConfig) -> dict[RunStage, dict[str, Any]]:
+    return {
+        RunStage.core: core_tfvars_payload(config),
+        RunStage.platform: platform_tfvars_payload(config),
+        RunStage.policies: policies_tfvars_payload(config),
+        RunStage.applications: applications_tfvars_payload(config),
     }

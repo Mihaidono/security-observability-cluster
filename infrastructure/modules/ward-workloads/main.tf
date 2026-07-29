@@ -375,46 +375,52 @@ resource "kubernetes_network_policy" "application_egress_allowlist" {
   }
 }
 
-resource "kubernetes_ingress_v1" "ward_application" {
-  for_each = local.applications_with_ingress
+resource "kubernetes_manifest" "ward_application_route" {
+  for_each = local.applications_with_exposure
 
-  metadata {
-    name        = "${each.value.name}-ingress"
-    namespace   = each.value.namespace
-    labels      = each.value.pod_labels
-    annotations = each.value.ingress.annotations
-  }
-
-  spec {
-    ingress_class_name = each.value.ingress.class_name
-
-    dynamic "tls" {
-      for_each = each.value.ingress.tls_secret_name != null ? [each.value.ingress.tls_secret_name] : []
-      content {
-        hosts       = each.value.ingress.host != null ? [each.value.ingress.host] : []
-        secret_name = tls.value
-      }
+  manifest = {
+    apiVersion = "gateway.networking.k8s.io/v1"
+    kind       = "HTTPRoute"
+    metadata = {
+      name      = "${each.value.name}-route"
+      namespace = each.value.namespace
+      labels = merge(each.value.pod_labels, {
+        "app.kubernetes.io/component" = "public-route"
+        "isolens.io/gateway-provider" = "cilium"
+        "isolens.io/exposure-scope"   = "application"
+      })
     }
-
-    rule {
-      host = each.value.ingress.host
-
-      http {
-        path {
-          path      = each.value.ingress.path
-          path_type = each.value.ingress.path_type
-
-          backend {
-            service {
-              name = kubernetes_service.ward_application[each.key].metadata[0].name
-
-              port {
-                number = each.value.service.port
-              }
-            }
+    spec = merge(
+      {
+        parentRefs = [
+          {
+            name        = var.shared_applications_gateway_name
+            namespace   = var.shared_applications_gateway_namespace
+            sectionName = "http"
           }
-        }
-      }
-    }
+        ]
+        rules = [
+          {
+            matches = [
+              {
+                path = {
+                  type  = each.value.exposure.path_type == "Exact" ? "Exact" : "PathPrefix"
+                  value = each.value.exposure.path
+                }
+              }
+            ]
+            backendRefs = [
+              {
+                name = kubernetes_service.ward_application[each.key].metadata[0].name
+                port = each.value.service.port
+              }
+            ]
+          }
+        ]
+      },
+      each.value.exposure.host != null ? {
+        hostnames = [each.value.exposure.host]
+      } : {}
+    )
   }
 }

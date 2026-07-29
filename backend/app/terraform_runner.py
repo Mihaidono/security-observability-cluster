@@ -131,8 +131,7 @@ class TerraformRunner:
             "-no-color",
             "-out",
             str(run_dir / "planned.tfplan"),
-            "-var-file",
-            str(self.settings.tfvars_path_for_stage(stage)),
+            *self.settings.var_file_args_for_stage(stage),
         ]
         run = TerraformRun(
             id=run_id,
@@ -217,8 +216,7 @@ class TerraformRunner:
             "-auto-approve",
             "-input=false",
             "-no-color",
-            "-var-file",
-            str(self.settings.tfvars_path_for_stage(stage)),
+            *self.settings.var_file_args_for_stage(stage),
         ]
         run = TerraformRun(
             id=destroy_run_id,
@@ -450,8 +448,7 @@ class TerraformRunner:
             "-no-color",
             "-out",
             str(plan_file),
-            "-var-file",
-            str(self.settings.tfvars_path_for_stage(run.stage)),
+            *self.settings.var_file_args_for_stage(run.stage),
         ]
         run.command = command
         await self._persist_run(run)
@@ -606,8 +603,7 @@ class TerraformRunner:
             "-auto-approve",
             "-input=false",
             "-no-color",
-            "-var-file",
-            str(self.settings.tfvars_path_for_stage(run.stage)),
+            *self.settings.var_file_args_for_stage(run.stage),
         ]
         run.command = command
         await self._persist_run(run)
@@ -828,13 +824,7 @@ class TerraformRunner:
                 self._active_process = None
 
     def _terraform_root_for_stage(self, stage: RunStage) -> Path:
-        if stage == RunStage.core:
-            return self.settings.terraform_core_root
-        if stage == RunStage.platform:
-            return self.settings.terraform_platform_root
-        if stage == RunStage.policies:
-            return self.settings.terraform_policies_root
-        return self.settings.terraform_applications_root
+        return self.settings.terraform_root_for_stage(stage)
 
     def _find_recent_lock_for_stage(self, stage: RunStage) -> tuple[TerraformRun, StateLockInfo] | None:
         for run in self.store.list_runs():
@@ -886,7 +876,7 @@ class TerraformRunner:
         )
 
     def _terraform_env(self) -> dict[str, str]:
-        helm_root = self.settings.state_dir / "helm"
+        helm_root = self.settings.paths.helm_root
         helm_cache = helm_root / "cache"
         helm_config = helm_root / "config"
         helm_data = helm_root / "data"

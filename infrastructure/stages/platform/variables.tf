@@ -50,6 +50,12 @@ variable "enable_ingress_nginx" {
   default     = false
 }
 
+variable "gateway_api_crds_version" {
+  description = "Pinned upstream Gateway API standard channel version applied before enabling Cilium Gateway API support."
+  type        = string
+  default     = "1.4.1"
+}
+
 variable "control_plane_namespace" {
   description = "Namespace reserved for the Isolens backend and frontend workloads."
   type        = string
@@ -206,10 +212,73 @@ variable "control_plane_public_app_url" {
   default     = "http://localhost:5173"
 }
 
+variable "enable_control_plane_public_gateway" {
+  description = "Whether to expose the control-plane frontend through a Cilium Gateway and create a Route53 record for it."
+  type        = bool
+  default     = false
+}
+
+variable "control_plane_public_hostname" {
+  description = "Public DNS hostname for the control-plane frontend when the public gateway is enabled."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = (!var.enable_control_plane_public_gateway && var.control_plane_public_hostname == "") || (var.enable_control_plane_public_gateway && can(regex("^[A-Za-z0-9.-]+$", var.control_plane_public_hostname)))
+    error_message = "control_plane_public_hostname must be a valid DNS hostname."
+  }
+}
+
+variable "control_plane_public_tls_secret_name" {
+  description = "Name of the TLS secret presented by the public Gateway listener."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.enable_control_plane_public_gateway || trimspace(var.control_plane_public_tls_secret_name) != ""
+    error_message = "control_plane_public_tls_secret_name must be set when the control-plane public gateway is enabled."
+  }
+}
+
+variable "control_plane_route53_zone_id" {
+  description = "Route53 hosted zone ID that should receive the control-plane frontend CNAME record."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.enable_control_plane_public_gateway || trimspace(var.control_plane_route53_zone_id) != ""
+    error_message = "control_plane_route53_zone_id must be set when the control-plane public gateway is enabled."
+  }
+}
+
+variable "control_plane_route53_record_ttl" {
+  description = "TTL in seconds for the public Route53 CNAME record."
+  type        = number
+  default     = 60
+}
+
 variable "control_plane_session_cookie_secure" {
   description = "Whether the backend session cookie should require HTTPS."
   type        = bool
   default     = true
+}
+
+variable "enable_shared_applications_gateway" {
+  description = "Whether to create the shared Cilium Gateway used by application HTTPRoutes across ward namespaces."
+  type        = bool
+  default     = true
+}
+
+variable "shared_applications_gateway_name" {
+  description = "Gateway name used for shared application exposure routes."
+  type        = string
+  default     = "isolens-applications"
+}
+
+variable "shared_applications_gateway_namespace" {
+  description = "Namespace that owns the shared applications Gateway."
+  type        = string
+  default     = "isolens-system"
 }
 
 variable "keycloak_name" {

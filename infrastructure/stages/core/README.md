@@ -62,11 +62,12 @@ use_lockfile = true
 ## Direct Terraform Usage
 
 ```bash
-cd infrastructure/stages/core
-terraform init -reconfigure -backend-config=backend.hcl
-terraform plan
-terraform apply
+./tfstage core init -reconfigure -backend-config=backend.hcl
+./tfstage core plan
+./tfstage core apply
 ```
+
+The cluster-admin override file is intentionally untracked. Start from `infrastructure/variables/lab/cluster-admins.override.tfvars.json.example` and keep the real file local.
 
 ## Terraform Reference
 

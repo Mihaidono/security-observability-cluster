@@ -18,10 +18,17 @@ output "ward_kubectl_commands" {
   }
 }
 
-output "ward_ingress_hosts" {
-  description = "Hosts configured for ward application ingress resources."
+output "ward_exposure_routes" {
+  description = "Gateway exposure routes configured for ward applications."
   value = {
-    for name, app in local.applications_with_ingress :
-    name => app.ingress.host
+    for name, app in local.applications_with_exposure :
+    name => {
+      gateway_name      = var.shared_applications_gateway_name
+      gateway_namespace = var.shared_applications_gateway_namespace
+      hostname          = app.exposure.host
+      path              = app.exposure.path
+      service_name      = app.service.name
+      service_port      = app.service.port
+    }
   }
 }

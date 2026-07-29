@@ -15,6 +15,7 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
   CLUSTER_ADMIN_USER_ARNS_JSON: ${{ vars.CLUSTER_ADMIN_USER_ARNS_JSON }}
+  TERRAFORM_VARIABLE_SET: lab
   TF_IN_AUTOMATION: "true"
 
 jobs:
@@ -39,7 +40,7 @@ jobs:
 
       - name: Write Core CI Tfvars
         shell: bash
-        run: bash ./.github/scripts/write-cluster-admin-tfvars.sh infrastructure/stages/core
+        run: bash ./.github/scripts/write-cluster-admin-tfvars.sh "$RUNNER_TEMP/core-ci.tfvars.json"
 
       - name: Terraform Init Core
         working-directory: infrastructure/stages/core
@@ -51,7 +52,13 @@ jobs:
         shell: bash
         run: |
           set +e
-          terraform plan -detailed-exitcode -input=false -no-color -out=core.tfplan
+          terraform plan \
+            -detailed-exitcode \
+            -input=false \
+            -no-color \
+            -out=core.tfplan \
+            -var-file="../../variables/${TERRAFORM_VARIABLE_SET}/core.tfvars.json" \
+            -var-file="$RUNNER_TEMP/core-ci.tfvars.json"
           exit_code=$?
           set -e
           echo "Terraform core plan exit code: $exit_code"
@@ -95,7 +102,7 @@ jobs:
 
       - name: Write Platform CI Tfvars
         shell: bash
-        run: bash ./.github/scripts/write-cluster-admin-tfvars.sh infrastructure/stages/platform
+        run: bash ./.github/scripts/write-cluster-admin-tfvars.sh "$RUNNER_TEMP/platform-ci.tfvars.json"
 
       - name: Terraform Init Platform
         working-directory: infrastructure/stages/platform
@@ -107,7 +114,13 @@ jobs:
         shell: bash
         run: |
           set +e
-          terraform plan -detailed-exitcode -input=false -no-color -out=platform.tfplan
+          terraform plan \
+            -detailed-exitcode \
+            -input=false \
+            -no-color \
+            -out=platform.tfplan \
+            -var-file="../../variables/${TERRAFORM_VARIABLE_SET}/platform.tfvars.json" \
+            -var-file="$RUNNER_TEMP/platform-ci.tfvars.json"
           exit_code=$?
           set -e
           echo "Terraform platform plan exit code: $exit_code"

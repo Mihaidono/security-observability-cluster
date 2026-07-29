@@ -7,6 +7,7 @@ module "addons" {
   cluster_vpc_cidr             = data.aws_vpc.cluster.cidr_block
   cilium_operator_iam_role_arn = aws_iam_role.cilium_operator.arn
   enable_ingress_nginx         = var.enable_ingress_nginx
+  gateway_api_crds_version     = var.gateway_api_crds_version
 
   depends_on = [
     time_sleep.cluster_access_ready,

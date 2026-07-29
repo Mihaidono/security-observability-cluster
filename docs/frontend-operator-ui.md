@@ -67,7 +67,7 @@ Optional override:
 - `VITE_API_BASE_URL`
 
 The normal local stack is still the repo-level Docker Compose flow.
-Keycloak starts without a preloaded realm, so sign-in works only after you create the realm/client/user in Keycloak.
+Keycloak imports the bootstrap realm, client, and operator user during local startup, so sign-in works immediately unless you intentionally replace that seed data.
 
 ## Build
 

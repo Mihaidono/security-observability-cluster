@@ -1,6 +1,6 @@
 # Testing and Usage
 
-This guide matches the current implementation as of July 23, 2026.
+This guide matches the current implementation as of July 29, 2026.
 
 ## Local Stack
 
@@ -46,22 +46,23 @@ The Keycloak bootstrap admin is also available locally:
 
 Those credentials are for local development only.
 
-Before login works, create these in Keycloak:
+The local stack also imports a ready-to-use login path:
 
 - realm: `isolens`
 - client: `isolens-web`
 - redirect URI: `http://localhost:5173/auth/callback`
 - web origin: `http://localhost:5173`
-- client type: public with PKCE if `ISOLENS_OIDC_CLIENT_SECRET` is empty
-- at least one user you can sign in with
+- client type: public with PKCE when `ISOLENS_OIDC_CLIENT_SECRET` is empty
+- operator user: `operator`
+- operator password: `operator-password-change-me`
 
 ## Local Smoke Test
 
 1. Open `http://127.0.0.1:5173`
 2. Sign in to the Keycloak admin console at `http://127.0.0.1:8081/auth`
-3. Create the realm, client, and test user listed above
+3. Verify the imported realm `isolens`, client `isolens-web`, and user `operator` exist
 4. Click `Sign in` in the Isolens UI
-5. Authenticate with the user you created
+5. Authenticate with the imported `operator` user or another user you created
 6. Confirm the UI loads the control-plane state
 7. Open the `Accounts` tab and confirm the authenticated username and roles are visible
 
@@ -118,10 +119,9 @@ terraform fmt infrastructure/modules/control-plane \
 For live Terraform checks against AWS:
 
 ```bash
-cd infrastructure/stages/platform
-terraform init -reconfigure -backend-config=backend.hcl
+./tfstage platform init -reconfigure -backend-config=backend.hcl
 terraform validate
-terraform plan
+./tfstage platform plan
 ```
 
 ## Cluster Validation
@@ -155,7 +155,7 @@ kubectl -n isolens-system logs job/isolens-keycloak-database-bootstrap
 Expected results:
 
 - backend, frontend, runner, and Keycloak are running
-- Keycloak is healthy and ready for manual realm/client configuration
+- Keycloak is healthy and serving the bootstrap realm/client configuration
 - backend has OIDC environment configured
 - backend can reach the shared PostgreSQL instance
 

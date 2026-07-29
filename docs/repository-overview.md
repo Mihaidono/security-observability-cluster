@@ -77,7 +77,7 @@ Then open:
 http://127.0.0.1:5173
 ```
 
-Keycloak starts clean. Create the realm, client, and user before testing login.
+The local Keycloak container imports the bootstrap realm, OIDC client, and operator user automatically.
 
 ## Related Docs
 

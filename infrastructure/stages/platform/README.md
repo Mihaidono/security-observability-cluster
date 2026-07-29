@@ -10,6 +10,8 @@ This stage owns:
 - the `isolens-system` namespace
 - backend, frontend, runner, and Keycloak workloads
 - the control-plane PostgreSQL RDS instance
+- the shared Cilium `Gateway` used by application `HTTPRoute` resources
+- the optional public Cilium `Gateway` and Route53 record for the control-plane frontend
 
 This stage does not own:
 
@@ -25,6 +27,7 @@ The platform stage now deploys:
 - frontend reverse-proxy access for `/auth`
 - backend OIDC configuration pointing to the internal Keycloak service
 - a generated bootstrap admin password
+- a bootstrap realm and OIDC client for the frontend login flow
 
 Identity is handled by Keycloak. The backend still owns:
 
@@ -32,7 +35,7 @@ Identity is handled by Keycloak. The backend still owns:
 - authorization checks
 - audit logging
 
-The platform stage does not bootstrap the Keycloak realm, client, or users. It only brings up the service cleanly so you can configure identity afterwards.
+The platform stage bootstraps the Keycloak realm and client, then leaves ongoing user and role management to Keycloak administration.
 
 ## Database Layout
 
@@ -46,17 +49,24 @@ The instance is private, SG-restricted to the EKS worker-node security group, an
 ## Direct Terraform Usage
 
 ```bash
-cd infrastructure/stages/platform
-terraform init -reconfigure -backend-config=backend.hcl
-terraform validate
-terraform plan
-terraform apply
+./tfstage platform init -reconfigure -backend-config=backend.hcl
+terraform -chdir=infrastructure/stages/platform validate
+./tfstage platform plan
+./tfstage platform apply
 ```
 
 ## Important Inputs
 
 - `cluster_admin_principal_arns`
 - `control_plane_public_app_url`
+- `gateway_api_crds_version`
+- `enable_control_plane_public_gateway`
+- `control_plane_public_hostname`
+- `control_plane_public_tls_secret_name`
+- `control_plane_route53_zone_id`
+- `enable_shared_applications_gateway`
+- `shared_applications_gateway_name`
+- `shared_applications_gateway_namespace`
 - `control_plane_session_cookie_secure`
 - `control_plane_backend_*`
 - `control_plane_frontend_*`
@@ -70,6 +80,11 @@ terraform apply
 - `control_plane_backend_service_name`
 - `control_plane_backend_service_fqdn`
 - `control_plane_frontend_service_name`
+- `control_plane_public_url`
+- `control_plane_gateway_name`
+- `control_plane_gateway_service_name`
+- `shared_applications_gateway_name`
+- `shared_applications_gateway_namespace`
 - `control_plane_runner_name`
 - `control_plane_keycloak_service_name`
 - `control_plane_keycloak_service_fqdn`
@@ -104,13 +119,16 @@ kubectl -n isolens-system logs statefulset/isolens-keycloak
 kubectl -n isolens-system exec deploy/isolens-backend -- printenv | grep '^ISOLENS_OIDC_'
 ```
 
-After Keycloak is healthy, configure:
+After Keycloak is healthy, verify the bootstrap completed:
 
-- the realm named by `keycloak_realm`
-- the client named by `keycloak_client_id`
-- redirect URI `${control_plane_public_app_url}/auth/callback`
-- web origin `control_plane_public_app_url`
-- a public PKCE client if `keycloak_client_secret` is empty, or a confidential client if you set a secret explicitly
+- the realm named by `keycloak_realm` exists
+- the client named by `keycloak_client_id` exists
+- the redirect URI `${control_plane_public_app_url}/auth/callback` is present
+- the web origin `control_plane_public_app_url` is present
+- the client mode matches your configuration:
+  `public` + PKCE when `keycloak_client_secret` is empty, or `confidential` when you set a secret explicitly
+
+Ongoing user, group, and role management stays in Keycloak administration after bootstrap.
 
 ```bash
 aws rds describe-db-instances --db-instance-identifier isolens-postgresql
@@ -121,6 +139,7 @@ Expected results:
 - Cilium agents are ready
 - CoreDNS is available
 - backend, frontend, runner, and Keycloak are healthy in `isolens-system`
+- the shared applications Gateway exists when enabled
 - the shared RDS instance is available
 
 ## Hubble
@@ -164,17 +183,23 @@ http://127.0.0.1:12000
 | [aws_iam_policy.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_policy) | resource |
 | [aws_iam_role.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_route53_record.control_plane_frontend](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/resources/route53_record) | resource |
+| [kubernetes_manifest.control_plane_frontend_route](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
+| [kubernetes_manifest.control_plane_gateway](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
+| [kubernetes_manifest.shared_applications_gateway](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
 | [kubernetes_namespace_v1.control_plane](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
 | [random_password.keycloak_admin_password](https://registry.terraform.io/providers/hashicorp/random/3.7.2/docs/resources/password) | resource |
 | [random_password.keycloak_database_password](https://registry.terraform.io/providers/hashicorp/random/3.7.2/docs/resources/password) | resource |
 | [random_password.postgresql_password](https://registry.terraform.io/providers/hashicorp/random/3.7.2/docs/resources/password) | resource |
 | [time_sleep.cluster_access_ready](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
+| [time_sleep.control_plane_gateway_load_balancer](https://registry.terraform.io/providers/hashicorp/time/0.13.1/docs/resources/sleep) | resource |
 | [aws_eks_cluster.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/eks_cluster) | data source |
 | [aws_iam_openid_connect_provider.this](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/iam_openid_connect_provider) | data source |
 | [aws_iam_policy_document.cilium_operator](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.cilium_operator_assume_role](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_security_group.eks_nodes](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/security_group) | data source |
 | [aws_vpc.cluster](https://registry.terraform.io/providers/hashicorp/aws/5.100.0/docs/data-sources/vpc) | data source |
+| [kubernetes_service_v1.control_plane_gateway](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/data-sources/service_v1) | data source |
 
 ## Inputs
 
@@ -200,12 +225,19 @@ http://127.0.0.1:12000
 | control_plane_namespace_annotations | Additional annotations applied to the control-plane namespace. | `map(string)` | `{}` | no |
 | control_plane_namespace_labels | Additional labels applied to the control-plane namespace. | `map(string)` | `{}` | no |
 | control_plane_public_app_url | Public base URL of the control-plane frontend, used for Keycloak redirects and issuer URLs. | `string` | `"http://localhost:5173"` | no |
+| control_plane_public_hostname | Public DNS hostname for the control-plane frontend when the public gateway is enabled. | `string` | `""` | no |
+| control_plane_public_tls_secret_name | Name of the TLS secret presented by the public Gateway listener. | `string` | `""` | no |
+| control_plane_route53_record_ttl | TTL in seconds for the public Route53 CNAME record. | `number` | `60` | no |
+| control_plane_route53_zone_id | Route53 hosted zone ID that should receive the control-plane frontend CNAME record. | `string` | `""` | no |
 | control_plane_runner_name | Deployment name for the control-plane Terraform runner. | `string` | `"isolens-runner"` | no |
 | control_plane_runner_replicas | Replica count for the control-plane Terraform runner. | `number` | `1` | no |
 | control_plane_runner_resources | Resource requests and limits for the control-plane Terraform runner container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
 | control_plane_session_cookie_secure | Whether the backend session cookie should require HTTPS. | `bool` | `true` | no |
+| enable_control_plane_public_gateway | Whether to expose the control-plane frontend through a Cilium Gateway and create a Route53 record for it. | `bool` | `false` | no |
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |
+| enable_shared_applications_gateway | Whether to create the shared Cilium Gateway used by application HTTPRoutes across ward namespaces. | `bool` | `true` | no |
 | environment | Environment name used for tags and naming. | `string` | `"lab"` | no |
+| gateway_api_crds_version | Pinned upstream Gateway API standard channel version applied before enabling Cilium Gateway API support. | `string` | `"1.4.1"` | no |
 | keycloak_client_id | OIDC client identifier used by the Isolens control plane. | `string` | `"isolens-web"` | no |
 | keycloak_client_secret | Optional OIDC client secret used by the Isolens control plane. Leave empty for a public PKCE client. | `string` | `""` | no |
 | keycloak_database_name | Database name created for Keycloak on the shared PostgreSQL instance. | `string` | `"keycloak"` | no |
@@ -234,6 +266,8 @@ http://127.0.0.1:12000
 | postgresql_username | Application username created for the control plane database. | `string` | `"isolens"` | no |
 | project_name | Logical project name used for tagging and naming. | `string` | `"isolens"` | no |
 | region | AWS region of the existing EKS cluster targeted by the platform stage. | `string` | `"eu-north-1"` | no |
+| shared_applications_gateway_name | Gateway name used for shared application exposure routes. | `string` | `"isolens-applications"` | no |
+| shared_applications_gateway_namespace | Namespace that owns the shared applications Gateway. | `string` | `"isolens-system"` | no |
 
 ## Outputs
 
@@ -242,11 +276,16 @@ http://127.0.0.1:12000
 | control_plane_backend_service_fqdn | Cluster-local DNS name for the control-plane backend service. |
 | control_plane_backend_service_name | ClusterIP Service name for the control-plane backend. |
 | control_plane_frontend_service_name | Service name for the control-plane frontend. |
+| control_plane_gateway_name | Gateway resource name used for the public control-plane frontend entrypoint when enabled. |
+| control_plane_gateway_service_name | LoadBalancer service name created by Cilium for the public control-plane Gateway when enabled. |
 | control_plane_keycloak_service_fqdn | Cluster-local DNS name for the control-plane Keycloak service. |
 | control_plane_keycloak_service_name | ClusterIP Service name for the control-plane Keycloak workload. |
 | control_plane_namespace | Namespace reserved for the Isolens backend and frontend workloads. |
+| control_plane_public_url | Public URL used by the frontend and Keycloak redirect flow. |
 | control_plane_runner_name | Deployment name for the control-plane Terraform runner. |
 | ingress_controller_namespace | Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled. |
+| keycloak_admin_password | Bootstrap Keycloak admin password. |
+| keycloak_admin_username | Bootstrap Keycloak admin username. |
 | keycloak_database_name | Database name provisioned for Keycloak on the shared PostgreSQL instance. |
 | keycloak_database_username | Database username provisioned for Keycloak on the shared PostgreSQL instance. |
 | keycloak_realm | Keycloak realm used by the Isolens control plane. |
@@ -256,5 +295,7 @@ http://127.0.0.1:12000
 | postgresql_endpoint | Endpoint of the RDS PostgreSQL instance used by the control plane. |
 | postgresql_port | Port exposed by the RDS PostgreSQL instance. |
 | postgresql_username | Application username provisioned for the control plane database. |
+| shared_applications_gateway_name | Gateway resource name used for shared application exposure routes when enabled. |
+| shared_applications_gateway_namespace | Namespace that owns the shared applications Gateway when enabled. |
 | update_kubeconfig_command | Command to merge this cluster into the local kubeconfig. |
 <!-- END_TF_DOCS -->

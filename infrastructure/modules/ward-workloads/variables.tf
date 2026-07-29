@@ -17,3 +17,13 @@ variable "ward_applications" {
     error_message = "ward_applications must be a list of objects that at least define name and namespace."
   }
 }
+
+variable "shared_applications_gateway_name" {
+  description = "Gateway name used for shared application HTTPRoutes when exposure is enabled."
+  type        = string
+}
+
+variable "shared_applications_gateway_namespace" {
+  description = "Namespace that owns the shared applications Gateway."
+  type        = string
+}

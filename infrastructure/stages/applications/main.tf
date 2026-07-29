@@ -20,8 +20,10 @@ module "subjects" {
 module "workloads" {
   source = "../../modules/ward-workloads"
 
-  analysis_subject_names = toset(keys(var.analysis_subjects))
-  ward_applications      = var.ward_applications
+  analysis_subject_names                = toset(keys(var.analysis_subjects))
+  ward_applications                     = var.ward_applications
+  shared_applications_gateway_name      = var.shared_applications_gateway_name
+  shared_applications_gateway_namespace = var.shared_applications_gateway_namespace
 
   depends_on = [module.subjects]
 }

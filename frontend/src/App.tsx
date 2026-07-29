@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "./components/ui/badge";
+import { SignInScreen } from "./components/auth/sign-in-screen";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Input } from "./components/ui/input";
@@ -3748,41 +3749,13 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <div className="app-shell">
-        <div className="mx-auto max-w-5xl">
-          {errorMessage ? (
-            <div className="mb-4 rounded-[1.4rem] border border-warning/30 bg-warning/92 px-4 py-3 text-sm text-accentForeground shadow-[0_18px_48px_rgb(0_0_0_/_0.24)]">
-              {errorMessage}
-            </div>
-          ) : null}
-          <Card>
-            <CardContent className="space-y-6 py-12">
-              <div className="space-y-3">
-                <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
-                  Isolens Control Plane
-                </p>
-                <h1 className="text-4xl font-semibold tracking-tight text-foreground">
-                  Sign in with Keycloak to manage policies, workloads, and run
-                  history.
-                </h1>
-                <p className="max-w-3xl text-sm leading-7 text-neutral-500">
-                  The control plane now uses Keycloak-backed identity with
-                  backend-managed sessions so every action can be tied to a real
-                  user and audited safely.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <Button disabled={isBusy} onClick={() => void beginLogin()}>
-                  {isBusy ? "Redirecting..." : "Sign in"}
-                </Button>
-                <Badge>OIDC</Badge>
-                <Badge>Cookie session</Badge>
-                <Badge>Audited actions</Badge>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <SignInScreen
+        busy={isBusy}
+        errorMessage={errorMessage}
+        onSignIn={() => void beginLogin()}
+        onToggleTheme={toggleThemeMode}
+        themeMode={themeMode}
+      />
     );
   }
 

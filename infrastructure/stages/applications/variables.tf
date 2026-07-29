@@ -59,7 +59,7 @@ variable "analysis_subjects" {
 }
 
 variable "ward_applications" {
-  description = "Application definitions rendered into Deployments plus optional Services, Ingresses, generated ConfigMaps, volumes, and app-specific NetworkPolicies."
+  description = "Application definitions rendered into Deployments plus optional Services, Gateway API exposure routes, generated ConfigMaps, volumes, and app-specific NetworkPolicies."
   type        = any
   default     = []
 
@@ -72,4 +72,16 @@ variable "ward_applications" {
     ])
     error_message = "ward_applications must be a list of objects that at least define name and namespace."
   }
+}
+
+variable "shared_applications_gateway_name" {
+  description = "Gateway name used for shared application HTTPRoutes when exposure is enabled."
+  type        = string
+  default     = "isolens-applications"
+}
+
+variable "shared_applications_gateway_namespace" {
+  description = "Namespace that owns the shared applications Gateway."
+  type        = string
+  default     = "isolens-system"
 }

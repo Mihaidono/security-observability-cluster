@@ -9,6 +9,7 @@ This module deploys the shared Isolens control-plane workloads into `isolens-sys
 - runner Deployment
 - Keycloak Service, StatefulSet, and runtime secret
 - Keycloak database bootstrap Secret and Job for creating the Keycloak database/user on the shared PostgreSQL instance
+- optional Keycloak realm bootstrap Secret, ConfigMap, and Job for the Isolens realm/client setup
 - optional namespace creation for the control-plane namespace
 
 ## Authentication Model
@@ -27,9 +28,9 @@ The frontend runtime now proxies:
 - `/api` -> backend
 - `/auth` -> Keycloak
 
-Keycloak is deployed in-cluster without any realm bootstrap.
 Before Keycloak starts, the module runs a short bootstrap Job that creates the Keycloak database and role inside the shared PostgreSQL instance if they do not already exist.
-The module does not create the realm, client, or users. Configure those afterwards in Keycloak.
+By default, the module also runs a one-time realm bootstrap Job that creates the configured Isolens realm and OIDC client.
+Ongoing user, group, and role management remains a Keycloak administration concern after bootstrap.
 
 ## Key Inputs
 
@@ -81,6 +82,10 @@ kubectl -n isolens-system logs statefulset/isolens-keycloak
 kubectl -n isolens-system exec deploy/isolens-backend -- printenv | grep '^ISOLENS_OIDC_'
 ```
 
+```bash
+kubectl -n isolens-system logs job/isolens-keycloak-realm-bootstrap
+```
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -97,13 +102,17 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
+| [kubernetes_config_map_v1.keycloak_database_bootstrap_script](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/config_map_v1) | resource |
+| [kubernetes_config_map_v1.keycloak_realm_bootstrap_script](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/config_map_v1) | resource |
 | [kubernetes_deployment_v1.backend](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/deployment_v1) | resource |
 | [kubernetes_deployment_v1.frontend](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/deployment_v1) | resource |
 | [kubernetes_deployment_v1.runner](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/deployment_v1) | resource |
 | [kubernetes_job_v1.keycloak_database_bootstrap](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/job_v1) | resource |
+| [kubernetes_job_v1.keycloak_realm_bootstrap](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/job_v1) | resource |
 | [kubernetes_namespace_v1.control_plane](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
 | [kubernetes_secret_v1.backend_runtime](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.keycloak_database_bootstrap](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/secret_v1) | resource |
+| [kubernetes_secret_v1.keycloak_realm_bootstrap](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/secret_v1) | resource |
 | [kubernetes_secret_v1.keycloak_runtime](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/secret_v1) | resource |
 | [kubernetes_service_v1.backend](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/service_v1) | resource |
 | [kubernetes_service_v1.frontend](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/service_v1) | resource |
@@ -133,6 +142,7 @@ No modules.
 | frontend_service_port | Service port exposed by the frontend Service. | `number` | `80` | no |
 | keycloak_admin_password | Bootstrap Keycloak admin password. | `string` | n/a | yes |
 | keycloak_admin_username | Bootstrap Keycloak admin username. | `string` | `"admin"` | no |
+| keycloak_bootstrap_realm | Whether the control-plane module should bootstrap the Keycloak realm and client configuration. | `bool` | `true` | no |
 | keycloak_client_id | OIDC client identifier used by the Isolens control plane. | `string` | `"isolens-web"` | no |
 | keycloak_client_secret | OIDC client secret used by the Isolens control plane. | `string` | `""` | no |
 | keycloak_container_port | Container port exposed by the Keycloak workload. | `number` | `8080` | no |
@@ -149,6 +159,7 @@ No modules.
 | keycloak_image_pull_policy | Image pull policy for the Keycloak container. | `string` | `"IfNotPresent"` | no |
 | keycloak_name | Service and StatefulSet name for the in-cluster Keycloak deployment. | `string` | `"isolens-keycloak"` | no |
 | keycloak_realm | Keycloak realm used by the Isolens control plane. | `string` | `"isolens"` | no |
+| keycloak_realm_bootstrap_resources | Resource requests and limits for the one-time Keycloak realm bootstrap job. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "250m",<br/>  "limits_memory": "256Mi",<br/>  "requests_cpu": "50m",<br/>  "requests_memory": "128Mi"<br/>}</pre> | no |
 | keycloak_resources | Resource requests and limits for the Keycloak container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
 | keycloak_service_port | Service port exposed by the Keycloak service. | `number` | `8080` | no |
 | kubernetes_version | Cluster Kubernetes version used to label the namespace with the matching PSA version. | `string` | n/a | yes |
@@ -159,6 +170,7 @@ No modules.
 | runner_replicas | Replica count for the Terraform runner workload. | `number` | `2` | no |
 | runner_resources | Resource requests and limits for the Terraform runner container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
 | session_cookie_secure | Whether the backend session cookie should require HTTPS. | `bool` | `true` | no |
+| terraform_variable_set | Committed Terraform variable-set directory name consumed by the backend and runner. | `string` | `"lab"` | no |
 
 ## Outputs
 
@@ -167,6 +179,8 @@ No modules.
 | backend_service_fqdn | Cluster-local DNS name for the control-plane backend service. |
 | backend_service_name | ClusterIP Service name for the control-plane backend. |
 | frontend_service_name | Service name for the control-plane frontend. |
+| keycloak_admin_password | Bootstrap Keycloak admin password. |
+| keycloak_admin_username | Bootstrap Keycloak admin username. |
 | keycloak_service_fqdn | Cluster-local DNS name for the control-plane Keycloak service. |
 | keycloak_service_name | ClusterIP Service name for the control-plane Keycloak workload. |
 | namespace | Namespace reserved for the Isolens backend and frontend workloads. |

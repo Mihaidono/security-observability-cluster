@@ -188,9 +188,9 @@ locals {
     if app.allow_same_namespace_ingress
   }
 
-  applications_with_ingress = {
+  applications_with_exposure = {
     for name, app in local.ward_applications : name => app
-    if app.ingress.enabled && app.service.enabled
+    if app.exposure.enabled && app.connectivity.internet_ingress_enabled && app.service.enabled
   }
 
   applications_with_ingress_allowlists = {

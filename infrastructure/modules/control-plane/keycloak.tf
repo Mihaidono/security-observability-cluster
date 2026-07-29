@@ -24,6 +24,54 @@ resource "kubernetes_secret_v1" "keycloak_runtime" {
   type = "Opaque"
 }
 
+resource "kubernetes_secret_v1" "keycloak_realm_bootstrap" {
+  count = var.keycloak_bootstrap_realm ? 1 : 0
+
+  metadata {
+    name      = "${var.keycloak_name}-realm-bootstrap"
+    namespace = local.namespace_name
+    labels    = local.keycloak_labels
+  }
+
+  data = {
+    KEYCLOAK_BASE_URL       = "http://${local.keycloak_service_fqdn}:${var.keycloak_service_port}/auth"
+    KEYCLOAK_ADMIN_USERNAME = var.keycloak_admin_username
+    KEYCLOAK_ADMIN_PASSWORD = var.keycloak_admin_password
+    KEYCLOAK_REALM          = var.keycloak_realm
+    KEYCLOAK_CLIENT_ID      = var.keycloak_client_id
+    KEYCLOAK_CLIENT_SECRET  = var.keycloak_client_secret
+    KEYCLOAK_PUBLIC_APP_URL = trimsuffix(var.public_app_url, "/")
+  }
+
+  type = "Opaque"
+}
+
+resource "kubernetes_config_map_v1" "keycloak_database_bootstrap_script" {
+  metadata {
+    name      = "${var.keycloak_name}-database-bootstrap-script"
+    namespace = local.namespace_name
+    labels    = local.keycloak_labels
+  }
+
+  data = {
+    "bootstrap.sh" = file("${path.root}/../../scripts/keycloak-database-bootstrap.sh")
+  }
+}
+
+resource "kubernetes_config_map_v1" "keycloak_realm_bootstrap_script" {
+  count = var.keycloak_bootstrap_realm ? 1 : 0
+
+  metadata {
+    name      = "${var.keycloak_name}-realm-bootstrap-script"
+    namespace = local.namespace_name
+    labels    = local.keycloak_labels
+  }
+
+  data = {
+    "bootstrap.py" = file("${path.root}/../../scripts/keycloak-realm-bootstrap.py")
+  }
+}
+
 resource "kubernetes_secret_v1" "keycloak_database_bootstrap" {
   metadata {
     name      = "${var.keycloak_name}-database-bootstrap"
@@ -75,28 +123,19 @@ resource "kubernetes_job_v1" "keycloak_database_bootstrap" {
           image = "postgres:16.9-alpine"
           command = [
             "/bin/sh",
-            "-ec",
-            <<-EOT
-              if ! psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$${KEYCLOAK_DATABASE_USERNAME}'" | grep -q 1; then
-                psql -c "CREATE ROLE \"$${KEYCLOAK_DATABASE_USERNAME}\" LOGIN PASSWORD '$${KEYCLOAK_DATABASE_PASSWORD}';"
-              else
-                psql -c "ALTER ROLE \"$${KEYCLOAK_DATABASE_USERNAME}\" WITH LOGIN PASSWORD '$${KEYCLOAK_DATABASE_PASSWORD}';"
-              fi
-
-              psql -c "GRANT \"$${KEYCLOAK_DATABASE_USERNAME}\" TO \"$${PGUSER}\";"
-
-              if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$${KEYCLOAK_DATABASE_NAME}'" | grep -q 1; then
-                psql -c "CREATE DATABASE \"$${KEYCLOAK_DATABASE_NAME}\" OWNER \"$${KEYCLOAK_DATABASE_USERNAME}\";"
-              else
-                psql -c "ALTER DATABASE \"$${KEYCLOAK_DATABASE_NAME}\" OWNER TO \"$${KEYCLOAK_DATABASE_USERNAME}\";"
-              fi
-            EOT
+            "/bootstrap/bootstrap.sh",
           ]
 
           env_from {
             secret_ref {
               name = kubernetes_secret_v1.keycloak_database_bootstrap.metadata[0].name
             }
+          }
+
+          volume_mount {
+            name       = "bootstrap-script"
+            mount_path = "/bootstrap"
+            read_only  = true
           }
 
           resources {
@@ -120,6 +159,14 @@ resource "kubernetes_job_v1" "keycloak_database_bootstrap" {
             capabilities {
               drop = ["ALL"]
             }
+          }
+        }
+
+        volume {
+          name = "bootstrap-script"
+
+          config_map {
+            name = kubernetes_config_map_v1.keycloak_database_bootstrap_script.metadata[0].name
           }
         }
       }
@@ -270,4 +317,91 @@ resource "kubernetes_stateful_set_v1" "keycloak" {
   wait_for_rollout = true
 
   depends_on = [kubernetes_job_v1.keycloak_database_bootstrap]
+}
+
+resource "kubernetes_job_v1" "keycloak_realm_bootstrap" {
+  count = var.keycloak_bootstrap_realm ? 1 : 0
+
+  metadata {
+    name      = "${var.keycloak_name}-realm-bootstrap"
+    namespace = local.namespace_name
+    labels    = local.keycloak_labels
+  }
+
+  spec {
+    backoff_limit              = 4
+    ttl_seconds_after_finished = 600
+
+    template {
+      metadata {
+        labels = local.keycloak_labels
+      }
+
+      spec {
+        restart_policy = "Never"
+
+        security_context {
+          seccomp_profile {
+            type = "RuntimeDefault"
+          }
+        }
+
+        container {
+          name  = "bootstrap"
+          image = "python:3.12-alpine"
+          command = [
+            "python",
+            "/bootstrap/bootstrap.py",
+          ]
+
+          env_from {
+            secret_ref {
+              name = kubernetes_secret_v1.keycloak_realm_bootstrap[0].metadata[0].name
+            }
+          }
+
+          volume_mount {
+            name       = "bootstrap-script"
+            mount_path = "/bootstrap"
+            read_only  = true
+          }
+
+          resources {
+            requests = {
+              cpu    = var.keycloak_realm_bootstrap_resources.requests_cpu
+              memory = var.keycloak_realm_bootstrap_resources.requests_memory
+            }
+            limits = {
+              cpu    = var.keycloak_realm_bootstrap_resources.limits_cpu
+              memory = var.keycloak_realm_bootstrap_resources.limits_memory
+            }
+          }
+
+          security_context {
+            allow_privilege_escalation = false
+            read_only_root_filesystem  = false
+            run_as_non_root            = true
+            run_as_user                = 65532
+            run_as_group               = 65532
+
+            capabilities {
+              drop = ["ALL"]
+            }
+          }
+        }
+
+        volume {
+          name = "bootstrap-script"
+
+          config_map {
+            name = kubernetes_config_map_v1.keycloak_realm_bootstrap_script[0].metadata[0].name
+          }
+        }
+      }
+    }
+  }
+
+  wait_for_completion = true
+
+  depends_on = [kubernetes_stateful_set_v1.keycloak]
 }

@@ -14,7 +14,8 @@ module "control_plane" {
   backend_service_port      = var.control_plane_backend_service_port
   backend_container_port    = var.control_plane_backend_container_port
   backend_database_url      = "postgresql://${var.postgresql_username}:${random_password.postgresql_password.result}@${module.postgresql.address}:${module.postgresql.port}/${var.postgresql_database_name}?sslmode=require"
-  public_app_url            = var.control_plane_public_app_url
+  public_app_url            = local.control_plane_public_url
+  terraform_variable_set    = var.environment
   session_cookie_secure     = var.control_plane_session_cookie_secure
   backend_resources         = var.control_plane_backend_resources
 

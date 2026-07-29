@@ -3,12 +3,7 @@ from __future__ import annotations
 import json
 
 from ..models import TerraformConfig
-from ..tfvars import (
-    applications_tfvars_payload,
-    core_tfvars_payload,
-    platform_tfvars_payload,
-    policies_tfvars_payload,
-)
+from ..tfvars import generated_tfvars_payloads
 from .base import BaseRepository, utc_now
 
 
@@ -25,11 +20,6 @@ class ConfigRepository(BaseRepository):
 
         path = self.settings.managed_config_path
         if not path.exists():
-            legacy_path = self.settings.infrastructure_root / "frontend-managed.auto.tfvars.json"
-            if legacy_path.exists():
-                config = TerraformConfig.model_validate_json(legacy_path.read_text())
-                self.save_config(config)
-                return config
             default_config = self.load_default_config()
             self.save_config(default_config)
             return default_config
@@ -52,12 +42,8 @@ class ConfigRepository(BaseRepository):
                 ("managed-config", payload, utc_now().isoformat()),
             )
         self.settings.managed_config_path.write_text(f"{payload}\n")
-        self.settings.core_tfvars_path.write_text(f"{json.dumps(core_tfvars_payload(config), indent=2)}\n")
-        self.settings.platform_tfvars_path.write_text(f"{json.dumps(platform_tfvars_payload(config), indent=2)}\n")
-        self.settings.policies_tfvars_path.write_text(f"{json.dumps(policies_tfvars_payload(config), indent=2)}\n")
-        self.settings.applications_tfvars_path.write_text(
-            f"{json.dumps(applications_tfvars_payload(config), indent=2)}\n"
-        )
+        for stage, stage_payload in generated_tfvars_payloads(config).items():
+            self.settings.tfvars_path_for_stage(stage).write_text(f"{json.dumps(stage_payload, indent=2)}\n")
 
     def reset_config(self) -> TerraformConfig:
         config = self.load_default_config()
@@ -75,12 +61,4 @@ class ConfigRepository(BaseRepository):
         return TerraformConfig.model_validate_json(row["payload_json"])
 
     def _managed_tfvars_exist(self) -> bool:
-        return all(
-            stage_path.exists()
-            for stage_path in [
-                self.settings.core_tfvars_path,
-                self.settings.platform_tfvars_path,
-                self.settings.policies_tfvars_path,
-                self.settings.applications_tfvars_path,
-            ]
-        )
+        return all(stage_path.exists() for stage_path in self.settings.paths.all_generated_tfvars_paths())

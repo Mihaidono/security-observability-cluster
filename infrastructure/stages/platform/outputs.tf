@@ -33,6 +33,31 @@ output "control_plane_frontend_service_name" {
   value       = module.control_plane.frontend_service_name
 }
 
+output "control_plane_public_url" {
+  description = "Public URL used by the frontend and Keycloak redirect flow."
+  value       = local.control_plane_public_url
+}
+
+output "control_plane_gateway_name" {
+  description = "Gateway resource name used for the public control-plane frontend entrypoint when enabled."
+  value       = local.control_plane_public_gateway_enabled ? local.control_plane_gateway_name : null
+}
+
+output "control_plane_gateway_service_name" {
+  description = "LoadBalancer service name created by Cilium for the public control-plane Gateway when enabled."
+  value       = local.control_plane_public_gateway_enabled ? local.control_plane_gateway_service_name : null
+}
+
+output "shared_applications_gateway_name" {
+  description = "Gateway resource name used for shared application exposure routes when enabled."
+  value       = var.enable_shared_applications_gateway ? local.applications_gateway_name : null
+}
+
+output "shared_applications_gateway_namespace" {
+  description = "Namespace that owns the shared applications Gateway when enabled."
+  value       = var.enable_shared_applications_gateway ? local.applications_gateway_namespace : null
+}
+
 output "control_plane_runner_name" {
   description = "Deployment name for the control-plane Terraform runner."
   value       = module.control_plane.runner_name
@@ -86,4 +111,15 @@ output "keycloak_database_username" {
 output "keycloak_realm" {
   description = "Keycloak realm used by the Isolens control plane."
   value       = var.keycloak_realm
+}
+
+output "keycloak_admin_username" {
+  description = "Bootstrap Keycloak admin username."
+  value       = module.control_plane.keycloak_admin_username
+}
+
+output "keycloak_admin_password" {
+  description = "Bootstrap Keycloak admin password."
+  value       = module.control_plane.keycloak_admin_password
+  sensitive   = true
 }

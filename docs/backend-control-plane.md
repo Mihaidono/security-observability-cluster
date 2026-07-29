@@ -48,10 +48,16 @@ The managed config file is still mirrored to:
 
 Generated per-stage tfvars are still written to:
 
-- `infrastructure/stages/core/managed.auto.tfvars.json`
-- `infrastructure/stages/platform/managed.auto.tfvars.json`
-- `infrastructure/stages/policies/managed.auto.tfvars.json`
-- `infrastructure/stages/applications/managed.auto.tfvars.json`
+- `backend/state/tfvars/core.tfvars.json`
+- `backend/state/tfvars/platform.tfvars.json`
+- `backend/state/tfvars/policies.tfvars.json`
+- `backend/state/tfvars/applications.tfvars.json`
+
+Committed stage baselines live under:
+
+- `infrastructure/variables/<environment>/`
+
+Terraform runs now pass var files explicitly instead of relying on stage-local `*.auto.tfvars.json` files.
 
 ## Key Routes
 
@@ -97,6 +103,7 @@ Important runtime values:
 - `ISOLENS_SESSION_TTL_SECONDS`
 - `ISOLENS_CORS_ORIGINS`
 - `TERRAFORM_BIN`
+- `ISOLENS_TERRAFORM_VARIABLE_SET`
 
 AWS credentials are still inherited from the backend process environment because Terraform runs from the backend/runner context.
 
@@ -113,7 +120,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 For the full local stack, use the repo-level Docker Compose flow so backend, runner, PostgreSQL, Keycloak, and frontend start together.
-Keycloak starts without a preloaded realm, so login works only after you create the realm/client/user in Keycloak.
+The local stack imports a bootstrap Keycloak realm, client, and operator user during startup.
 
 ## Validation
 

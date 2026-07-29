@@ -27,16 +27,7 @@ async def health() -> HealthResponse:
         status="ok" if worker_running else "degraded",
         active_run_id=active_run_id,
         worker_running=worker_running,
-        managed_tfvars_present=all(
-            path.exists()
-            for path in [
-                settings.managed_config_path,
-                settings.core_tfvars_path,
-                settings.platform_tfvars_path,
-                settings.policies_tfvars_path,
-                settings.applications_tfvars_path,
-            ]
-        ),
+        managed_tfvars_present=all(path.exists() for path in settings.paths.managed_artifacts()),
         queue_depth=run_service.queue_depth(),
         auth_enabled=True,
         stages=APP_CONTROL_PLANE_RUN_STAGES,

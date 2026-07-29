@@ -7,26 +7,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .models import RunStage
+from .paths import BackendPaths
 
 
 @dataclass(frozen=True)
 class Settings:
-    project_root: Path
-    infrastructure_root: Path
-    terraform_stages_root: Path
-    terraform_core_root: Path
-    terraform_platform_root: Path
-    terraform_policies_root: Path
-    terraform_applications_root: Path
-    state_dir: Path
-    runs_dir: Path
+    paths: BackendPaths
+    terraform_variable_set: str
     database_url: str
-    managed_config_path: Path
-    core_tfvars_path: Path
-    platform_tfvars_path: Path
-    policies_tfvars_path: Path
-    applications_tfvars_path: Path
-    default_config_path: Path
     terraform_bin: str
     cors_origins: list[str]
     public_app_url: str
@@ -77,35 +65,98 @@ class Settings:
     def oidc_post_logout_redirect_uri(self) -> str:
         return self.public_app_url.rstrip("/")
 
+    @property
+    def project_root(self) -> Path:
+        return self.paths.project_root
+
+    @property
+    def backend_root(self) -> Path:
+        return self.paths.backend_root
+
+    @property
+    def infrastructure_root(self) -> Path:
+        return self.paths.infrastructure_root
+
+    @property
+    def terraform_stages_root(self) -> Path:
+        return self.paths.terraform_stages_root
+
+    @property
+    def terraform_variables_root(self) -> Path:
+        return self.paths.terraform_variables_root
+
+    @property
+    def terraform_core_root(self) -> Path:
+        return self.paths.terraform_stage_root(RunStage.core)
+
+    @property
+    def terraform_platform_root(self) -> Path:
+        return self.paths.terraform_stage_root(RunStage.platform)
+
+    @property
+    def terraform_policies_root(self) -> Path:
+        return self.paths.terraform_stage_root(RunStage.policies)
+
+    @property
+    def terraform_applications_root(self) -> Path:
+        return self.paths.terraform_stage_root(RunStage.applications)
+
+    @property
+    def state_dir(self) -> Path:
+        return self.paths.state_dir
+
+    @property
+    def runs_dir(self) -> Path:
+        return self.paths.runs_dir
+
+    @property
+    def generated_tfvars_root(self) -> Path:
+        return self.paths.generated_tfvars_root
+
+    @property
+    def managed_config_path(self) -> Path:
+        return self.paths.managed_config_path
+
+    @property
+    def core_tfvars_path(self) -> Path:
+        return self.paths.generated_tfvars_path(RunStage.core)
+
+    @property
+    def platform_tfvars_path(self) -> Path:
+        return self.paths.generated_tfvars_path(RunStage.platform)
+
+    @property
+    def policies_tfvars_path(self) -> Path:
+        return self.paths.generated_tfvars_path(RunStage.policies)
+
+    @property
+    def applications_tfvars_path(self) -> Path:
+        return self.paths.generated_tfvars_path(RunStage.applications)
+
+    @property
+    def default_config_path(self) -> Path:
+        return self.paths.default_config_path
+
     def tfvars_path_for_stage(self, stage: RunStage) -> Path:
-        if stage == RunStage.core:
-            return self.core_tfvars_path
-        if stage == RunStage.platform:
-            return self.platform_tfvars_path
-        if stage == RunStage.policies:
-            return self.policies_tfvars_path
-        return self.applications_tfvars_path
+        return self.paths.generated_tfvars_path(stage)
+
+    def committed_tfvars_path_for_stage(self, stage: RunStage) -> Path:
+        return self.paths.committed_tfvars_path(stage)
+
+    def terraform_root_for_stage(self, stage: RunStage) -> Path:
+        return self.paths.terraform_stage_root(stage)
+
+    def var_file_args_for_stage(self, stage: RunStage) -> list[str]:
+        return self.paths.var_file_args(stage)
 
 
 def get_settings() -> Settings:
     project_root = Path(__file__).resolve().parents[2]
     backend_root = project_root / "backend"
     load_dotenv(backend_root / ".env")
-    infrastructure_root = project_root / "infrastructure"
-    terraform_stages_root = infrastructure_root / "stages"
-    terraform_core_root = terraform_stages_root / "core"
-    terraform_platform_root = terraform_stages_root / "platform"
-    terraform_policies_root = terraform_stages_root / "policies"
-    terraform_applications_root = terraform_stages_root / "applications"
-    state_dir = backend_root / "state"
-    runs_dir = state_dir / "runs"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    managed_config_path = state_dir / "managed-config.json"
-    core_tfvars_path = terraform_core_root / "managed.auto.tfvars.json"
-    platform_tfvars_path = terraform_platform_root / "managed.auto.tfvars.json"
-    policies_tfvars_path = terraform_policies_root / "managed.auto.tfvars.json"
-    applications_tfvars_path = terraform_applications_root / "managed.auto.tfvars.json"
-    default_config_path = backend_root / "app" / "default_managed_config.json"
+    terraform_variable_set = os.getenv("ISOLENS_TERRAFORM_VARIABLE_SET", "lab").strip() or "lab"
+    paths = BackendPaths.from_project_root(project_root, terraform_variable_set)
+    paths.ensure_runtime_dirs()
 
     cors_origins = [
         origin.strip()
@@ -114,25 +165,12 @@ def get_settings() -> Settings:
     ]
 
     return Settings(
-        project_root=project_root,
-        infrastructure_root=infrastructure_root,
-        terraform_stages_root=terraform_stages_root,
-        terraform_core_root=terraform_core_root,
-        terraform_platform_root=terraform_platform_root,
-        terraform_policies_root=terraform_policies_root,
-        terraform_applications_root=terraform_applications_root,
-        state_dir=state_dir,
-        runs_dir=runs_dir,
+        paths=paths,
+        terraform_variable_set=terraform_variable_set,
         database_url=os.getenv(
             "ISOLENS_DATABASE_URL",
             "postgresql://isolens:isolens-dev-password-change-me@localhost:5432/isolens",
         ),
-        managed_config_path=managed_config_path,
-        core_tfvars_path=core_tfvars_path,
-        platform_tfvars_path=platform_tfvars_path,
-        policies_tfvars_path=policies_tfvars_path,
-        applications_tfvars_path=applications_tfvars_path,
-        default_config_path=default_config_path,
         terraform_bin=os.getenv("TERRAFORM_BIN", "terraform"),
         cors_origins=cors_origins,
         public_app_url=os.getenv("ISOLENS_PUBLIC_APP_URL", "http://localhost:5173").rstrip("/"),

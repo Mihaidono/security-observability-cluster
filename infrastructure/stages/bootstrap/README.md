@@ -2,6 +2,14 @@
 
 Creates the remote-state storage and shared ECR repositories used by the other Terraform roots and CI workflows.
 
+## Direct Terraform Usage
+
+```bash
+./tfstage bootstrap init
+./tfstage bootstrap plan
+./tfstage bootstrap apply
+```
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
