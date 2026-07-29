@@ -10,7 +10,7 @@ Current flow:
 
 1. the UI calls `GET /api/auth/config`
 2. the browser is redirected to Keycloak with Authorization Code + PKCE
-3. Keycloak redirects back to `/auth/callback`
+3. Keycloak redirects back to `/login/callback`
 4. the frontend posts the authorization code and PKCE verifier to `POST /api/auth/exchange`
 5. the backend sets an `HttpOnly` session cookie
 6. later `fetch` and WebSocket requests use `credentials: "include"` and the same session

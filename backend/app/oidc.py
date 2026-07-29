@@ -45,6 +45,21 @@ class KeycloakOIDC:
             )
 
         if response.status_code != 200:
+            detail = ""
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+
+            if isinstance(payload, dict):
+                error = str(payload.get("error", "")).strip()
+                description = str(payload.get("error_description", "")).strip()
+                detail = description or error
+            else:
+                detail = response.text.strip()
+
+            if detail:
+                raise OIDCError(f"Unable to exchange the Keycloak authorization code. {detail}")
             raise OIDCError("Unable to exchange the Keycloak authorization code.")
 
         payload = response.json()

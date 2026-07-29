@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from ..sql import auth as auth_sql
 from .base import BaseRepository, utc_now
 
 
@@ -20,16 +21,7 @@ class AuthRepository(BaseRepository):
     ) -> dict[str, Any]:
         with self._connection() as connection:
             connection.execute(
-                """
-        INSERT INTO users (id, subject, username, email, display_name, roles_json, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT(subject) DO UPDATE SET
-            username = excluded.username,
-            email = excluded.email,
-            display_name = excluded.display_name,
-            roles_json = excluded.roles_json,
-            updated_at = excluded.updated_at
-        """,
+                auth_sql.UPSERT_USER,
                 (
                     subject,
                     subject,
@@ -41,7 +33,7 @@ class AuthRepository(BaseRepository):
                     now.isoformat(),
                 ),
             )
-            row = connection.execute("SELECT * FROM users WHERE subject = %s", (subject,)).fetchone()
+            row = connection.execute(auth_sql.SELECT_USER_BY_SUBJECT, (subject,)).fetchone()
         if row is None:
             raise RuntimeError(f"Authenticated user {subject} could not be loaded after upsert.")
         return self._row_to_user(row)
@@ -61,13 +53,7 @@ class AuthRepository(BaseRepository):
     ) -> None:
         with self._connection() as connection:
             connection.execute(
-                """
-        INSERT INTO sessions (
-            id, user_id, token_hash, subject, id_token, expires_at,
-            created_at, updated_at, revoked_at, user_agent, ip_address
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NULL, %s, %s)
-        """,
+                auth_sql.CREATE_SESSION,
                 (
                     session_id,
                     user_id,
@@ -85,23 +71,7 @@ class AuthRepository(BaseRepository):
     def load_active_session(self, token_hash: str) -> dict[str, Any] | None:
         with self._connection() as connection:
             row = connection.execute(
-                """
-        SELECT
-            sessions.id,
-            sessions.user_id,
-            sessions.subject,
-            sessions.id_token,
-            sessions.expires_at,
-            users.username,
-            users.email,
-            users.display_name,
-            users.roles_json
-        FROM sessions
-        JOIN users ON users.id = sessions.user_id
-        WHERE sessions.token_hash = %s
-          AND sessions.revoked_at IS NULL
-          AND sessions.expires_at > %s
-        """,
+                auth_sql.SELECT_ACTIVE_SESSION,
                 (token_hash, utc_now().isoformat()),
             ).fetchone()
         if row is None:
@@ -120,17 +90,11 @@ class AuthRepository(BaseRepository):
 
     def touch_session(self, session_id: str, now: datetime) -> None:
         with self._connection() as connection:
-            connection.execute(
-                "UPDATE sessions SET updated_at = %s WHERE id = %s",
-                (now.isoformat(), session_id),
-            )
+            connection.execute(auth_sql.TOUCH_SESSION, (now.isoformat(), session_id))
 
     def revoke_session(self, session_id: str, now: datetime) -> None:
         with self._connection() as connection:
-            connection.execute(
-                "UPDATE sessions SET revoked_at = %s, updated_at = %s WHERE id = %s",
-                (now.isoformat(), now.isoformat(), session_id),
-            )
+            connection.execute(auth_sql.REVOKE_SESSION, (now.isoformat(), now.isoformat(), session_id))
 
     def record_audit_event(
         self,
@@ -149,13 +113,7 @@ class AuthRepository(BaseRepository):
         event_time = now or utc_now()
         with self._connection() as connection:
             connection.execute(
-                """
-        INSERT INTO audit_events (
-            user_id, session_id, method, path, status_code,
-            action, resource_type, resource_id, details_json, created_at
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
+                auth_sql.INSERT_AUDIT_EVENT,
                 (
                     user_id,
                     session_id,

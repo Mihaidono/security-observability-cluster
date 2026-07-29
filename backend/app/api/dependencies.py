@@ -56,7 +56,7 @@ def logout_endpoint(request: Request) -> str:
 
 
 def redirect_uri(request: Request) -> str:
-    return f"{public_app_url(request)}/auth/callback"
+    return f"{public_app_url(request)}/login/callback"
 
 
 def session_response_from_request(request: Request) -> SessionResponse:

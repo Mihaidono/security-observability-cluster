@@ -13,7 +13,7 @@ client_id = os.environ["KEYCLOAK_CLIENT_ID"]
 client_secret = os.environ["KEYCLOAK_CLIENT_SECRET"]
 public_app_url = os.environ["KEYCLOAK_PUBLIC_APP_URL"].rstrip("/")
 
-redirect_uri = f"{public_app_url}/auth/callback"
+redirect_uri = f"{public_app_url}/login/callback"
 web_origin = public_app_url
 public_client = client_secret == ""
 
@@ -106,6 +106,7 @@ client_payload = {
     "webOrigins": [web_origin],
     "attributes": {
         "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+",
     },
 }
 if not public_client:

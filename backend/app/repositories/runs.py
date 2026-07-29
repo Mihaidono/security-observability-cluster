@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 
 from ..models import PlanSummary, RunKind, RunStage, RunStatus, TerraformRun
 from ..run_messages import canceled_run_message, interrupted_run_message
+from ..sql import runs as runs_sql
 from .base import BaseRepository, normalize_log_lines, utc_now
 
 
@@ -23,29 +24,7 @@ class RunRepository(BaseRepository):
         self.run_dir(run.id)
         with self._connection() as connection:
             connection.execute(
-                """
-        INSERT INTO runs (
-            id, stage, kind, status, created_at, updated_at, started_at, completed_at,
-            command_json, plan_path, log_path, error, plan_summary_json, outputs_json,
-            source_run_id, queue_position, cancel_requested
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE((SELECT cancel_requested FROM runs WHERE id = %s), FALSE))
-        ON CONFLICT(id) DO UPDATE SET
-            stage = excluded.stage,
-            kind = excluded.kind,
-            status = excluded.status,
-            created_at = excluded.created_at,
-            updated_at = excluded.updated_at,
-            started_at = excluded.started_at,
-            completed_at = excluded.completed_at,
-            command_json = excluded.command_json,
-            plan_path = excluded.plan_path,
-            log_path = excluded.log_path,
-            error = excluded.error,
-            plan_summary_json = excluded.plan_summary_json,
-            outputs_json = excluded.outputs_json,
-            source_run_id = excluded.source_run_id,
-            queue_position = excluded.queue_position
-        """,
+                runs_sql.UPSERT_RUN,
                 (
                     run.id,
                     run.stage.value,
@@ -77,14 +56,14 @@ class RunRepository(BaseRepository):
 
     def load_run(self, run_id: str) -> TerraformRun | None:
         with self._connection() as connection:
-            row = connection.execute("SELECT * FROM runs WHERE id = %s", (run_id,)).fetchone()
+            row = connection.execute(runs_sql.SELECT_RUN_BY_ID, (run_id,)).fetchone()
         if row is None:
             return None
         return self._row_to_run(row)
 
     def list_runs(self) -> list[TerraformRun]:
         with self._connection() as connection:
-            rows = connection.execute("SELECT * FROM runs ORDER BY created_at DESC").fetchall()
+            rows = connection.execute(runs_sql.SELECT_RUNS_ORDERED).fetchall()
         return [self._row_to_run(row) for row in rows]
 
     def prune_runs(self, keep: int) -> tuple[list[TerraformRun], int]:
@@ -98,8 +77,8 @@ class RunRepository(BaseRepository):
 
         run_ids_to_delete = [run.id for run in runs_to_delete]
         with self._connection() as connection:
-            connection.execute("DELETE FROM run_logs WHERE run_id = ANY(%s)", (run_ids_to_delete,))
-            connection.execute("DELETE FROM runs WHERE id = ANY(%s)", (run_ids_to_delete,))
+            connection.execute(runs_sql.DELETE_RUN_LOGS_BY_RUN_IDS, (run_ids_to_delete,))
+            connection.execute(runs_sql.DELETE_RUNS_BY_IDS, (run_ids_to_delete,))
 
         for run_id in run_ids_to_delete:
             shutil.rmtree(self.settings.runs_dir / run_id, ignore_errors=True)
@@ -108,99 +87,53 @@ class RunRepository(BaseRepository):
 
     def has_nonterminal_runs(self) -> bool:
         with self._connection() as connection:
-            row = connection.execute(
-                """
-        SELECT EXISTS(
-            SELECT 1
-            FROM runs
-            WHERE status IN ('queued', 'running', 'applying', 'destroying', 'canceling')
-        ) AS exists
-        """
-            ).fetchone()
+            row = connection.execute(runs_sql.SELECT_HAS_NONTERMINAL_RUNS).fetchone()
         return bool(row["exists"]) if row is not None else False
 
     def queue_depth(self) -> int:
         with self._connection() as connection:
-            row = connection.execute(
-                """
-        SELECT COUNT(*) AS count
-        FROM runs
-        WHERE status = 'queued' AND cancel_requested = FALSE AND claimed_by IS NULL
-        """
-            ).fetchone()
+            row = connection.execute(runs_sql.SELECT_QUEUE_DEPTH).fetchone()
         return int(row["count"]) if row is not None else 0
 
     def refresh_queue_positions(self) -> None:
         with self._connection() as connection:
-            connection.execute(
-                "UPDATE runs SET queue_position = NULL WHERE status <> 'queued' OR cancel_requested = TRUE OR claimed_by IS NOT NULL"
-            )
-            connection.execute(
-                """
-        WITH ranked AS (
-            SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC) AS position
-            FROM runs
-            WHERE status = 'queued' AND cancel_requested = FALSE AND claimed_by IS NULL
-        )
-        UPDATE runs AS target
-        SET queue_position = ranked.position
-        FROM ranked
-        WHERE target.id = ranked.id
-        """
-            )
+            connection.execute(runs_sql.CLEAR_QUEUE_POSITIONS)
+            connection.execute(runs_sql.REFRESH_QUEUE_POSITIONS)
 
     def is_run_claimed(self, run_id: str) -> bool:
         with self._connection() as connection:
-            row = connection.execute(
-                "SELECT claimed_by IS NOT NULL AS claimed FROM runs WHERE id = %s",
-                (run_id,),
-            ).fetchone()
+            row = connection.execute(runs_sql.SELECT_RUN_CLAIMED, (run_id,)).fetchone()
         return bool(row["claimed"]) if row is not None else False
 
     def request_run_cancellation(self, run_id: str) -> None:
         with self._connection() as connection:
-            connection.execute(
-                "UPDATE runs SET cancel_requested = TRUE, updated_at = %s WHERE id = %s",
-                (utc_now().isoformat(), run_id),
-            )
+            connection.execute(runs_sql.REQUEST_RUN_CANCELLATION, (utc_now().isoformat(), run_id))
 
     def clear_run_cancellation(self, run_id: str) -> None:
         with self._connection() as connection:
-            connection.execute("UPDATE runs SET cancel_requested = FALSE WHERE id = %s", (run_id,))
+            connection.execute(runs_sql.CLEAR_RUN_CANCELLATION, (run_id,))
 
     def is_cancel_requested(self, run_id: str) -> bool:
         with self._connection() as connection:
-            row = connection.execute("SELECT cancel_requested FROM runs WHERE id = %s", (run_id,)).fetchone()
+            row = connection.execute(runs_sql.SELECT_CANCEL_REQUESTED, (run_id,)).fetchone()
         return bool(row["cancel_requested"]) if row is not None else False
 
     def claim_next_queued_run(self, worker_id: str) -> TerraformRun | None:
         with self._connection() as connection:
             with connection.transaction():
-                row = connection.execute(
-                    """
-          SELECT id
-          FROM runs
-          WHERE status = 'queued' AND cancel_requested = FALSE AND claimed_by IS NULL
-          ORDER BY created_at ASC
-          FOR UPDATE SKIP LOCKED
-          LIMIT 1
-          """
-                ).fetchone()
+                row = connection.execute(runs_sql.SELECT_NEXT_QUEUED_RUN).fetchone()
                 if row is None:
                     return None
                 run_id = str(row["id"])
-                connection.execute(
-                    "UPDATE runs SET claimed_by = %s, queue_position = NULL, updated_at = %s WHERE id = %s",
-                    (worker_id, utc_now().isoformat(), run_id),
-                )
+                connection.execute(runs_sql.CLAIM_RUN, (worker_id, utc_now().isoformat(), run_id))
         self.refresh_queue_positions()
         return self.load_run(run_id)
 
     def clear_claim(self, run_id: str, worker_id: str | None = None) -> None:
-        query = "UPDATE runs SET claimed_by = NULL, cancel_requested = FALSE WHERE id = %s"
+        query = runs_sql.CLEAR_CLAIM
         params: tuple[Any, ...] = (run_id,)
         if worker_id is not None:
-            query = "UPDATE runs SET claimed_by = NULL, cancel_requested = FALSE WHERE id = %s AND claimed_by = %s"
+            query = runs_sql.CLEAR_CLAIM_BY_WORKER
             params = (run_id, worker_id)
         with self._connection() as connection:
             connection.execute(query, params)
@@ -208,35 +141,16 @@ class RunRepository(BaseRepository):
     def touch_worker(self, worker_id: str, active_run_id: str | None = None) -> None:
         now = utc_now().isoformat()
         with self._connection() as connection:
-            connection.execute(
-                """
-        INSERT INTO workers (id, heartbeat_at, started_at, updated_at, active_run_id)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT(id) DO UPDATE SET
-            heartbeat_at = excluded.heartbeat_at,
-            updated_at = excluded.updated_at,
-            active_run_id = excluded.active_run_id
-        """,
-                (worker_id, now, now, now, active_run_id),
-            )
+            connection.execute(runs_sql.UPSERT_WORKER, (worker_id, now, now, now, active_run_id))
 
     def remove_worker(self, worker_id: str) -> None:
         with self._connection() as connection:
-            connection.execute("DELETE FROM workers WHERE id = %s", (worker_id,))
+            connection.execute(runs_sql.DELETE_WORKER, (worker_id,))
 
     def worker_snapshot(self, heartbeat_ttl_seconds: int) -> tuple[bool, str | None]:
         cutoff = (utc_now() - timedelta(seconds=heartbeat_ttl_seconds)).isoformat()
         with self._connection() as connection:
-            row = connection.execute(
-                """
-        SELECT id, active_run_id
-        FROM workers
-        WHERE heartbeat_at >= %s
-        ORDER BY heartbeat_at DESC
-        LIMIT 1
-        """,
-                (cutoff,),
-            ).fetchone()
+            row = connection.execute(runs_sql.SELECT_WORKER_SNAPSHOT, (cutoff,)).fetchone()
         if row is None:
             return False, None
         return True, (str(row["active_run_id"]) if row["active_run_id"] else None)
@@ -244,22 +158,14 @@ class RunRepository(BaseRepository):
     def reconcile_stale_workers(self, heartbeat_ttl_seconds: int) -> None:
         cutoff = (utc_now() - timedelta(seconds=heartbeat_ttl_seconds)).isoformat()
         with self._connection() as connection:
-            stale_rows = connection.execute("SELECT id FROM workers WHERE heartbeat_at < %s", (cutoff,)).fetchall()
+            stale_rows = connection.execute(runs_sql.SELECT_STALE_WORKERS, (cutoff,)).fetchall()
 
         stale_worker_ids = [str(row["id"]) for row in stale_rows]
         if not stale_worker_ids:
             return
 
         with self._connection() as connection:
-            rows = connection.execute(
-                """
-        SELECT *
-        FROM runs
-        WHERE claimed_by = ANY(%s)
-        ORDER BY created_at ASC
-        """,
-                (stale_worker_ids,),
-            ).fetchall()
+            rows = connection.execute(runs_sql.SELECT_RUNS_BY_WORKER_IDS, (stale_worker_ids,)).fetchall()
 
         for row in rows:
             run = self._row_to_run(row)
@@ -267,10 +173,7 @@ class RunRepository(BaseRepository):
             run.queue_position = None
             if run.status == RunStatus.queued:
                 with self._connection() as connection:
-                    connection.execute(
-                        "UPDATE runs SET claimed_by = NULL, updated_at = %s WHERE id = %s",
-                        (run.updated_at.isoformat(), run.id),
-                    )
+                    connection.execute(runs_sql.UNCLAIM_QUEUED_RUN, (run.updated_at.isoformat(), run.id))
                 continue
 
             if run.status == RunStatus.canceling:
@@ -288,7 +191,7 @@ class RunRepository(BaseRepository):
             self.clear_claim(run.id)
 
         with self._connection() as connection:
-            connection.execute("DELETE FROM workers WHERE id = ANY(%s)", (stale_worker_ids,))
+            connection.execute(runs_sql.DELETE_WORKERS_BY_IDS, (stale_worker_ids,))
 
         self.refresh_queue_positions()
 
@@ -305,24 +208,18 @@ class RunRepository(BaseRepository):
         with self._connection() as connection:
             with connection.cursor() as cursor:
                 cursor.executemany(
-                    "INSERT INTO run_logs (run_id, line) VALUES (%s, %s)",
+                    runs_sql.INSERT_RUN_LOG,
                     [(run_id, line) for line in cleaned_lines],
                 )
 
     def read_logs(self, run_id: str) -> list[str]:
         with self._connection() as connection:
-            rows = connection.execute(
-                "SELECT line FROM run_logs WHERE run_id = %s ORDER BY id ASC",
-                (run_id,),
-            ).fetchall()
+            rows = connection.execute(runs_sql.SELECT_RUN_LOGS, (run_id,)).fetchall()
         return [str(row["line"]) for row in rows]
 
     def read_logs_after(self, run_id: str, offset: int) -> list[str]:
         with self._connection() as connection:
-            rows = connection.execute(
-                "SELECT line FROM run_logs WHERE run_id = %s ORDER BY id ASC OFFSET %s",
-                (run_id, offset),
-            ).fetchall()
+            rows = connection.execute(runs_sql.SELECT_RUN_LOGS_AFTER_OFFSET, (run_id, offset)).fetchall()
         return [str(row["line"]) for row in rows]
 
     def save_json_artifact(self, run_id: str, name: str, payload: dict[str, Any]) -> Path:

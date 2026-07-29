@@ -12,7 +12,6 @@ from ..oidc import OIDCError
 from .dependencies import (
     authorization_endpoint,
     oidc,
-    public_app_url,
     public_realm_url,
     redirect_uri,
     session_cookie_max_age,
@@ -127,7 +126,7 @@ async def logout(request: Request, response: Response) -> LogoutResponse:
     if session is not None:
         store.revoke_session(str(session["id"]), utc_now())
         query = {
-            "post_logout_redirect_uri": public_app_url(request),
+            "post_logout_redirect_uri": settings.oidc_post_logout_redirect_uri,
             "client_id": settings.oidc_client_id,
         }
         if session.get("id_token"):

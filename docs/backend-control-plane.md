@@ -6,6 +6,21 @@ The backend is a FastAPI service that:
 - queues and executes `terraform plan`, `apply`, and `destroy` for the app-managed stages
 - persists run logs, outputs, workers, users, sessions, and audit events in PostgreSQL
 
+## Backend Structure
+
+Relevant backend paths:
+
+- `backend/app/repositories/`
+  repository methods and row-mapping logic
+- `backend/app/sql/`
+  packaged `.sql` assets for schema creation and repository queries
+- `backend/app/paths.py`
+  explicit repository, state, stage, and tfvars path management
+
+The backend loads SQL from `backend/app/sql/*.sql` through package resources instead of embedding long SQL strings directly in repository methods.
+
+OIDC callback routing uses `/login/callback` so the frontend callback path does not collide with the proxied `/auth` Keycloak path.
+
 ## Authentication Model
 
 The backend no longer uses a shared API token for normal UI traffic.

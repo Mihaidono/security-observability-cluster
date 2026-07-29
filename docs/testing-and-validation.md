@@ -50,7 +50,7 @@ The local stack also imports a ready-to-use login path:
 
 - realm: `isolens`
 - client: `isolens-web`
-- redirect URI: `http://localhost:5173/auth/callback`
+- redirect URI: `http://localhost:5173/login/callback`
 - web origin: `http://localhost:5173`
 - client type: public with PKCE when `ISOLENS_OIDC_CLIENT_SECRET` is empty
 - operator user: `operator`
@@ -93,7 +93,7 @@ Verify:
 
 - the login screen appears before authentication
 - redirect to Keycloak uses `/auth`
-- callback returns to `/auth/callback` and then back to `/`
+- callback returns to `/login/callback` and then back to `/`
 - `Accounts` shows the signed-in identity
 - `Stages`, `Assets`, and `Activity` load only after the session is established
 - sign-out clears access and returns the UI to the login screen

@@ -59,11 +59,11 @@ class Settings:
 
     @property
     def oidc_redirect_uri(self) -> str:
-        return f"{self.public_app_url.rstrip('/')}/auth/callback"
+        return f"{self.public_app_url.rstrip('/')}/login/callback"
 
     @property
     def oidc_post_logout_redirect_uri(self) -> str:
-        return self.public_app_url.rstrip("/")
+        return self.oidc_redirect_uri
 
     @property
     def project_root(self) -> Path:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from ..models import TerraformConfig
+from ..sql import config_state as config_state_sql
 from ..tfvars import generated_tfvars_payloads
 from .base import BaseRepository, utc_now
 
@@ -31,16 +32,7 @@ class ConfigRepository(BaseRepository):
     def save_config(self, config: TerraformConfig) -> None:
         payload = json.dumps(config.model_dump(mode="json"), indent=2)
         with self._connection() as connection:
-            connection.execute(
-                """
-        INSERT INTO config_state (key, payload_json, updated_at)
-        VALUES (%s, %s, %s)
-        ON CONFLICT(key) DO UPDATE SET
-            payload_json = excluded.payload_json,
-            updated_at = excluded.updated_at
-        """,
-                ("managed-config", payload, utc_now().isoformat()),
-            )
+            connection.execute(config_state_sql.UPSERT_CONFIG_STATE, ("managed-config", payload, utc_now().isoformat()))
         self.settings.managed_config_path.write_text(f"{payload}\n")
         for stage, stage_payload in generated_tfvars_payloads(config).items():
             self.settings.tfvars_path_for_stage(stage).write_text(f"{json.dumps(stage_payload, indent=2)}\n")
@@ -52,10 +44,7 @@ class ConfigRepository(BaseRepository):
 
     def _load_config_from_database(self) -> TerraformConfig | None:
         with self._connection() as connection:
-            row = connection.execute(
-                "SELECT payload_json FROM config_state WHERE key = %s",
-                ("managed-config",),
-            ).fetchone()
+            row = connection.execute(config_state_sql.SELECT_CONFIG_STATE, ("managed-config",)).fetchone()
         if row is None:
             return None
         return TerraformConfig.model_validate_json(row["payload_json"])

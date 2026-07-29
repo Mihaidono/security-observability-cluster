@@ -5,7 +5,7 @@ Isolens is a Terraform-driven EKS lab with an operator control plane for applica
 ## Repository Layout
 
 - `backend/`
-  FastAPI backend for config storage, Terraform run orchestration, sessions, and audit logging
+  FastAPI backend for config storage, Terraform run orchestration, sessions, audit logging, and packaged SQL assets under `backend/app/sql/`
 - `frontend/`
   Vite + React operator UI
 - `docker/postgres-init/`

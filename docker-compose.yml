@@ -31,8 +31,7 @@ services:
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: keycloak-dev-password-change-me
       KC_HTTP_RELATIVE_PATH: /auth
-      KC_HOSTNAME: http://localhost:5173/auth
-      KC_PROXY_HEADERS: xforwarded
+      KC_HOSTNAME_STRICT: "false"
     command:
       - start-dev
       - --import-realm

@@ -123,7 +123,7 @@ After Keycloak is healthy, verify the bootstrap completed:
 
 - the realm named by `keycloak_realm` exists
 - the client named by `keycloak_client_id` exists
-- the redirect URI `${control_plane_public_app_url}/auth/callback` is present
+- the redirect URI `${control_plane_public_app_url}/login/callback` is present
 - the web origin `control_plane_public_app_url` is present
 - the client mode matches your configuration:
   `public` + PKCE when `keycloak_client_secret` is empty, or `confidential` when you set a secret explicitly

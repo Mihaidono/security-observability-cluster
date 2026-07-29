@@ -2513,6 +2513,14 @@ export default function App() {
     const expectedState = window.sessionStorage.getItem(authStateStorageKey);
     const verifier = window.sessionStorage.getItem(authVerifierStorageKey);
 
+    if (!code && !state) {
+      window.sessionStorage.removeItem(authStateStorageKey);
+      window.sessionStorage.removeItem(authVerifierStorageKey);
+      window.history.replaceState({}, "", "/");
+      setCurrentUser(null);
+      return;
+    }
+
     if (
       !code ||
       !state ||
@@ -2523,6 +2531,10 @@ export default function App() {
       throw new Error("Invalid Keycloak callback state.");
     }
 
+    window.sessionStorage.removeItem(authStateStorageKey);
+    window.sessionStorage.removeItem(authVerifierStorageKey);
+    window.history.replaceState({}, "", "/");
+
     setIsAuthExchanging(true);
     try {
       const session = await api.exchangeAuthCode({
@@ -2531,9 +2543,6 @@ export default function App() {
         redirect_uri: resolvedAuthConfig.redirect_uri,
       });
 
-      window.sessionStorage.removeItem(authStateStorageKey);
-      window.sessionStorage.removeItem(authVerifierStorageKey);
-      window.history.replaceState({}, "", "/");
       setCurrentUser(session.user ?? null);
     } finally {
       setIsAuthExchanging(false);
@@ -2546,7 +2555,7 @@ export default function App() {
       const resolvedAuthConfig = await api.getAuthConfig();
       setAuthConfig(resolvedAuthConfig);
 
-      if (window.location.pathname === "/auth/callback") {
+      if (window.location.pathname === "/login/callback") {
         await finishAuthCallback(resolvedAuthConfig);
       }
 
@@ -3731,20 +3740,8 @@ export default function App() {
     }
   }
 
-  if (isAuthLoading || isAuthExchanging) {
-    return (
-      <div className="app-shell">
-        <div className="mx-auto max-w-7xl">
-          <Card>
-            <CardContent className="py-10 text-sm text-neutral-600">
-              {isAuthExchanging
-                ? "Completing Keycloak sign-in..."
-                : "Checking your control-plane session..."}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+  if (isAuthLoading || isAuthExchanging || (currentUser && !config)) {
+    return <div className="app-shell min-h-screen" aria-hidden="true" />;
   }
 
   if (!currentUser) {
@@ -3760,17 +3757,7 @@ export default function App() {
   }
 
   if (!config) {
-    return (
-      <div className="app-shell">
-        <div className="mx-auto max-w-7xl">
-          <Card>
-            <CardContent className="py-10 text-sm text-neutral-600">
-              Loading control plane state...
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+    return <div className="app-shell min-h-screen" aria-hidden="true" />;
   }
 
   const tabs: Array<{ id: Exclude<AppTab, "accounts">; label: string }> = [
