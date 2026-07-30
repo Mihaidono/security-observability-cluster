@@ -1,3 +1,9 @@
+## [0.9.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.5...v0.9.0) (2026-07-30)
+
+### Features
+
+* **repo:** improve auth UI and deployment hardening ([5a14703](https://github.com/Mihaidono/security-observability-cluster/commit/5a14703afa2375780b2528472d2709ce1f0a3ba5))
+
 ## [0.8.5](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.4...v0.8.5) (2026-07-27)
 
 ### Bug Fixes
