@@ -1,0 +1,510 @@
+:root {
+  --isolens-ink: #191308;
+  --isolens-ink-soft: #302822;
+  --isolens-paper: #f9f9fc;
+  --isolens-card: #ffffff;
+  --isolens-border: #9ca3db;
+  --isolens-accent: #677db7;
+  --isolens-accent-dark: #5269a4;
+  --isolens-muted: #454b66;
+  --isolens-warning: #a85454;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(103, 125, 183, 0.2), transparent 32rem),
+    radial-gradient(circle at 90% 92%, rgba(156, 163, 219, 0.2), transparent 28rem),
+    var(--isolens-paper);
+  color: var(--isolens-ink);
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
+#kc-header-wrapper {
+  color: #ffffff;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#kc-header-wrapper::before {
+  content: "◆";
+  color: #9ca3db;
+  display: inline-block;
+  font-size: 0.8em;
+  margin-right: 0.65rem;
+  transform: rotate(45deg);
+}
+
+#kc-header {
+  background: var(--isolens-ink);
+  border-radius: 1.75rem 1.75rem 0 0;
+  padding: 2rem 2rem 1.5rem;
+}
+
+.login-pf-page {
+  background: transparent;
+}
+
+.card-pf {
+  background: var(--isolens-card);
+  border: 1px solid rgba(156, 163, 219, 0.58);
+  border-radius: 0 0 1.75rem 1.75rem;
+  box-shadow: 0 18px 40px rgba(25, 19, 8, 0.1);
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+#kc-content-wrapper,
+#kc-form-wrapper {
+  max-width: none;
+}
+
+#kc-page-title {
+  color: var(--isolens-ink);
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.instruction,
+.subtitle,
+.login-pf-header p,
+#kc-registration,
+#kc-info {
+  color: var(--isolens-muted);
+}
+
+label {
+  color: var(--isolens-ink-soft);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+input.form-control {
+  background: #ffffff;
+  border: 1px solid rgba(156, 163, 219, 0.72);
+  border-radius: 0.85rem;
+  box-shadow: none;
+  color: var(--isolens-ink);
+  min-height: 2.9rem;
+  padding: 0.7rem 0.85rem;
+}
+
+input.form-control:focus {
+  border-color: var(--isolens-accent);
+  box-shadow: 0 0 0 3px rgba(103, 125, 183, 0.18);
+}
+
+.btn-primary,
+#kc-login {
+  background: var(--isolens-accent);
+  border: 0;
+  border-radius: 0.85rem;
+  box-shadow: 0 10px 20px rgba(103, 125, 183, 0.22);
+  font-weight: 600;
+  min-height: 2.9rem;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.btn-primary:hover,
+#kc-login:hover {
+  background: var(--isolens-accent-dark);
+  transform: translateY(-1px);
+}
+
+a {
+  color: var(--isolens-accent-dark);
+}
+
+.alert {
+  border-radius: 0.85rem;
+}
+
+.alert-error,
+.alert-danger {
+  background: rgba(168, 84, 84, 0.1);
+  border-color: rgba(168, 84, 84, 0.32);
+  color: var(--isolens-warning);
+}
+
+@media (max-width: 767px) {
+  #kc-header {
+    border-radius: 1.25rem 1.25rem 0 0;
+    padding: 1.5rem;
+  }
+
+  .card-pf {
+    border-radius: 0 0 1.25rem 1.25rem;
+    padding: 1.5rem;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    --isolens-paper: #191308;
+    --isolens-card: #322a26;
+    --isolens-ink: #f2f4ff;
+    --isolens-ink-soft: #f2f4ff;
+    --isolens-muted: #c0c5e0;
+  }
+
+  input.form-control {
+    background: #261f1b;
+    color: #f2f4ff;
+  }
+
+  #kc-page-title {
+    color: #f2f4ff;
+  }
+}
+
+/* Isolens layout: keep the identity surface compact and centered. */
+body {
+  background:
+    radial-gradient(circle at 50% -10%, rgba(103, 125, 183, 0.24), transparent 30rem),
+    linear-gradient(145deg, #191308 0%, #211a17 54%, #191308 100%);
+  color: #f2f4ff;
+}
+
+#kc-container,
+#kc-container-wrapper {
+  width: 100%;
+}
+
+#kc-container-wrapper {
+  padding: 3.5rem 1.25rem 4rem;
+}
+
+#kc-header {
+  background: transparent;
+  border-radius: 0;
+  margin: 0 auto;
+  max-width: 30rem;
+  padding: 0 0 1.4rem;
+  text-align: left;
+}
+
+#kc-header-wrapper {
+  color: #f2f4ff;
+  font-size: 1rem;
+  letter-spacing: 0.18em;
+}
+
+#kc-header-wrapper::before {
+  background: #9ca3db;
+  border-radius: 0.15rem;
+  content: "";
+  display: inline-block;
+  height: 0.55rem;
+  margin: 0 0.7rem 0.08rem 0;
+  transform: rotate(45deg);
+  width: 0.55rem;
+}
+
+.login-pf-page .card-pf,
+.card-pf {
+  background: #322a26;
+  border: 1px solid rgba(156, 163, 219, 0.38);
+  border-radius: 1.5rem;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #f2f4ff;
+  margin: 0 auto;
+  max-width: 30rem;
+  padding: 2.25rem;
+}
+
+#kc-page-title {
+  color: #f2f4ff;
+  font-size: 1.7rem;
+  margin-bottom: 2rem;
+  text-align: left;
+}
+
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+label {
+  color: rgba(242, 244, 255, 0.72);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  margin-bottom: 0.5rem;
+}
+
+input.form-control {
+  background: #211b18;
+  border: 1px solid rgba(156, 163, 219, 0.34);
+  border-radius: 0.8rem;
+  color: #f2f4ff;
+  min-height: 3.05rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+input.form-control:focus {
+  background: #211b18;
+  border-color: #9ca3db;
+  box-shadow: 0 0 0 3px rgba(103, 125, 183, 0.2);
+}
+
+.checkbox label,
+#kc-form-options label {
+  color: rgba(242, 244, 255, 0.65);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+#kc-form-options {
+  margin-top: 0.2rem;
+}
+
+#kc-form-buttons {
+  margin-top: 1.75rem;
+}
+
+.btn-primary,
+#kc-login {
+  background: #778bc9;
+  border-radius: 0.8rem;
+  box-shadow: 0 10px 24px rgba(103, 125, 183, 0.25);
+  color: #191308;
+  font-size: 0.9rem;
+  min-height: 3.05rem;
+}
+
+.btn-primary:hover,
+#kc-login:hover,
+.btn-primary:focus,
+#kc-login:focus {
+  background: #91a2dc;
+  color: #191308;
+}
+
+#kc-form-options a,
+#kc-registration a,
+#kc-info a {
+  color: #aebcf0;
+}
+
+.alert {
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 520px) {
+  #kc-container-wrapper {
+    padding: 2rem 1rem 2.5rem;
+  }
+
+  #kc-header {
+    padding-bottom: 1rem;
+  }
+
+  .login-pf-page .card-pf,
+  .card-pf {
+    border-radius: 1.25rem;
+    padding: 1.5rem;
+  }
+}
+
+/* Desktop composition: visual context on the left, authentication on the right. */
+:root,
+:root[data-theme="light"] {
+  --isolens-page: #f5f6fb;
+  --isolens-grid: rgba(103, 125, 183, 0.09);
+  --isolens-glow-a: rgba(103, 125, 183, 0.2);
+  --isolens-glow-b: rgba(80, 191, 220, 0.14);
+  --isolens-surface: #ffffff;
+  --isolens-text: #191308;
+  --isolens-muted-text: #454b66;
+  --isolens-input: #ffffff;
+  --isolens-input-text: #191308;
+  --isolens-line: rgba(103, 125, 183, 0.35);
+}
+
+:root[data-theme="dark"] {
+  --isolens-page: #101a2b;
+  --isolens-grid: rgba(110, 177, 222, 0.1);
+  --isolens-glow-a: rgba(48, 140, 205, 0.2);
+  --isolens-glow-b: rgba(126, 91, 214, 0.16);
+  --isolens-surface: #211f2a;
+  --isolens-text: #f2f4ff;
+  --isolens-muted-text: #c0c5e0;
+  --isolens-input: #171b29;
+  --isolens-input-text: #f2f4ff;
+  --isolens-line: rgba(156, 163, 219, 0.38);
+}
+
+body {
+  background:
+    radial-gradient(circle at 8% 12%, var(--isolens-glow-a), transparent 28rem),
+    radial-gradient(circle at 92% 88%, var(--isolens-glow-b), transparent 32rem),
+    linear-gradient(135deg, transparent 0 49.6%, var(--isolens-grid) 49.7%, transparent 49.9%),
+    linear-gradient(45deg, transparent 0 49.6%, var(--isolens-grid) 49.7%, transparent 49.9%),
+    var(--isolens-page) !important;
+  background-size: auto, auto, 7rem 7rem, 7rem 7rem, auto;
+  color: var(--isolens-text);
+}
+
+.login-pf-page {
+  background: transparent !important;
+  align-items: center;
+  display: grid;
+  gap: clamp(2.5rem, 6vw, 6rem);
+  grid-template-columns: minmax(34rem, 1.35fr) minmax(27rem, 32rem);
+  margin: 0 auto;
+  max-width: 88rem;
+  min-height: 100vh;
+  padding: 3rem clamp(1.25rem, 5vw, 5rem);
+}
+
+#kc-header {
+  align-self: center;
+  background:
+    linear-gradient(145deg, rgba(9, 19, 34, 0.28), rgba(9, 19, 34, 0.72)),
+    url("../img/isolens-graphic.png") center / cover;
+  border: 1px solid rgba(93, 207, 247, 0.3);
+  border-radius: 2rem;
+  box-shadow: 0 24px 70px rgba(8, 20, 38, 0.3);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  margin: 0;
+  max-width: none;
+  min-height: 0;
+  overflow: hidden;
+  padding: 2rem;
+  position: relative;
+  text-align: left;
+}
+
+#isolens-theme-toggle {
+  align-items: center;
+  background: rgba(8, 20, 38, 0.42);
+  border: 1px solid rgba(174, 188, 240, 0.42);
+  border-radius: 0.75rem;
+  color: #f2f4ff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 1.1rem;
+  height: 2.25rem;
+  justify-content: center;
+  position: absolute;
+  right: 1.75rem;
+  top: 1.75rem;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  width: 2.25rem;
+  z-index: 2;
+}
+
+#isolens-theme-toggle:hover,
+#isolens-theme-toggle:focus-visible {
+  background: rgba(119, 139, 201, 0.62);
+  border-color: rgba(242, 244, 255, 0.7);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+#kc-header::after {
+  color: rgba(242, 244, 255, 0.75);
+  content: "Secure and observable by design.";
+  display: block;
+  font-size: clamp(1.1rem, 2vw, 1.55rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  margin-top: auto;
+  max-width: 18rem;
+  padding-top: 18rem;
+}
+
+#kc-header-wrapper {
+  left: 2rem;
+  position: absolute;
+  top: 2rem;
+  z-index: 1;
+}
+
+.login-pf-page .card-pf,
+.card-pf {
+  background: var(--isolens-surface);
+  border: 1px solid var(--isolens-line);
+  border-radius: 1.75rem;
+  box-shadow: 0 24px 60px rgba(8, 20, 38, 0.2);
+  color: var(--isolens-text);
+  margin: 0;
+  max-width: none;
+  min-height: 0;
+  padding: clamp(1.75rem, 4vw, 2.75rem);
+  position: relative;
+}
+
+#kc-page-title {
+  color: var(--isolens-text);
+  margin-bottom: 2.25rem;
+}
+
+.instruction,
+.subtitle,
+.login-pf-header p,
+#kc-registration,
+#kc-info {
+  color: var(--isolens-muted-text);
+}
+
+label,
+.checkbox label,
+#kc-form-options label {
+  color: var(--isolens-muted-text);
+}
+
+input.form-control {
+  background: var(--isolens-input);
+  border-color: var(--isolens-line);
+  color: var(--isolens-input-text);
+}
+
+input.form-control:focus {
+  background: var(--isolens-input);
+}
+
+#kc-form-options a,
+#kc-registration a,
+#kc-info a {
+  color: var(--isolens-accent-dark);
+}
+
+@media (max-width: 850px) {
+  .login-pf-page {
+    gap: 1.5rem;
+    grid-template-columns: 1fr;
+    max-width: 34rem;
+    padding: 2rem 1rem;
+  }
+
+  #kc-header {
+    min-height: 15rem;
+  }
+
+  #isolens-theme-toggle {
+    right: 1.25rem;
+    top: 1.25rem;
+  }
+
+  .login-pf-page .card-pf,
+  .card-pf {
+    min-height: 0;
+  }
+
+  #kc-header::after {
+    padding-top: 6rem;
+  }
+}

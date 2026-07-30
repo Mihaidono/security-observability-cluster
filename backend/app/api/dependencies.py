@@ -30,16 +30,7 @@ def authenticated_user_dependency(request: Request) -> AuthenticatedUser:
 
 
 def public_app_url(request: Request) -> str:
-    origin = request.headers.get("origin")
-    if origin:
-        return origin.rstrip("/")
-
-    forwarded_proto = request.headers.get("x-forwarded-proto")
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
-    if host:
-        scheme = forwarded_proto or request.url.scheme
-        return f"{scheme}://{host}".rstrip("/")
-
+    del request
     return settings.public_app_url.rstrip("/")
 
 

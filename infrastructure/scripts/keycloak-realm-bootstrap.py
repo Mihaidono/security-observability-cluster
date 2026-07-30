@@ -70,6 +70,7 @@ realm_payload = {
     "realm": realm_name,
     "enabled": True,
     "displayName": "Isolens",
+    "loginTheme": "isolens",
     "loginWithEmailAllowed": True,
     "registrationAllowed": False,
     "resetPasswordAllowed": True,

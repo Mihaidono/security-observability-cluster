@@ -2,6 +2,7 @@
   "realm": "isolens",
   "enabled": true,
   "displayName": "Isolens",
+  "loginTheme": "isolens",
   "loginWithEmailAllowed": true,
   "registrationAllowed": false,
   "resetPasswordAllowed": true,

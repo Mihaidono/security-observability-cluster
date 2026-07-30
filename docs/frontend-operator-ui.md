@@ -85,12 +85,49 @@ The production frontend container expects:
 - `KEYCLOAK_HOST`
 - `KEYCLOAK_PORT`
 
+The production image includes `frontend/public/favicon.png` and serves it at
+`/favicon.png`. Its Nginx configuration proxies `/api` to the private backend
+service and `/auth` to the private Keycloak service. The browser therefore only
+needs access to the public frontend hostname.
+
+For the deployed Terraform path, set `control_plane_public_app_url` to the
+exact HTTPS origin users will open. That value is used for the OIDC redirect URI
+and issuer validation; host-header or browser-origin overrides are not trusted.
+
 ## Accounts View
 
-The `Accounts` tab now reflects the active authenticated user instead of the old shared-token placeholder. It shows:
+The `Account` tab reflects the active authenticated user. It shows:
 
 - username
 - display name
 - email
-- mapped Keycloak roles
+- account subject/ID
+- mapped Keycloak roles, or an explicit no-roles state
+- current authenticated-session permissions when at least one role is present
 - sign-out action
+
+The backend currently protects API actions by authenticated session and does not
+map individual Keycloak roles to separate application permissions. The
+permissions shown in the UI therefore describe the access available to the
+current authenticated session, not role-specific grants.
+
+## Keycloak Login Theme
+
+The Keycloak login page uses the Isolens theme from
+`docker/keycloak-theme/isolens`. Local Compose mounts the theme into Keycloak;
+the platform Terraform module mounts the same files through a ConfigMap and
+selects the `isolens` login theme during realm bootstrap.
+
+The login layout places the authentication card on the right and uses
+`isolens-graphic.png` as the visual panel on the left. The page follows the
+browser color preference and also reads the frontend's `isolens-theme-mode`
+setting when available.
+
+The theme favicon is `login/resources/img/favicon.png`. Terraform carries the
+PNG through the Keycloak ConfigMap as binary data; local Compose mounts the
+theme directory directly.
+
+For an existing local Compose database, realm import settings are not reapplied
+automatically. Select `isolens` under Keycloak Realm Settings → Themes, or
+recreate the local database volume when that is acceptable. Terraform theme
+changes trigger a Keycloak rollout through a content checksum annotation.

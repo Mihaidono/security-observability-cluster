@@ -104,6 +104,7 @@ No modules.
 | ---- | ---- |
 | [kubernetes_config_map_v1.keycloak_database_bootstrap_script](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/config_map_v1) | resource |
 | [kubernetes_config_map_v1.keycloak_realm_bootstrap_script](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/config_map_v1) | resource |
+| [kubernetes_config_map_v1.keycloak_theme](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/config_map_v1) | resource |
 | [kubernetes_deployment_v1.backend](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/deployment_v1) | resource |
 | [kubernetes_deployment_v1.frontend](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/deployment_v1) | resource |
 | [kubernetes_deployment_v1.runner](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/deployment_v1) | resource |

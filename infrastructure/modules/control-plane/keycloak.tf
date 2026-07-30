@@ -46,6 +46,25 @@ resource "kubernetes_secret_v1" "keycloak_realm_bootstrap" {
   type = "Opaque"
 }
 
+resource "kubernetes_config_map_v1" "keycloak_theme" {
+  metadata {
+    name      = "${var.keycloak_name}-theme"
+    namespace = local.namespace_name
+    labels    = local.keycloak_labels
+  }
+
+  data = {
+    "theme.properties" = file("${path.module}/../../../docker/keycloak-theme/isolens/login/theme.properties")
+    "isolens.css"      = file("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/css/isolens.css")
+    "isolens-theme.js" = file("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/js/isolens-theme.js")
+  }
+
+  binary_data = {
+    "isolens-graphic.png" = filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/img/isolens-graphic.png")
+    "favicon.png"         = filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/img/favicon.png")
+  }
+}
+
 resource "kubernetes_config_map_v1" "keycloak_database_bootstrap_script" {
   metadata {
     name      = "${var.keycloak_name}-database-bootstrap-script"
@@ -160,6 +179,7 @@ resource "kubernetes_job_v1" "keycloak_database_bootstrap" {
               drop = ["ALL"]
             }
           }
+
         }
 
         volume {
@@ -169,6 +189,7 @@ resource "kubernetes_job_v1" "keycloak_database_bootstrap" {
             name = kubernetes_config_map_v1.keycloak_database_bootstrap_script.metadata[0].name
           }
         }
+
       }
     }
   }
@@ -214,6 +235,15 @@ resource "kubernetes_stateful_set_v1" "keycloak" {
     template {
       metadata {
         labels = local.keycloak_labels
+        annotations = {
+          "isolens.io/keycloak-theme-checksum" = sha256(join("", [
+            file("${path.module}/../../../docker/keycloak-theme/isolens/login/theme.properties"),
+            file("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/css/isolens.css"),
+            filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/js/isolens-theme.js"),
+            filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/img/isolens-graphic.png"),
+            filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/img/favicon.png"),
+          ]))
+        }
       }
 
       spec {
@@ -271,6 +301,12 @@ resource "kubernetes_stateful_set_v1" "keycloak" {
             }
           }
 
+          volume_mount {
+            name       = "keycloak-theme"
+            mount_path = "/opt/keycloak/themes/isolens"
+            read_only  = true
+          }
+
           readiness_probe {
             http_get {
               path = "/auth/health/ready"
@@ -308,6 +344,39 @@ resource "kubernetes_stateful_set_v1" "keycloak" {
             timeout_seconds       = 5
             failure_threshold     = 30
             success_threshold     = 1
+          }
+        }
+
+        volume {
+          name = "keycloak-theme"
+
+          config_map {
+            name = kubernetes_config_map_v1.keycloak_theme.metadata[0].name
+
+            items {
+              key  = "theme.properties"
+              path = "login/theme.properties"
+            }
+
+            items {
+              key  = "isolens.css"
+              path = "login/resources/css/isolens.css"
+            }
+
+            items {
+              key  = "isolens-theme.js"
+              path = "login/resources/js/isolens-theme.js"
+            }
+
+            items {
+              key  = "isolens-graphic.png"
+              path = "login/resources/img/isolens-graphic.png"
+            }
+
+            items {
+              key  = "favicon.png"
+              path = "login/resources/img/favicon.png"
+            }
           }
         }
       }

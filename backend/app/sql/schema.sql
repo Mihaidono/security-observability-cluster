@@ -1,8 +1,5 @@
 -- name: ADVISORY_LOCK
-SELECT pg_advisory_lock(%s, %s)
-
--- name: ADVISORY_UNLOCK
-SELECT pg_advisory_unlock(%s, %s)
+SELECT pg_advisory_xact_lock(%s, %s)
 
 -- name: CREATE_RUNS_TABLE
 CREATE TABLE IF NOT EXISTS runs (

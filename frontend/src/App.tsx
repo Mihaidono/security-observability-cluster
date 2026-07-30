@@ -118,6 +118,12 @@ type SelectedPolicyRef = {
 const SCENARIO_ID_LABEL = "isolens.io/scenario-id";
 const SCENARIO_BUNDLE_LABEL = "isolens.io/scenario-bundle";
 const SCENARIO_ROLE_LABEL = "isolens.io/scenario-role";
+
+const CURRENT_ACCOUNT_PERMISSIONS = [
+  "View configuration, outputs, run history, logs, and health",
+  "Plan, apply, destroy, cancel, and prune Terraform runs",
+  "Unlock Terraform state when required",
+];
 const themeStorageKey = "isolens-theme-mode";
 const authStateStorageKey = "isolens-auth-state";
 const authVerifierStorageKey = "isolens-auth-verifier";
@@ -5724,48 +5730,12 @@ export default function App() {
 
             {activeTab === "accounts" ? (
               <div className="grid gap-6">
-                <Card>
+                <Card className="relative">
                   <CardHeader>
-                    <CardTitle>Accounts</CardTitle>
+                    <CardTitle>Account</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="surface-strong rounded-[1.8rem] p-6">
-                      <p className="text-xs uppercase tracking-[0.34em] text-neutral-500">
-                        Current Session
-                      </p>
-                      <h2 className="mt-3 text-3xl font-semibold tracking-tight">
-                        Identity and access now come from Keycloak.
-                      </h2>
-                      <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
-                        The backend keeps a control-plane session after Keycloak
-                        sign-in so every API call and workload action can be
-                        tied to your user identity for auditing.
-                      </p>
-                    </div>
-
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                      <MetricTile
-                        label="Username"
-                        value={currentUser.username}
-                        hint={currentUser.display_name ?? "Keycloak identity"}
-                      />
-                      <MetricTile
-                        label="Roles"
-                        value={currentUser.roles.length}
-                        hint={currentUser.roles.join(", ") || "No roles"}
-                      />
-                      <MetricTile
-                        label="Email"
-                        value={currentUser.email ?? "Not set"}
-                        hint="Mapped from the OIDC profile"
-                      />
-                      <MetricTile
-                        label="Session"
-                        value="Active"
-                        hint="Cookie-backed control-plane session"
-                      />
-                    </div>
-                    <div className="flex justify-end">
+                  <CardContent className="space-y-6">
+                    <div className="absolute right-6 top-5">
                       <Button
                         variant="ghost"
                         disabled={isBusy}
@@ -5774,6 +5744,73 @@ export default function App() {
                         Sign out
                       </Button>
                     </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <ReadOnlyField
+                        label="Username"
+                        value={currentUser.username}
+                      />
+                      <ReadOnlyField
+                        label="Display name"
+                        value={currentUser.display_name ?? "Not set"}
+                      />
+                      <ReadOnlyField
+                        label="Email"
+                        value={currentUser.email ?? "Not set"}
+                      />
+                      <ReadOnlyField
+                        label="Account ID"
+                        value={currentUser.subject}
+                      />
+                    </div>
+
+                    <div className="border-t border-border/60 pt-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold">Roles</p>
+                        </div>
+                        <Badge>{currentUser.roles.length}</Badge>
+                      </div>
+                      {currentUser.roles.length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {currentUser.roles.map((role) => (
+                            <Badge
+                              key={role}
+                              className="normal-case tracking-normal"
+                            >
+                              {role}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-neutral-500">
+                          No roles are assigned to this account.
+                        </p>
+                      )}
+                    </div>
+
+                    {currentUser.roles.length > 0 ? (
+                      <div className="border-t border-border/60 pt-5">
+                        <p className="text-sm font-semibold">
+                          Current permissions
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-neutral-500">
+                          Available to authenticated accounts. Keycloak roles
+                          are shown above but are not currently mapped to
+                          separate application permissions.
+                        </p>
+                        <ul className="mt-3 grid gap-2 text-sm text-foreground/82 md:grid-cols-2">
+                          {CURRENT_ACCOUNT_PERMISSIONS.map((permission) => (
+                            <li
+                              key={permission}
+                              className="rounded-xl border border-border/60 bg-background/40 px-3 py-2"
+                            >
+                              {permission}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </CardContent>
                 </Card>
               </div>
@@ -5803,7 +5840,6 @@ export default function App() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Badge>Infra-owned foundation</Badge>
                   <Badge>{config.core.cluster_name}</Badge>
                   <Badge>{config.core.environment}</Badge>
                 </div>
@@ -5864,14 +5900,7 @@ export default function App() {
                     <h4 className="mt-3 text-2xl font-semibold tracking-tight text-foreground">
                       Foundation details live here, not in the operator flow.
                     </h4>
-                    <p className="mt-3 text-sm leading-7 text-foreground/66">
-                      Core and platform are managed outside this control plane.
-                      Reconcile shared AWS and cluster layers through the
-                      infrastructure pipeline, then use this UI for policy and
-                      workload changes.
-                    </p>
                   </div>
-                  <Badge>Infra-owned</Badge>
                 </div>
 
                 <div className="mt-5">

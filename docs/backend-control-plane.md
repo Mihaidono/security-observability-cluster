@@ -36,6 +36,15 @@ Current flow:
 
 Identity comes from Keycloak. Authorization and audit logging stay in the backend.
 
+The backend uses the configured `ISOLENS_PUBLIC_APP_URL` as the authoritative
+public origin for OIDC redirects and issuer validation. In a deployed
+environment this must be the exact HTTPS frontend URL; request `Host`,
+`Origin`, and forwarded-host headers do not override it.
+
+Both the backend and the separate runner use the shared PostgreSQL store. Schema
+initialization is protected by a transaction-scoped advisory lock and retries a
+bounded PostgreSQL duplicate-type race during simultaneous process startup.
+
 ## Runtime Behavior
 
 The backend only executes the app-managed stages:

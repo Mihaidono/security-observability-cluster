@@ -1,6 +1,6 @@
 # Testing and Usage
 
-This guide matches the current implementation as of July 29, 2026.
+This guide matches the current implementation as of July 30, 2026.
 
 ## Local Stack
 
@@ -65,6 +65,7 @@ The local stack also imports a ready-to-use login path:
 5. Authenticate with the imported `operator` user or another user you created
 6. Confirm the UI loads the control-plane state
 7. Open the `Accounts` tab and confirm the authenticated username and roles are visible
+8. Confirm the browser tab displays the Isolens favicon
 
 ## Backend API Checks
 
@@ -97,6 +98,7 @@ Verify:
 - `Accounts` shows the signed-in identity
 - `Stages`, `Assets`, and `Activity` load only after the session is established
 - sign-out clears access and returns the UI to the login screen
+- `/favicon.png` returns the Isolens PNG with a successful response
 
 ## Terraform Validation
 
@@ -151,6 +153,18 @@ kubectl -n isolens-system exec deploy/isolens-backend -- nc -vz <control-plane-r
 ```bash
 kubectl -n isolens-system logs job/isolens-keycloak-database-bootstrap
 ```
+
+For a public control-plane deployment, also verify the rendered edge paths:
+
+```bash
+curl -I https://<control-plane-host>/
+curl -I https://<control-plane-host>/favicon.png
+curl -I https://<control-plane-host>/auth/realms/isolens/
+```
+
+The first two requests must be served by the frontend. The Keycloak request
+must be reachable through the frontend `/auth` proxy; Keycloak itself should
+remain a private ClusterIP service.
 
 Expected results:
 
