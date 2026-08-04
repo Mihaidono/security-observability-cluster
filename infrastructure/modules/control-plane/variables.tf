@@ -84,6 +84,16 @@ variable "session_cookie_secure" {
   default     = true
 }
 
+variable "session_ttl_seconds" {
+  description = "Maximum lifetime of a control-plane session in seconds."
+  type        = number
+  default     = 7200
+  validation {
+    condition     = var.session_ttl_seconds > 0
+    error_message = "session_ttl_seconds must be greater than zero."
+  }
+}
+
 variable "backend_resources" {
   description = "Resource requests and limits for the backend container."
   type = object({

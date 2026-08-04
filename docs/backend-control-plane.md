@@ -129,6 +129,10 @@ Important runtime values:
 - `TERRAFORM_BIN`
 - `ISOLENS_TERRAFORM_VARIABLE_SET`
 
+`ISOLENS_SESSION_TTL_SECONDS` defaults to `7200` (two hours). The frontend warns
+15 minutes before expiry and can start OIDC authentication while preserving the
+active workspace context across the callback.
+
 AWS credentials are still inherited from the backend process environment because Terraform runs from the backend/runner context.
 
 ## Local Development

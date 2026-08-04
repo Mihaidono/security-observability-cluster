@@ -102,5 +102,13 @@ http {
       add_header Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
       try_files $uri $uri/ /index.html;
     }
+
+    # The OIDC authorization code is returned in the callback query string.
+    # Do not persist it in access logs or propagate it as a referrer.
+    location = /login/callback {
+      access_log off;
+      add_header Referrer-Policy "no-referrer" always;
+      try_files $uri /index.html;
+    }
   }
 }

@@ -171,6 +171,7 @@ No modules.
 | runner_replicas | Replica count for the Terraform runner workload. | `number` | `2` | no |
 | runner_resources | Resource requests and limits for the Terraform runner container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
 | session_cookie_secure | Whether the backend session cookie should require HTTPS. | `bool` | `true` | no |
+| session_ttl_seconds | Maximum lifetime of a control-plane session in seconds. | `number` | `7200` | no |
 | terraform_variable_set | Committed Terraform variable-set directory name consumed by the backend and runner. | `string` | `"lab"` | no |
 
 ## Outputs
@@ -180,7 +181,6 @@ No modules.
 | backend_service_fqdn | Cluster-local DNS name for the control-plane backend service. |
 | backend_service_name | ClusterIP Service name for the control-plane backend. |
 | frontend_service_name | Service name for the control-plane frontend. |
-| keycloak_admin_password | Bootstrap Keycloak admin password. |
 | keycloak_admin_username | Bootstrap Keycloak admin username. |
 | keycloak_service_fqdn | Cluster-local DNS name for the control-plane Keycloak service. |
 | keycloak_service_name | ClusterIP Service name for the control-plane Keycloak workload. |

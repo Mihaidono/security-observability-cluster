@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -80,10 +80,10 @@ async def exchange_auth_code(
     )
 
     session_token = generate_session_token()
-    session_expires_at = min(
-        datetime.fromtimestamp(oidc.expires_at_from_payload(token_payload), timezone.utc),
-        now + timedelta(seconds=settings.session_ttl_seconds),
-    )
+    # The ID token is validated at login. The backend session is the credential
+    # used by the UI after that point, so its configured lifetime must not be
+    # capped by the short-lived ID token.
+    session_expires_at = now + timedelta(seconds=settings.session_ttl_seconds)
     store.create_session(
         session_id=secrets.token_hex(16),
         user_id=str(user_row["id"]),
@@ -114,7 +114,7 @@ async def exchange_auth_code(
         resource_id=user.subject,
         details={"username": user.username},
     )
-    return SessionResponse(authenticated=True, user=user)
+    return SessionResponse(authenticated=True, user=user, expires_at=session_expires_at)
 
 
 @router.post("/logout", response_model=LogoutResponse)

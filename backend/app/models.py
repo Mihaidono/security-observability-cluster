@@ -294,6 +294,7 @@ class AuthenticatedUser(BaseModel):
 class SessionResponse(BaseModel):
     authenticated: bool
     user: AuthenticatedUser | None = None
+    expires_at: datetime | None = None
 
 
 class LogoutResponse(BaseModel):

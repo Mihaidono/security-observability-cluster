@@ -14,6 +14,7 @@ resource "kubernetes_secret_v1" "backend_runtime" {
     ISOLENS_OIDC_CLIENT_ID         = var.keycloak_client_id
     ISOLENS_OIDC_CLIENT_SECRET     = var.keycloak_client_secret
     ISOLENS_SESSION_COOKIE_SECURE  = tostring(var.session_cookie_secure)
+    ISOLENS_SESSION_TTL_SECONDS    = tostring(var.session_ttl_seconds)
   }
 
   type = "Opaque"

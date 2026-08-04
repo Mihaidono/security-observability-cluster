@@ -55,7 +55,12 @@ def session_response_from_request(request: Request) -> SessionResponse:
         user = require_session_user(request=request, settings=settings, store=store)
     except HTTPException:
         return SessionResponse(authenticated=False)
-    return SessionResponse(authenticated=True, user=user)
+    session = getattr(request.state, "session", None)
+    return SessionResponse(
+        authenticated=True,
+        user=user,
+        expires_at=session["expires_at"] if session is not None else None,
+    )
 
 
 def set_audit_context(

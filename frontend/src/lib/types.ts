@@ -285,6 +285,7 @@ export interface AuthenticatedUser {
 export interface SessionResponse {
   authenticated: boolean;
   user?: AuthenticatedUser | null;
+  expires_at?: string | null;
 }
 
 export interface LogoutResponse {

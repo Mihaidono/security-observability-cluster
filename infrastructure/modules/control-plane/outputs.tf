@@ -37,9 +37,3 @@ output "keycloak_admin_username" {
   description = "Bootstrap Keycloak admin username."
   value       = var.keycloak_admin_username
 }
-
-output "keycloak_admin_password" {
-  description = "Bootstrap Keycloak admin password."
-  value       = var.keycloak_admin_password
-  sensitive   = true
-}

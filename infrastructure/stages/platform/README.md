@@ -233,6 +233,7 @@ http://127.0.0.1:12000
 | control_plane_runner_replicas | Replica count for the control-plane Terraform runner. | `number` | `1` | no |
 | control_plane_runner_resources | Resource requests and limits for the control-plane Terraform runner container. | <pre>object({<br/>    requests_cpu    = string<br/>    requests_memory = string<br/>    limits_cpu      = string<br/>    limits_memory   = string<br/>  })</pre> | <pre>{<br/>  "limits_cpu": "1000m",<br/>  "limits_memory": "1Gi",<br/>  "requests_cpu": "250m",<br/>  "requests_memory": "512Mi"<br/>}</pre> | no |
 | control_plane_session_cookie_secure | Whether the backend session cookie should require HTTPS. | `bool` | `true` | no |
+| control_plane_session_ttl_seconds | Maximum lifetime of a control-plane session in seconds. | `number` | `7200` | no |
 | enable_control_plane_public_gateway | Whether to expose the control-plane frontend through a Cilium Gateway and create a Route53 record for it. | `bool` | `false` | no |
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |
 | enable_shared_applications_gateway | Whether to create the shared Cilium Gateway used by application HTTPRoutes across ward namespaces. | `bool` | `true` | no |
@@ -284,7 +285,6 @@ http://127.0.0.1:12000
 | control_plane_public_url | Public URL used by the frontend and Keycloak redirect flow. |
 | control_plane_runner_name | Deployment name for the control-plane Terraform runner. |
 | ingress_controller_namespace | Namespace containing the nginx ingress controller when nginx-backed ingresses are enabled. |
-| keycloak_admin_password | Bootstrap Keycloak admin password. |
 | keycloak_admin_username | Bootstrap Keycloak admin username. |
 | keycloak_database_name | Database name provisioned for Keycloak on the shared PostgreSQL instance. |
 | keycloak_database_username | Database username provisioned for Keycloak on the shared PostgreSQL instance. |

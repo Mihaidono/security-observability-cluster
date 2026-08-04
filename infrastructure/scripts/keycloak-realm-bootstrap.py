@@ -75,6 +75,8 @@ realm_payload = {
     "registrationAllowed": False,
     "resetPasswordAllowed": True,
     "rememberMe": True,
+    "ssoSessionIdleTimeout": 7200,
+    "ssoSessionMaxLifespan": 7200,
 }
 
 if realm is None:

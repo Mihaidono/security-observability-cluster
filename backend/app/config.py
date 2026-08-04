@@ -180,7 +180,7 @@ def get_settings() -> Settings:
         oidc_client_secret=os.getenv("ISOLENS_OIDC_CLIENT_SECRET", ""),
         session_cookie_name=os.getenv("ISOLENS_SESSION_COOKIE_NAME", "isolens_session"),
         session_cookie_secure=os.getenv("ISOLENS_SESSION_COOKIE_SECURE", "false").lower() == "true",
-        session_ttl_seconds=int(os.getenv("ISOLENS_SESSION_TTL_SECONDS", "28800")),
+        session_ttl_seconds=int(os.getenv("ISOLENS_SESSION_TTL_SECONDS", "7200")),
         worker_poll_interval_seconds=float(os.getenv("ISOLENS_WORKER_POLL_INTERVAL_SECONDS", "2")),
         worker_heartbeat_interval_seconds=float(os.getenv("ISOLENS_WORKER_HEARTBEAT_INTERVAL_SECONDS", "5")),
         worker_heartbeat_ttl_seconds=int(os.getenv("ISOLENS_WORKER_HEARTBEAT_TTL_SECONDS", "20")),

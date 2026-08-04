@@ -263,6 +263,16 @@ variable "control_plane_session_cookie_secure" {
   default     = true
 }
 
+variable "control_plane_session_ttl_seconds" {
+  description = "Maximum lifetime of a control-plane session in seconds."
+  type        = number
+  default     = 7200
+  validation {
+    condition     = var.control_plane_session_ttl_seconds > 0
+    error_message = "control_plane_session_ttl_seconds must be greater than zero."
+  }
+}
+
 variable "enable_shared_applications_gateway" {
   description = "Whether to create the shared Cilium Gateway used by application HTTPRoutes across ward namespaces."
   type        = bool

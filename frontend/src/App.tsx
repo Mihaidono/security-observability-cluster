@@ -125,8 +125,24 @@ const CURRENT_ACCOUNT_PERMISSIONS = [
   "Unlock Terraform state when required",
 ];
 const themeStorageKey = "isolens-theme-mode";
+const legacyApiTokenStorageKey = "isolens-api-token";
 const authStateStorageKey = "isolens-auth-state";
 const authVerifierStorageKey = "isolens-auth-verifier";
+const workspaceAuthContextKey = "isolens-workspace-auth-context";
+const sessionWarningLeadSeconds = 15 * 60;
+
+type WorkspaceAuthContext = {
+  activeTab: AppTab;
+  selectedDeploymentStage: DeploymentStage;
+  selectedSubjectKey: string;
+  selectedAppIndex: number;
+  selectedRunId: string;
+  selectedPolicyRef: SelectedPolicyRef | null;
+  isWardsAssetsOpen: boolean;
+  isPoliciesAssetsOpen: boolean;
+  wardSearchQuery: string;
+  policySearchQuery: string;
+};
 
 function getInitialThemeMode(): ThemeMode {
   if (typeof window === "undefined") {
@@ -2088,6 +2104,11 @@ export default function App() {
   );
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isAuthExchanging, setIsAuthExchanging] = useState(false);
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
+  const [isReauthPromptOpen, setIsReauthPromptOpen] = useState(false);
+  const [reauthPromptSnoozedUntil, setReauthPromptSnoozedUntil] = useState<
+    number | null
+  >(null);
   const [activeTab, setActiveTab] = useState<AppTab>("deployment");
   const [isWardsAssetsOpen, setIsWardsAssetsOpen] = useState(true);
   const [isPoliciesAssetsOpen, setIsPoliciesAssetsOpen] = useState(true);
@@ -2134,6 +2155,12 @@ export default function App() {
   const policyTypeMenuRef = useRef<HTMLDivElement | null>(null);
   const copiedLogsHintTimerRef = useRef<number | null>(null);
   const errorToastTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    // The former bearer-token implementation persisted this value in localStorage.
+    // Remove it from existing browser profiles; OIDC now uses an HttpOnly cookie.
+    window.localStorage.removeItem(legacyApiTokenStorageKey);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
@@ -2512,6 +2539,64 @@ export default function App() {
     }
   }
 
+  function saveWorkspaceAuthContext() {
+    if (!currentUser) return;
+    const context: WorkspaceAuthContext = {
+      activeTab,
+      selectedDeploymentStage,
+      selectedSubjectKey,
+      selectedAppIndex,
+      selectedRunId,
+      selectedPolicyRef,
+      isWardsAssetsOpen,
+      isPoliciesAssetsOpen,
+      wardSearchQuery,
+      policySearchQuery,
+    };
+    window.sessionStorage.setItem(
+      workspaceAuthContextKey,
+      JSON.stringify(context),
+    );
+  }
+
+  function restoreWorkspaceAuthContext() {
+    const stored = window.sessionStorage.getItem(workspaceAuthContextKey);
+    if (!stored) return;
+    window.sessionStorage.removeItem(workspaceAuthContextKey);
+
+    try {
+      const context = JSON.parse(stored) as Partial<WorkspaceAuthContext>;
+      if (context.activeTab) setActiveTab(context.activeTab);
+      if (context.selectedDeploymentStage)
+        setSelectedDeploymentStage(context.selectedDeploymentStage);
+      if (typeof context.selectedSubjectKey === "string")
+        setSelectedSubjectKey(context.selectedSubjectKey);
+      if (typeof context.selectedAppIndex === "number")
+        setSelectedAppIndex(context.selectedAppIndex);
+      if (typeof context.selectedRunId === "string")
+        setSelectedRunId(context.selectedRunId);
+      if (context.selectedPolicyRef)
+        setSelectedPolicyRef(context.selectedPolicyRef);
+      if (typeof context.isWardsAssetsOpen === "boolean")
+        setIsWardsAssetsOpen(context.isWardsAssetsOpen);
+      if (typeof context.isPoliciesAssetsOpen === "boolean")
+        setIsPoliciesAssetsOpen(context.isPoliciesAssetsOpen);
+      if (typeof context.wardSearchQuery === "string")
+        setWardSearchQuery(context.wardSearchQuery);
+      if (typeof context.policySearchQuery === "string")
+        setPolicySearchQuery(context.policySearchQuery);
+    } catch {
+      window.sessionStorage.removeItem(workspaceAuthContextKey);
+    }
+  }
+
+  function startReauthentication() {
+    saveWorkspaceAuthContext();
+    setIsReauthPromptOpen(false);
+    setReauthPromptSnoozedUntil(null);
+    void beginLogin();
+  }
+
   async function finishAuthCallback(resolvedAuthConfig: AuthConfigResponse) {
     const currentUrl = new URL(window.location.href);
     const code = currentUrl.searchParams.get("code");
@@ -2550,6 +2635,7 @@ export default function App() {
       });
 
       setCurrentUser(session.user ?? null);
+      setSessionExpiresAt(session.expires_at ?? null);
     } finally {
       setIsAuthExchanging(false);
     }
@@ -2567,14 +2653,20 @@ export default function App() {
 
       const session = await api.getSession();
       setCurrentUser(session.authenticated ? (session.user ?? null) : null);
+      setSessionExpiresAt(
+        session.authenticated ? (session.expires_at ?? null) : null,
+      );
       if (!session.authenticated) {
         return;
       }
 
       await loadInitial();
+      restoreWorkspaceAuthContext();
     } catch (error) {
       if (isUnauthorizedError(error)) {
+        saveWorkspaceAuthContext();
         setCurrentUser(null);
+        setSessionExpiresAt(null);
         return;
       }
       setErrorMessage((error as Error).message);
@@ -2589,6 +2681,7 @@ export default function App() {
       setIsBusy(true);
       const result = await api.logout();
       setCurrentUser(null);
+      setSessionExpiresAt(null);
       setConfig(null);
       setRuns([]);
       setSelectedRun(null);
@@ -2712,6 +2805,34 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || !sessionExpiresAt) {
+      setIsReauthPromptOpen(false);
+      return;
+    }
+
+    const checkSessionExpiry = () => {
+      const remainingSeconds =
+        (new Date(sessionExpiresAt).getTime() - Date.now()) / 1000;
+      if (remainingSeconds <= 0) {
+        saveWorkspaceAuthContext();
+        setCurrentUser(null);
+        setSessionExpiresAt(null);
+        return;
+      }
+      if (
+        remainingSeconds <= sessionWarningLeadSeconds &&
+        (!reauthPromptSnoozedUntil || Date.now() >= reauthPromptSnoozedUntil)
+      ) {
+        setIsReauthPromptOpen(true);
+      }
+    };
+
+    checkSessionExpiry();
+    const intervalId = window.setInterval(checkSessionExpiry, 15000);
+    return () => window.clearInterval(intervalId);
+  }, [currentUser, reauthPromptSnoozedUntil, sessionExpiresAt]);
 
   useEffect(() => {
     return () => {
@@ -2918,7 +3039,9 @@ export default function App() {
       }
     } catch (error) {
       if (isUnauthorizedError(error)) {
+        saveWorkspaceAuthContext();
         setCurrentUser(null);
+        setSessionExpiresAt(null);
         return;
       }
       setErrorMessage((error as Error).message);
@@ -2932,7 +3055,9 @@ export default function App() {
       setStatusMessage(buildHealthStatusMessage(health));
     } catch (error) {
       if (isUnauthorizedError(error)) {
+        saveWorkspaceAuthContext();
         setCurrentUser(null);
+        setSessionExpiresAt(null);
       }
     }
   }
@@ -3782,6 +3907,35 @@ export default function App() {
             </div>
           </div>
         ) : null}
+
+        <Modal
+          title="Session expiring soon"
+          open={isReauthPromptOpen}
+          onClose={() => setIsReauthPromptOpen(false)}
+        >
+          <div className="max-w-xl space-y-5">
+            <p className="text-sm leading-7 text-neutral-500">
+              Your workspace session is nearing its two-hour limit.
+              Re-authenticate now to keep working. The current tab, filters,
+              selections, and run context will be restored after sign-in.
+            </p>
+            <div className="flex flex-wrap justify-end gap-3">
+              <Button
+                variant="ghost"
+                type="button"
+                onClick={() => {
+                  setIsReauthPromptOpen(false);
+                  setReauthPromptSnoozedUntil(Date.now() + 5 * 60 * 1000);
+                }}
+              >
+                Remind me later
+              </Button>
+              <Button type="button" onClick={startReauthentication}>
+                Continue session
+              </Button>
+            </div>
+          </div>
+        </Modal>
 
         <div className="navbar-shell sticky top-0 z-20 px-2 py-3">
           <div className="mx-auto max-w-[1560px]">

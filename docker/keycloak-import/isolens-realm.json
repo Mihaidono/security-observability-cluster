@@ -7,6 +7,8 @@
   "registrationAllowed": false,
   "resetPasswordAllowed": true,
   "rememberMe": true,
+  "ssoSessionIdleTimeout": 7200,
+  "ssoSessionMaxLifespan": 7200,
   "clients": [
     {
       "clientId": "isolens-web",

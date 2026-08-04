@@ -17,6 +17,7 @@ module "control_plane" {
   public_app_url            = local.control_plane_public_url
   terraform_variable_set    = var.environment
   session_cookie_secure     = var.control_plane_session_cookie_secure
+  session_ttl_seconds       = var.control_plane_session_ttl_seconds
   backend_resources         = var.control_plane_backend_resources
 
   frontend_image             = var.control_plane_frontend_image
