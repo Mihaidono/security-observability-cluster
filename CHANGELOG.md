@@ -1,3 +1,9 @@
+## [0.9.2](https://github.com/Mihaidono/security-observability-cluster/compare/v0.9.1...v0.9.2) (2026-08-05)
+
+### Bug Fixes
+
+* **ci:** for_each issue for gateway api standard manifest ([e4f6a74](https://github.com/Mihaidono/security-observability-cluster/commit/e4f6a74ee4e20baaad665721c4453e9239623c34))
+
 ## [0.9.1](https://github.com/Mihaidono/security-observability-cluster/compare/v0.9.0...v0.9.1) (2026-08-05)
 
 ### Bug Fixes
