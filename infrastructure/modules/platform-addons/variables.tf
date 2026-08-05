@@ -23,6 +23,16 @@ variable "cilium_operator_iam_role_arn" {
   type        = string
 }
 
+variable "cluster_access_ready_id" {
+  description = "Dependency handle used to ensure Kubernetes resources wait for cluster access to become ready."
+  type        = string
+}
+
+variable "cilium_operator_policy_attachment_id" {
+  description = "Dependency handle used to ensure Cilium waits for its IAM policy attachment."
+  type        = string
+}
+
 variable "enable_ingress_nginx" {
   description = "Whether the shared nginx ingress controller should be installed by the platform layer."
   type        = bool

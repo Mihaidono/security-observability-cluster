@@ -39,6 +39,7 @@ No modules.
 | [kubernetes_manifest.gateway_api_standard](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
 | [kubernetes_namespace_v1.ingress_nginx](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
 | [kubernetes_namespace_v1.kyverno](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
+| [terraform_data.platform_access_ready](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
 | [http_http.gateway_api_standard](https://registry.terraform.io/providers/hashicorp/http/3.5.0/docs/data-sources/http) | data source |
 
 ## Inputs
@@ -46,6 +47,8 @@ No modules.
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | cilium_operator_iam_role_arn | IAM role ARN assumed by the Cilium operator for ENI management. | `string` | n/a | yes |
+| cilium_operator_policy_attachment_id | Dependency handle used to ensure Cilium waits for its IAM policy attachment. | `string` | n/a | yes |
+| cluster_access_ready_id | Dependency handle used to ensure Kubernetes resources wait for cluster access to become ready. | `string` | n/a | yes |
 | cluster_endpoint | HTTPS endpoint of the EKS API server used by Cilium during kube-proxy-free bootstrap. | `string` | n/a | yes |
 | cluster_name | Name of the EKS cluster where Cilium is installed. | `string` | n/a | yes |
 | cluster_vpc_cidr | IPv4 CIDR block of the cluster VPC used for Cilium native routing. | `string` | n/a | yes |

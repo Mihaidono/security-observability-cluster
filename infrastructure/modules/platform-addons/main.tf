@@ -2,6 +2,13 @@ data "http" "gateway_api_standard" {
   url = "https://github.com/kubernetes-sigs/gateway-api/releases/download/v${var.gateway_api_crds_version}/standard-install.yaml"
 }
 
+resource "terraform_data" "platform_access_ready" {
+  input = {
+    cluster_access_ready_id              = var.cluster_access_ready_id
+    cilium_operator_policy_attachment_id = var.cilium_operator_policy_attachment_id
+  }
+}
+
 locals {
   gateway_api_standard_manifests_list = [
     for document in split("\n---\n", data.http.gateway_api_standard.response_body) :
@@ -19,6 +26,8 @@ resource "kubernetes_manifest" "gateway_api_standard" {
   for_each = local.gateway_api_standard_manifests
 
   manifest = each.value
+
+  depends_on = [terraform_data.platform_access_ready]
 }
 
 resource "helm_release" "cilium" {
@@ -197,7 +206,10 @@ resource "helm_release" "cilium" {
     value = "256Mi"
   }
 
-  depends_on = [kubernetes_manifest.gateway_api_standard]
+  depends_on = [
+    kubernetes_manifest.gateway_api_standard,
+    terraform_data.platform_access_ready,
+  ]
 }
 
 resource "aws_eks_addon" "coredns" {
@@ -214,7 +226,10 @@ resource "aws_eks_addon" "coredns" {
     delete = "20m"
   }
 
-  depends_on = [helm_release.cilium]
+  depends_on = [
+    helm_release.cilium,
+    terraform_data.platform_access_ready,
+  ]
 }
 
 resource "helm_release" "tetragon" {
@@ -231,6 +246,7 @@ resource "helm_release" "tetragon" {
   depends_on = [
     helm_release.cilium,
     aws_eks_addon.coredns,
+    terraform_data.platform_access_ready,
   ]
 }
 
@@ -243,6 +259,8 @@ resource "kubernetes_namespace_v1" "kyverno" {
       "observability-role"                         = "policy-engine"
     }
   }
+
+  depends_on = [terraform_data.platform_access_ready]
 }
 
 resource "helm_release" "kyverno" {
@@ -260,6 +278,7 @@ resource "helm_release" "kyverno" {
     helm_release.cilium,
     aws_eks_addon.coredns,
     kubernetes_namespace_v1.kyverno,
+    terraform_data.platform_access_ready,
   ]
 }
 
@@ -274,6 +293,8 @@ resource "kubernetes_namespace_v1" "ingress_nginx" {
       "networking-role"                            = "ingress"
     }
   }
+
+  depends_on = [terraform_data.platform_access_ready]
 }
 
 resource "helm_release" "ingress_nginx" {
@@ -303,5 +324,6 @@ resource "helm_release" "ingress_nginx" {
     helm_release.cilium,
     aws_eks_addon.coredns,
     kubernetes_namespace_v1.ingress_nginx,
+    terraform_data.platform_access_ready,
   ]
 }
