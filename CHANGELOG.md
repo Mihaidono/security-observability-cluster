@@ -1,3 +1,9 @@
+## [0.9.3](https://github.com/Mihaidono/security-observability-cluster/compare/v0.9.2...v0.9.3) (2026-08-05)
+
+### Bug Fixes
+
+* **ci:** separated CRD dependencies for platform in a separate stage ([121ab78](https://github.com/Mihaidono/security-observability-cluster/commit/121ab78eaf94e450e1d74a13844a272a6afd9595))
+
 ## [0.9.2](https://github.com/Mihaidono/security-observability-cluster/compare/v0.9.1...v0.9.2) (2026-08-05)
 
 ### Bug Fixes
