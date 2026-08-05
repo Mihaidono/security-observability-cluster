@@ -1,3 +1,9 @@
+## [0.9.1](https://github.com/Mihaidono/security-observability-cluster/compare/v0.9.0...v0.9.1) (2026-08-05)
+
+### Bug Fixes
+
+* **repo:** session time was treated as variable but was hardcoded ([af50327](https://github.com/Mihaidono/security-observability-cluster/commit/af50327e56446185aeeb6c917130ef5fae488cb1))
+
 ## [0.9.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.8.5...v0.9.0) (2026-07-30)
 
 ### Features
