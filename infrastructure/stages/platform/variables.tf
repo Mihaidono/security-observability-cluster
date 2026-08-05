@@ -50,11 +50,6 @@ variable "enable_ingress_nginx" {
   default     = false
 }
 
-variable "gateway_api_crds_version" {
-  description = "Pinned upstream Gateway API standard channel version applied before enabling Cilium Gateway API support."
-  type        = string
-  default     = "1.4.1"
-}
 
 variable "control_plane_namespace" {
   description = "Namespace reserved for the Isolens backend and frontend workloads."

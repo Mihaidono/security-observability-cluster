@@ -14,6 +14,8 @@ Isolens is a Terraform-driven EKS lab with an operator control plane for applica
   remote state bucket and shared ECR repositories
 - `infrastructure/stages/core/`
   AWS foundation and EKS cluster
+- `infrastructure/stages/platform-prerequisites/`
+  foundational Kubernetes CRDs required before platform planning
 - `infrastructure/stages/platform/`
   shared add-ons, control-plane workloads, Keycloak, and the shared RDS PostgreSQL database
 - `infrastructure/stages/policies/`
@@ -41,13 +43,14 @@ Stages are intentionally split:
 
 1. `bootstrap`
 2. `core`
-3. `platform`
-4. `policies`
-5. `applications`
+3. `platform-prerequisites` (automatically reconciled by `platform`)
+4. `platform`
+5. `policies`
+6. `applications`
 
 Boundary:
 
-- `core` and `platform` are infrastructure-owned
+- `core`, `platform-prerequisites`, and `platform` are infrastructure-owned
 - `policies` and `applications` are the stages the control plane can execute
 
 ## Local Development

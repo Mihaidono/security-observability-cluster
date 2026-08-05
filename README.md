@@ -19,6 +19,7 @@ Isolens is a Terraform-driven EKS lab with an operator control plane.
 - `docker/postgres-init/`
 - `infrastructure/stages/bootstrap/`
 - `infrastructure/stages/core/`
+- `infrastructure/stages/platform-prerequisites/`
 - `infrastructure/stages/platform/`
 - `infrastructure/stages/policies/`
 - `infrastructure/stages/applications/`

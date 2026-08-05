@@ -1,33 +1,8 @@
-data "http" "gateway_api_standard" {
-  url = "https://github.com/kubernetes-sigs/gateway-api/releases/download/v${var.gateway_api_crds_version}/standard-install.yaml"
-}
-
 resource "terraform_data" "platform_access_ready" {
   input = {
     cluster_access_ready_id              = var.cluster_access_ready_id
     cilium_operator_policy_attachment_id = var.cilium_operator_policy_attachment_id
   }
-}
-
-locals {
-  gateway_api_standard_manifests_list = [
-    for document in split("\n---\n", data.http.gateway_api_standard.response_body) :
-    yamldecode(document)
-    if trimspace(document) != "" && can(yamldecode(document).kind)
-  ]
-
-  gateway_api_standard_manifests = {
-    for manifest in local.gateway_api_standard_manifests_list :
-    manifest.metadata.name => manifest
-  }
-}
-
-resource "kubernetes_manifest" "gateway_api_standard" {
-  for_each = local.gateway_api_standard_manifests
-
-  manifest = each.value
-
-  depends_on = [terraform_data.platform_access_ready]
 }
 
 resource "helm_release" "cilium" {
@@ -206,10 +181,7 @@ resource "helm_release" "cilium" {
     value = "256Mi"
   }
 
-  depends_on = [
-    kubernetes_manifest.gateway_api_standard,
-    terraform_data.platform_access_ready,
-  ]
+  depends_on = [terraform_data.platform_access_ready]
 }
 
 resource "aws_eks_addon" "coredns" {

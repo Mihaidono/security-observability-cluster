@@ -7,6 +7,7 @@ Current layout:
 - `bootstrap.tfvars.json`
 - `core.tfvars.json`
 - `platform.tfvars.json`
+- `platform-capabilities.tfvars.json`
 - `policies.tfvars.json`
 - `applications.tfvars.json`
 - `cluster-admins.override.tfvars.json.example`
@@ -28,6 +29,7 @@ Some values repeat across multiple stage files on purpose:
 - `analysis_subjects` appears in `policies` and `applications` because both stages validate or render namespace-scoped resources
 - `project_name`, `environment`, `region`, and `cluster_name` repeat because each Terraform root is standalone
 - `project_name`, `environment`, and `region` also appear in `bootstrap` because that root is standalone too
+- `platform-capabilities.tfvars.json` contains the cluster identity and prerequisite configuration shared by the prerequisite and platform roots
 
 This is not a Terraform requirement for all projects. It is a consequence of keeping each stage independently runnable.
 
@@ -59,6 +61,7 @@ Use `./tfstage` from the repository root to avoid typing the `-var-file` paths m
 ```bash
 ./tfstage bootstrap plan
 ./tfstage core plan
+./tfstage platform-prerequisites plan
 ./tfstage platform destroy
 ./tfstage policies plan
 ./tfstage applications destroy

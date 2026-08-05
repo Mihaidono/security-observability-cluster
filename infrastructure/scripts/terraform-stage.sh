@@ -8,6 +8,7 @@ Usage: infrastructure/scripts/terraform-stage.sh <stage> <terraform-subcommand> 
 Examples:
   infrastructure/scripts/terraform-stage.sh bootstrap plan
   infrastructure/scripts/terraform-stage.sh core plan
+  infrastructure/scripts/terraform-stage.sh platform-prerequisites plan
   infrastructure/scripts/terraform-stage.sh platform destroy
   infrastructure/scripts/terraform-stage.sh policies apply
   infrastructure/scripts/terraform-stage.sh applications apply backend/state/runs/<run-id>/planned.tfplan
@@ -27,6 +28,8 @@ shift
 case "$stage" in
   bootstrap|core|platform|policies|applications)
     ;;
+  platform-prerequisites)
+    ;;
   *)
     echo "Unsupported stage: $stage" >&2
     usage
@@ -37,7 +40,11 @@ esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 variable_set="${ISOLENS_TERRAFORM_VARIABLE_SET:-lab}"
 stage_dir="$repo_root/infrastructure/stages/$stage"
-baseline_tfvars="$repo_root/infrastructure/variables/$variable_set/$stage.tfvars.json"
+if [[ "$stage" == "platform-prerequisites" ]]; then
+  baseline_tfvars="$repo_root/infrastructure/variables/$variable_set/platform-capabilities.tfvars.json"
+else
+  baseline_tfvars="$repo_root/infrastructure/variables/$variable_set/$stage.tfvars.json"
+fi
 cluster_admin_override="$repo_root/infrastructure/variables/$variable_set/cluster-admins.override.tfvars.json"
 generated_overlay="$repo_root/backend/state/tfvars/$stage.tfvars.json"
 
@@ -47,6 +54,10 @@ if [[ ! -f "$baseline_tfvars" ]]; then
 fi
 
 var_args=("-var-file=$baseline_tfvars")
+
+if [[ "$stage" == "platform" ]]; then
+  var_args+=("-var-file=$repo_root/infrastructure/variables/$variable_set/platform-capabilities.tfvars.json")
+fi
 
 if [[ -f "$cluster_admin_override" ]]; then
   var_args+=("-var-file=$cluster_admin_override")
@@ -59,6 +70,10 @@ if [[ "$stage" == "policies" || "$stage" == "applications" ]]; then
     echo "Missing generated overlay for $stage: $generated_overlay" >&2
     exit 1
   fi
+fi
+
+if [[ "$stage" == "platform" && "$subcommand" == "apply" && "${1:-}" != *.tfplan ]]; then
+  "$0" platform-prerequisites apply "$@"
 fi
 
 terraform_args=()

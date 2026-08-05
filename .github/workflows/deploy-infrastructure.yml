@@ -104,6 +104,42 @@ jobs:
         shell: bash
         run: bash ./.github/scripts/write-cluster-admin-tfvars.sh "$RUNNER_TEMP/platform-ci.tfvars.json"
 
+      - name: Terraform Init Platform Prerequisites
+        working-directory: infrastructure/stages/platform-prerequisites
+        run: terraform init -reconfigure -backend-config=backend.hcl
+
+      - name: Terraform Plan Platform Prerequisites
+        id: prerequisites_plan
+        working-directory: infrastructure/stages/platform-prerequisites
+        shell: bash
+        run: |
+          set +e
+          terraform plan \
+            -detailed-exitcode \
+            -input=false \
+            -no-color \
+            -out=platform-prerequisites.tfplan \
+            -var-file="../../variables/${TERRAFORM_VARIABLE_SET}/platform-capabilities.tfvars.json"
+          exit_code=$?
+          set -e
+
+          if [[ "$exit_code" == "0" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$exit_code" == "2" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          exit "$exit_code"
+
+      - name: Terraform Apply Platform Prerequisites
+        if: steps.prerequisites_plan.outputs.changed == 'true'
+        working-directory: infrastructure/stages/platform-prerequisites
+        run: terraform apply -input=false -no-color platform-prerequisites.tfplan
+
       - name: Terraform Init Platform
         working-directory: infrastructure/stages/platform
         run: terraform init -reconfigure -backend-config=backend.hcl
@@ -120,6 +156,7 @@ jobs:
             -no-color \
             -out=platform.tfplan \
             -var-file="../../variables/${TERRAFORM_VARIABLE_SET}/platform.tfvars.json" \
+            -var-file="../../variables/${TERRAFORM_VARIABLE_SET}/platform-capabilities.tfvars.json" \
             -var-file="$RUNNER_TEMP/platform-ci.tfvars.json"
           exit_code=$?
           set -e

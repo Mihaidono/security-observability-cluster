@@ -7,7 +7,7 @@ Installs the shared cluster add-ons used by the platform layer.
 - Cilium is installed as the primary Kubernetes networking layer for EKS.
 - The deployment uses AWS ENI IPAM together with `kubeProxyReplacement=true`.
 - Hubble is enabled for flow visibility.
-- Gateway API CRDs are applied from a pinned upstream `gateway-api` release before Cilium Gateway support is enabled.
+- Gateway API CRDs are owned by the `platform-prerequisites` stage and must exist before Cilium Gateway support is enabled.
 - CoreDNS is installed only after Cilium is ready enough to remove the initial node taint.
 - Tetragon and Kyverno are installed as shared platform capabilities.
 - `ingress-nginx` is optional and disabled by default because the target direction is Cilium Gateway API rather than nginx ingress.
@@ -20,7 +20,6 @@ Installs the shared cluster add-ons used by the platform layer.
 | terraform | >= 1.7.0 |
 | aws | 5.100.0 |
 | helm | 2.17.0 |
-| http | 3.5.0 |
 | kubernetes | 2.37.1 |
 
 ## Modules
@@ -36,11 +35,9 @@ No modules.
 | [helm_release.ingress_nginx](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
 | [helm_release.kyverno](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
 | [helm_release.tetragon](https://registry.terraform.io/providers/hashicorp/helm/2.17.0/docs/resources/release) | resource |
-| [kubernetes_manifest.gateway_api_standard](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/manifest) | resource |
 | [kubernetes_namespace_v1.ingress_nginx](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
 | [kubernetes_namespace_v1.kyverno](https://registry.terraform.io/providers/hashicorp/kubernetes/2.37.1/docs/resources/namespace_v1) | resource |
 | [terraform_data.platform_access_ready](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
-| [http_http.gateway_api_standard](https://registry.terraform.io/providers/hashicorp/http/3.5.0/docs/data-sources/http) | data source |
 
 ## Inputs
 
@@ -53,7 +50,6 @@ No modules.
 | cluster_name | Name of the EKS cluster where Cilium is installed. | `string` | n/a | yes |
 | cluster_vpc_cidr | IPv4 CIDR block of the cluster VPC used for Cilium native routing. | `string` | n/a | yes |
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |
-| gateway_api_crds_version | Pinned upstream Gateway API standard channel version applied before enabling Cilium Gateway API support. | `string` | `"1.4.1"` | no |
 | kubernetes_version | Cluster Kubernetes version used to label namespaces with the matching PSA version. | `string` | n/a | yes |
 
 ## Outputs

@@ -121,8 +121,11 @@ terraform fmt infrastructure/modules/control-plane \
 For live Terraform checks against AWS:
 
 ```bash
+./tfstage platform-prerequisites init -reconfigure -backend-config=backend.hcl
+./tfstage platform-prerequisites plan
+./tfstage platform-prerequisites apply
 ./tfstage platform init -reconfigure -backend-config=backend.hcl
-terraform validate
+terraform -chdir=infrastructure/stages/platform validate
 ./tfstage platform plan
 ```
 

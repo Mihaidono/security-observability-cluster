@@ -13,5 +13,6 @@ This directory is the primary documentation home for the repository.
 
 ## Infrastructure Module Docs
 
+- [../infrastructure/stages/platform-prerequisites/README.md](../infrastructure/stages/platform-prerequisites/README.md)
 - [../infrastructure/stages/platform/README.md](../infrastructure/stages/platform/README.md)
 - [../infrastructure/modules/control-plane/README.md](../infrastructure/modules/control-plane/README.md)

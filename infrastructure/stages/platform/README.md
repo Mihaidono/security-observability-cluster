@@ -13,6 +13,10 @@ This stage owns:
 - the shared Cilium `Gateway` used by application `HTTPRoute` resources
 - the optional public Cilium `Gateway` and Route53 record for the control-plane frontend
 
+Gateway API CRDs are owned by the `platform-prerequisites` stage. The
+repository workflow and `./tfstage platform apply` reconcile that stage before
+planning this stage.
+
 This stage does not own:
 
 - ward application workloads
@@ -48,18 +52,33 @@ The instance is private, SG-restricted to the EKS worker-node security group, an
 
 ## Direct Terraform Usage
 
+For a clean cluster, use the helper to apply the prerequisite CRDs and the
+platform in the correct order:
+
+```bash
+./tfstage platform apply
+```
+
+To review the two roots separately:
+
 ```bash
 ./tfstage platform init -reconfigure -backend-config=backend.hcl
+./tfstage platform-prerequisites init -reconfigure -backend-config=backend.hcl
+terraform -chdir=infrastructure/stages/platform-prerequisites validate
+./tfstage platform-prerequisites plan
+./tfstage platform-prerequisites apply
 terraform -chdir=infrastructure/stages/platform validate
 ./tfstage platform plan
 ./tfstage platform apply
 ```
 
+The GitHub Actions deployment performs the same prerequisite plan/apply before
+planning the platform stage.
+
 ## Important Inputs
 
 - `cluster_admin_principal_arns`
 - `control_plane_public_app_url`
-- `gateway_api_crds_version`
 - `enable_control_plane_public_gateway`
 - `control_plane_public_hostname`
 - `control_plane_public_tls_secret_name`
@@ -238,7 +257,6 @@ http://127.0.0.1:12000
 | enable_ingress_nginx | Whether the shared nginx ingress controller should be installed by the platform layer. | `bool` | `false` | no |
 | enable_shared_applications_gateway | Whether to create the shared Cilium Gateway used by application HTTPRoutes across ward namespaces. | `bool` | `true` | no |
 | environment | Environment name used for tags and naming. | `string` | `"lab"` | no |
-| gateway_api_crds_version | Pinned upstream Gateway API standard channel version applied before enabling Cilium Gateway API support. | `string` | `"1.4.1"` | no |
 | keycloak_client_id | OIDC client identifier used by the Isolens control plane. | `string` | `"isolens-web"` | no |
 | keycloak_client_secret | Optional OIDC client secret used by the Isolens control plane. Leave empty for a public PKCE client. | `string` | `""` | no |
 | keycloak_database_name | Database name created for Keycloak on the shared PostgreSQL instance. | `string` | `"keycloak"` | no |

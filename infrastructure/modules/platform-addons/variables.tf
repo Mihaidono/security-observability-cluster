@@ -38,9 +38,3 @@ variable "enable_ingress_nginx" {
   type        = bool
   default     = false
 }
-
-variable "gateway_api_crds_version" {
-  description = "Pinned upstream Gateway API standard channel version applied before enabling Cilium Gateway API support."
-  type        = string
-  default     = "1.4.1"
-}

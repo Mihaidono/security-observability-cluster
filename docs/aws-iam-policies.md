@@ -55,6 +55,7 @@ It is used by the `deploy-infrastructure` GitHub Actions workflow to run Terrafo
 
 - `infrastructure/stages/bootstrap`
 - `infrastructure/stages/core`
+- `infrastructure/stages/platform-prerequisites`
 - `infrastructure/stages/platform`
 
 ### What it needs to do
@@ -78,7 +79,7 @@ It is used by the `deploy-infrastructure` GitHub Actions workflow to run Terrafo
 After updating the policy:
 
 1. rerun the `deploy-infrastructure` workflow
-2. confirm `bootstrap`, `core`, and `platform` complete
+2. confirm `bootstrap`, `core`, `platform-prerequisites`, and `platform` complete
 3. if AWS returns `AccessDenied`, add only the missing action shown in the error
 
 Useful checks:
