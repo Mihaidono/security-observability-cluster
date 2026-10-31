@@ -70,6 +70,11 @@ variable "backend_database_url" {
 variable "public_app_url" {
   description = "Public base URL used by the frontend and Keycloak redirect flow."
   type        = string
+
+  validation {
+    condition     = can(regex("^https?://[A-Za-z0-9.-]+(:[0-9]+)?/?$", var.public_app_url))
+    error_message = "public_app_url must be an HTTP(S) origin with an optional port and no path."
+  }
 }
 
 variable "terraform_variable_set" {
@@ -235,6 +240,11 @@ variable "keycloak_realm" {
   description = "Keycloak realm used by the Isolens control plane."
   type        = string
   default     = "isolens"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]+$", var.keycloak_realm)) && var.keycloak_realm != "master"
+    error_message = "keycloak_realm must use letters, digits, underscores or hyphens and must not be the administrative master realm."
+  }
 }
 
 variable "keycloak_client_id" {

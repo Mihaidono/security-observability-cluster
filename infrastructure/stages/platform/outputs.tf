@@ -48,6 +48,21 @@ output "control_plane_gateway_service_name" {
   value       = local.control_plane_public_gateway_enabled ? local.control_plane_gateway_service_name : null
 }
 
+output "control_plane_dns_record" {
+  description = "CNAME to create in the domain account when DNS is managed separately. Use the dedicated frontend load balancer, never the shared applications gateway."
+  value = local.control_plane_public_gateway_enabled ? {
+    name   = var.control_plane_public_hostname
+    type   = "CNAME"
+    ttl    = var.control_plane_route53_record_ttl
+    target = data.kubernetes_service_v1.control_plane_gateway[0].status[0].load_balancer[0].ingress[0].hostname
+  } : null
+}
+
+output "control_plane_certificate_issuer_name" {
+  description = "Namespaced ACME Issuer used by the managed frontend certificate. Changes when the ACME directory changes."
+  value       = var.control_plane_manage_tls ? local.control_plane_acme_issuer_name : null
+}
+
 output "shared_applications_gateway_name" {
   description = "Gateway resource name used for shared application exposure routes when enabled."
   value       = var.enable_shared_applications_gateway ? local.applications_gateway_name : null

@@ -31,6 +31,13 @@ Some values repeat across multiple stage files on purpose:
 - `project_name`, `environment`, and `region` also appear in `bootstrap` because that root is standalone too
 - `platform-capabilities.tfvars.json` contains the cluster identity and prerequisite configuration shared by the prerequisite and platform roots
 
+For frontend TLS, `platform-capabilities.tfvars.json` enables cert-manager and
+pins `cert_manager_version` for both CRDs and the controller chart.
+`platform.tfvars.json` enables `control_plane_manage_tls` and selects the ACME
+directory and optional contact email. Leave `control_plane_route53_zone_id`
+empty for manual DNS in the domain account. Keep the cert-manager capability
+enabled during frontend rollback; its CRDs are protected from deletion.
+
 This is not a Terraform requirement for all projects. It is a consequence of keeping each stage independently runnable.
 
 ## Cluster Admin Override

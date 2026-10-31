@@ -9,4 +9,6 @@ module "addons" {
   cluster_access_ready_id              = time_sleep.cluster_access_ready.id
   cilium_operator_policy_attachment_id = aws_iam_role_policy_attachment.cilium_operator.id
   enable_ingress_nginx                 = var.enable_ingress_nginx
+  enable_cert_manager                  = var.enable_cert_manager
+  cert_manager_version                 = var.cert_manager_version
 }

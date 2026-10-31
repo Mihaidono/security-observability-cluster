@@ -38,3 +38,14 @@ variable "enable_ingress_nginx" {
   type        = bool
   default     = false
 }
+
+variable "enable_cert_manager" {
+  description = "Whether to install cert-manager with Gateway API HTTP-01 support. CRDs must already exist."
+  type        = bool
+  default     = false
+}
+
+variable "cert_manager_version" {
+  description = "Pinned cert-manager Helm chart version, matching prerequisite CRDs."
+  type        = string
+}

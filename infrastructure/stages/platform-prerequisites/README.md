@@ -5,8 +5,11 @@ plan the shared platform add-ons.
 
 ## Ownership
 
-Currently this stage owns the pinned Gateway API standard CRDs. It must run
-after `core` has created the EKS cluster and before `platform` is planned.
+This stage owns the pinned Gateway API standard CRDs and, when
+`enable_cert_manager` is true, cert-manager CRDs. It must run after `core` has
+created the EKS cluster and before `platform` is planned. The shared
+`platform-capabilities.tfvars.json` pins the same cert-manager version for these
+CRDs and the platform Helm chart.
 
 The stage intentionally contains no Helm releases, namespaces, workloads, or
 custom resources.
@@ -14,6 +17,12 @@ custom resources.
 The pinned v1.4.1 Gateway API bundle includes a top-level CRD `status` field.
 Terraform omits that server-managed field from each manifest; the CRD status
 schema and status subresource under `spec` remain intact.
+
+cert-manager CRDs have `prevent_destroy` enabled: deleting a CRD also deletes
+all custom resources of that type. Keep `enable_cert_manager` true in the
+capabilities file during a frontend rollback. Remove the frontend Certificate
+and Issuer in the platform stage instead. Do not remove CRDs to downgrade
+cert-manager; review its official upgrade/downgrade guidance first.
 
 ## Direct Terraform Usage
 

@@ -57,6 +57,9 @@ resource "kubernetes_deployment_v1" "backend" {
     template {
       metadata {
         labels = local.backend_labels
+        annotations = {
+          "isolens.io/public-url-checksum" = sha256(var.public_app_url)
+        }
       }
 
       spec {

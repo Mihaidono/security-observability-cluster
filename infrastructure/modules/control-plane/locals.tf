@@ -5,6 +5,10 @@ locals {
 
   namespace_name = var.namespace
 
+  public_app_scheme    = split("://", var.public_app_url)[0]
+  public_app_authority = split("/", split("://", var.public_app_url)[1])[0]
+  public_app_port      = try(split(":", local.public_app_authority)[1], local.public_app_scheme == "https" ? "443" : "80")
+
   backend_labels = {
     "app.kubernetes.io/name"       = var.backend_service_name
     "app.kubernetes.io/component"  = "backend"

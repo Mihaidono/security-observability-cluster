@@ -17,7 +17,7 @@ resource "kubernetes_manifest" "control_plane_gateway" {
     }
     spec = {
       gatewayClassName = "cilium"
-      listeners = [
+      listeners = concat([
         {
           name     = "https"
           protocol = "HTTPS"
@@ -32,13 +32,39 @@ resource "kubernetes_manifest" "control_plane_gateway" {
             ]
           }
           allowedRoutes = {
+            kinds = [{ group = "gateway.networking.k8s.io", kind = "HTTPRoute" }]
             namespaces = {
               from = "Same"
             }
           }
         }
-      ]
+        ], var.control_plane_manage_tls ? [
+        {
+          name     = "acme-http"
+          protocol = "HTTP"
+          port     = 80
+          hostname = var.control_plane_public_hostname
+          allowedRoutes = {
+            kinds = [{ group = "gateway.networking.k8s.io", kind = "HTTPRoute" }]
+            namespaces = {
+              from = "Same"
+            }
+          }
+        }
+      ] : [])
     }
+  }
+
+  # Wait for the controller instead of assuming AWS provisioning finishes in 120s.
+  wait {
+    fields = {
+      "status.addresses[0].value" = ".+"
+    }
+  }
+
+  timeouts {
+    create = "20m"
+    update = "20m"
   }
 
   depends_on = [
@@ -68,7 +94,8 @@ resource "kubernetes_manifest" "control_plane_frontend_route" {
       hostnames = [var.control_plane_public_hostname]
       parentRefs = [
         {
-          name = local.control_plane_gateway_name
+          name        = local.control_plane_gateway_name
+          sectionName = "https"
         }
       ]
       rules = [
@@ -124,17 +151,6 @@ resource "kubernetes_manifest" "shared_applications_gateway" {
   depends_on = [module.addons]
 }
 
-resource "time_sleep" "control_plane_gateway_load_balancer" {
-  count = local.control_plane_public_gateway_enabled ? 1 : 0
-
-  create_duration = "120s"
-
-  depends_on = [
-    kubernetes_manifest.control_plane_gateway,
-    kubernetes_manifest.control_plane_frontend_route,
-  ]
-}
-
 data "kubernetes_service_v1" "control_plane_gateway" {
   count = local.control_plane_public_gateway_enabled ? 1 : 0
 
@@ -143,11 +159,11 @@ data "kubernetes_service_v1" "control_plane_gateway" {
     namespace = var.control_plane_namespace
   }
 
-  depends_on = [time_sleep.control_plane_gateway_load_balancer]
+  depends_on = [kubernetes_manifest.control_plane_gateway]
 }
 
 resource "aws_route53_record" "control_plane_frontend" {
-  count = local.control_plane_public_gateway_enabled ? 1 : 0
+  count = local.control_plane_public_gateway_enabled && var.control_plane_route53_zone_id != "" ? 1 : 0
 
   zone_id = var.control_plane_route53_zone_id
   name    = var.control_plane_public_hostname

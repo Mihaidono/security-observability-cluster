@@ -74,6 +74,28 @@ resource "kubernetes_deployment_v1" "frontend" {
             value = tostring(var.keycloak_service_port)
           }
 
+          # The Gateway terminates TLS; do not derive the browser origin from
+          # this container's HTTP connection or client-supplied proxy headers.
+          env {
+            name  = "PUBLIC_SCHEME"
+            value = local.public_app_scheme
+          }
+
+          env {
+            name  = "PUBLIC_HOST"
+            value = local.public_app_authority
+          }
+
+          env {
+            name  = "PUBLIC_PORT"
+            value = local.public_app_port
+          }
+
+          env {
+            name  = "KEYCLOAK_REALM"
+            value = var.keycloak_realm
+          }
+
           resources {
             requests = {
               cpu    = var.frontend_resources.requests_cpu

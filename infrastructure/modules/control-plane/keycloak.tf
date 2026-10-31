@@ -19,6 +19,9 @@ resource "kubernetes_secret_v1" "keycloak_runtime" {
     KC_HEALTH_ENABLED                 = "true"
     KC_HTTP_MANAGEMENT_HEALTH_ENABLED = "false"
     KC_PROXY_HEADERS                  = "xforwarded"
+    KC_HOSTNAME                       = "${trimsuffix(var.public_app_url, "/")}/auth"
+    KC_HOSTNAME_STRICT                = "true"
+    KC_HOSTNAME_BACKCHANNEL_DYNAMIC   = "true"
   }
 
   type = "Opaque"
@@ -231,6 +234,7 @@ resource "kubernetes_stateful_set_v1" "keycloak" {
       metadata {
         labels = local.keycloak_labels
         annotations = {
+          "isolens.io/public-url-checksum" = sha256(var.public_app_url)
           "isolens.io/keycloak-theme-checksum" = sha256(join("", [
             file("${path.module}/../../../docker/keycloak-theme/isolens/login/theme.properties"),
             file("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/css/isolens.css"),
@@ -256,7 +260,6 @@ resource "kubernetes_stateful_set_v1" "keycloak" {
             "start",
             "--http-enabled=true",
             "--http-relative-path=/auth",
-            "--hostname-strict=false",
             "--proxy-headers=xforwarded",
           ]
 
@@ -455,6 +458,15 @@ resource "kubernetes_job_v1" "keycloak_realm_bootstrap" {
   }
 
   wait_for_completion = true
+
+  # Completed Jobs do not rerun when their referenced Secret or script changes.
+  # Reconcile redirect URIs when the public origin changes on an existing cluster.
+  lifecycle {
+    replace_triggered_by = [
+      kubernetes_secret_v1.keycloak_realm_bootstrap[0],
+      kubernetes_config_map_v1.keycloak_realm_bootstrap_script[0],
+    ]
+  }
 
   depends_on = [kubernetes_stateful_set_v1.keycloak]
 }

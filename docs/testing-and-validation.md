@@ -110,6 +110,20 @@ curl -fI http://localhost:5173/isolens-graphic.png
 
 ## Terraform Validation
 
+Frontend TLS and route isolation have mocked plan checks that require no cloud
+credentials, installed CRDs or ACME access:
+
+```bash
+terraform -chdir=infrastructure/stages/platform test -no-color
+```
+
+These tests cover HTTPS-only frontend attachment, private HTTP-01 solver
+services, manual cross-account DNS, renewal/key rotation settings, separate
+staging and production issuers, and the cert-manager prerequisite validation.
+CI initializes this root with `-backend=false` before running them. On a fresh
+checkout, run `terraform -chdir=infrastructure/stages/platform init -backend=false`
+first; before later live work, reinitialize with the real backend configuration.
+
 Static checks:
 
 ```bash
@@ -154,7 +168,8 @@ kubectl -n isolens-system logs statefulset/isolens-keycloak
 ```
 
 ```bash
-kubectl -n isolens-system exec deploy/isolens-backend -- printenv | grep '^ISOLENS_OIDC_'
+kubectl -n isolens-system exec deploy/isolens-backend -- \
+  printenv ISOLENS_PUBLIC_APP_URL ISOLENS_OIDC_REALM ISOLENS_OIDC_CLIENT_ID
 ```
 
 ```bash

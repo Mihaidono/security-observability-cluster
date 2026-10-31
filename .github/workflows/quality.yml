@@ -27,3 +27,8 @@ jobs:
 
       - name: Run Pre-commit
         uses: ./.github/actions/pre-commit
+
+      - name: Check frontend TLS plans without cloud access
+        run: |
+          terraform -chdir=infrastructure/stages/platform init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infrastructure/stages/platform test -no-color

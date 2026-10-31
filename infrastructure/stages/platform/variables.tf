@@ -50,6 +50,17 @@ variable "enable_ingress_nginx" {
   default     = false
 }
 
+variable "enable_cert_manager" {
+  description = "Whether to install cert-manager. Its CRDs are installed first by platform-prerequisites using the shared capabilities file."
+  type        = bool
+  default     = false
+}
+
+variable "cert_manager_version" {
+  description = "Pinned cert-manager Helm release including the v prefix; shared with the prerequisite CRD version."
+  type        = string
+}
+
 
 variable "control_plane_namespace" {
   description = "Namespace reserved for the Isolens backend and frontend workloads."
@@ -208,7 +219,7 @@ variable "control_plane_public_app_url" {
 }
 
 variable "enable_control_plane_public_gateway" {
-  description = "Whether to expose the control-plane frontend through a Cilium Gateway and create a Route53 record for it."
+  description = "Whether to expose the control-plane frontend through a dedicated HTTPS Cilium Gateway. DNS is managed separately unless control_plane_route53_zone_id is set."
   type        = bool
   default     = false
 }
@@ -219,7 +230,7 @@ variable "control_plane_public_hostname" {
   default     = ""
 
   validation {
-    condition     = (!var.enable_control_plane_public_gateway && var.control_plane_public_hostname == "") || (var.enable_control_plane_public_gateway && can(regex("^[A-Za-z0-9.-]+$", var.control_plane_public_hostname)))
+    condition     = (!var.enable_control_plane_public_gateway && var.control_plane_public_hostname == "") || can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$", var.control_plane_public_hostname))
     error_message = "control_plane_public_hostname must be a valid DNS hostname."
   }
 }
@@ -235,15 +246,38 @@ variable "control_plane_public_tls_secret_name" {
   }
 }
 
-variable "control_plane_route53_zone_id" {
-  description = "Route53 hosted zone ID that should receive the control-plane frontend CNAME record."
-  type        = string
-  default     = ""
+variable "control_plane_manage_tls" {
+  description = "Whether cert-manager should issue and renew the frontend TLS secret using ACME HTTP-01 on the dedicated Gateway's port 80 listener."
+  type        = bool
+  default     = false
 
   validation {
-    condition     = !var.enable_control_plane_public_gateway || trimspace(var.control_plane_route53_zone_id) != ""
-    error_message = "control_plane_route53_zone_id must be set when the control-plane public gateway is enabled."
+    condition     = !var.control_plane_manage_tls || (var.enable_control_plane_public_gateway && var.enable_cert_manager)
+    error_message = "Managed frontend TLS requires enable_control_plane_public_gateway and enable_cert_manager."
   }
+}
+
+variable "control_plane_acme_server" {
+  description = "ACME directory for frontend certificates. Use the Let's Encrypt staging directory for issuance tests."
+  type        = string
+  default     = "https://acme-v02.api.letsencrypt.org/directory"
+
+  validation {
+    condition     = can(regex("^https://", var.control_plane_acme_server))
+    error_message = "control_plane_acme_server must use HTTPS."
+  }
+}
+
+variable "control_plane_acme_email" {
+  description = "Optional contact email for the frontend ACME account. Empty omits ACME contact registration."
+  type        = string
+  default     = ""
+}
+
+variable "control_plane_route53_zone_id" {
+  description = "Optional Route53 hosted zone ID in the platform AWS account. Leave empty to create the CNAME separately, including in another AWS account."
+  type        = string
+  default     = ""
 }
 
 variable "control_plane_route53_record_ttl" {
@@ -256,6 +290,11 @@ variable "control_plane_session_cookie_secure" {
   description = "Whether the backend session cookie should require HTTPS."
   type        = bool
   default     = true
+
+  validation {
+    condition     = !var.enable_control_plane_public_gateway || var.control_plane_session_cookie_secure
+    error_message = "Public HTTPS access requires secure session cookies."
+  }
 }
 
 variable "control_plane_session_ttl_seconds" {
