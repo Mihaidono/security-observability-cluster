@@ -1,3 +1,9 @@
+## [0.10.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.9.3...v0.10.0) (2026-10-31)
+
+### Features
+
+* **repo:** fixed deployment specific issues ([2cd5169](https://github.com/Mihaidono/security-observability-cluster/commit/2cd5169fe0f3db523de23e9c61c2657af61811eb))
+
 ## [0.9.3](https://github.com/Mihaidono/security-observability-cluster/compare/v0.9.2...v0.9.3) (2026-08-05)
 
 ### Bug Fixes
