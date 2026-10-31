@@ -11,6 +11,10 @@ after `core` has created the EKS cluster and before `platform` is planned.
 The stage intentionally contains no Helm releases, namespaces, workloads, or
 custom resources.
 
+The pinned v1.4.1 Gateway API bundle includes a top-level CRD `status` field.
+Terraform omits that server-managed field from each manifest; the CRD status
+schema and status subresource under `spec` remain intact.
+
 ## Direct Terraform Usage
 
 ```bash

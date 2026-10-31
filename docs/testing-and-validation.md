@@ -99,6 +99,14 @@ Verify:
 - `Stages`, `Assets`, and `Activity` load only after the session is established
 - sign-out clears access and returns the UI to the login screen
 - `/favicon.png` returns the Isolens PNG with a successful response
+- `/isolens-graphic.png` returns the login graphic through the frontend origin
+
+For local Compose, check both assets through the frontend port:
+
+```bash
+curl -fI http://localhost:5173/favicon.png
+curl -fI http://localhost:5173/isolens-graphic.png
+```
 
 ## Terraform Validation
 
@@ -162,10 +170,11 @@ For a public control-plane deployment, also verify the rendered edge paths:
 ```bash
 curl -I https://<control-plane-host>/
 curl -I https://<control-plane-host>/favicon.png
+curl -I https://<control-plane-host>/isolens-graphic.png
 curl -I https://<control-plane-host>/auth/realms/isolens/
 ```
 
-The first two requests must be served by the frontend. The Keycloak request
+The first three requests must be served by the frontend. The Keycloak request
 must be reachable through the frontend `/auth` proxy; Keycloak itself should
 remain a private ClusterIP service.
 

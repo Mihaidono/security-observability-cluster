@@ -370,7 +370,7 @@ body {
   align-self: center;
   background:
     linear-gradient(145deg, rgba(9, 19, 34, 0.28), rgba(9, 19, 34, 0.72)),
-    url("../img/isolens-graphic.png") center / cover;
+    url("/isolens-graphic.png?v=1") center / cover;
   border: 1px solid rgba(93, 207, 247, 0.3);
   border-radius: 2rem;
   box-shadow: 0 24px 70px rgba(8, 20, 38, 0.3);

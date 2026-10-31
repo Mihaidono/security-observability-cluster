@@ -21,7 +21,9 @@ locals {
 resource "kubernetes_manifest" "gateway_api_standard" {
   for_each = local.gateway_api_standard_manifests
 
-  manifest = each.value
+  # The v1.4.1 bundle includes API-server-managed CRD status. Remove only the
+  # top-level field; keep spec.versions[*].schema and subresources.status.
+  manifest = { for key, value in each.value : key => value if key != "status" }
 
   depends_on = [time_sleep.cluster_access_ready]
 }

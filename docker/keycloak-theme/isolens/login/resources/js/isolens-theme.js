@@ -1,6 +1,5 @@
 (function () {
   var storageKey = "isolens-theme-mode";
-  var themeScript = document.currentScript;
   var storedMode = window.localStorage.getItem(storageKey);
   var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   var mode = storedMode === "light" || storedMode === "dark"
@@ -11,12 +10,12 @@
 
   document.documentElement.dataset.theme = mode;
 
-  if (themeScript && themeScript.src && !document.querySelector('link[data-isolens-favicon]')) {
+  if (!document.querySelector('link[data-isolens-favicon]')) {
     var favicon = document.createElement("link");
     favicon.rel = "icon";
     favicon.type = "image/png";
     favicon.dataset.isolensFavicon = "true";
-    favicon.href = themeScript.src.replace(/\/js\/[^/]+$/, "/img/favicon.png?v=3");
+    favicon.href = "/favicon.png?v=1";
     document.head.appendChild(favicon);
   }
 

@@ -85,8 +85,9 @@ The production frontend container expects:
 - `KEYCLOAK_HOST`
 - `KEYCLOAK_PORT`
 
-The production image includes `frontend/public/favicon.png` and serves it at
-`/favicon.png`. Its Nginx configuration proxies `/api` to the private backend
+The production image includes the theme graphic and favicon from
+`frontend/public/` and serves them at `/isolens-graphic.png` and `/favicon.png`.
+Its Nginx configuration proxies `/api` to the private backend
 service and `/auth` to the private Keycloak service. The browser therefore only
 needs access to the public frontend hostname.
 
@@ -115,17 +116,18 @@ current authenticated session, not role-specific grants.
 
 The Keycloak login page uses the Isolens theme from
 `docker/keycloak-theme/isolens`. Local Compose mounts the theme into Keycloak;
-the platform Terraform module mounts the same files through a ConfigMap and
-selects the `isolens` login theme during realm bootstrap.
+the platform Terraform module mounts its properties, CSS, and JavaScript through
+a ConfigMap and selects the `isolens` login theme during realm bootstrap.
 
 The login layout places the authentication card on the right and uses
 `isolens-graphic.png` as the visual panel on the left. The page follows the
 browser color preference and also reads the frontend's `isolens-theme-mode`
 setting when available.
 
-The theme favicon is `login/resources/img/favicon.png`. Terraform carries the
-PNG through the Keycloak ConfigMap as binary data; local Compose mounts the
-theme directory directly.
+The theme loads both images from the frontend origin. Access Keycloak through
+the frontend `/auth` proxy so those URLs resolve. The PNGs are not stored in
+the Keycloak ConfigMap or Terraform state. Direct access to the Keycloak debug
+port bypasses the frontend and does not serve these images.
 
 For an existing local Compose database, realm import settings are not reapplied
 automatically. Select `isolens` under Keycloak Realm Settings → Themes, or

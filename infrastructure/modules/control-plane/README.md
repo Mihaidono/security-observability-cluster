@@ -32,6 +32,11 @@ Before Keycloak starts, the module runs a short bootstrap Job that creates the K
 By default, the module also runs a one-time realm bootstrap Job that creates the configured Isolens realm and OIDC client.
 Ongoing user, group, and role management remains a Keycloak administration concern after bootstrap.
 
+The Keycloak login theme's properties, CSS, and JavaScript are mounted from a
+ConfigMap. Its graphic and favicon are served by the frontend at
+`/isolens-graphic.png` and `/favicon.png`; login must go through the frontend
+`/auth` proxy. Publish the frontend image before applying theme changes.
+
 ## Key Inputs
 
 Backend:

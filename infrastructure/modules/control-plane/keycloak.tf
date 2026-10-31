@@ -58,11 +58,6 @@ resource "kubernetes_config_map_v1" "keycloak_theme" {
     "isolens.css"      = file("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/css/isolens.css")
     "isolens-theme.js" = file("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/js/isolens-theme.js")
   }
-
-  binary_data = {
-    "isolens-graphic.png" = filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/img/isolens-graphic.png")
-    "favicon.png"         = filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/img/favicon.png")
-  }
 }
 
 resource "kubernetes_config_map_v1" "keycloak_database_bootstrap_script" {
@@ -240,8 +235,6 @@ resource "kubernetes_stateful_set_v1" "keycloak" {
             file("${path.module}/../../../docker/keycloak-theme/isolens/login/theme.properties"),
             file("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/css/isolens.css"),
             filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/js/isolens-theme.js"),
-            filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/img/isolens-graphic.png"),
-            filebase64("${path.module}/../../../docker/keycloak-theme/isolens/login/resources/img/favicon.png"),
           ]))
         }
       }
@@ -368,15 +361,6 @@ resource "kubernetes_stateful_set_v1" "keycloak" {
               path = "login/resources/js/isolens-theme.js"
             }
 
-            items {
-              key  = "isolens-graphic.png"
-              path = "login/resources/img/isolens-graphic.png"
-            }
-
-            items {
-              key  = "favicon.png"
-              path = "login/resources/img/favicon.png"
-            }
           }
         }
       }
