@@ -1,3 +1,9 @@
+## [0.11.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.10.0...v0.11.0) (2026-10-31)
+
+### Features
+
+* **infra:** trying to apply a domain name, tls and records for the frontend ([57b4f07](https://github.com/Mihaidono/security-observability-cluster/commit/57b4f07abf152d86b3082a96682fef322e45038b))
+
 ## [0.10.0](https://github.com/Mihaidono/security-observability-cluster/compare/v0.9.3...v0.10.0) (2026-10-31)
 
 ### Features
